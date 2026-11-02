@@ -8,16 +8,15 @@ app. Agreed with the maintainer on 2026-11-02. Each release ticks its part off h
 
 Each is the usual +0.0.1 with the whole release checklist in DEVELOPMENT.md.
 
-1. **The rename and the folder move.** Done and merged (DigitalN/pythonflow#21), not released:
-   the maintainer asked to hold releases for now. The maintainer's M1 Pro already runs a
-   build of it from `/Applications/Mac Engine Room.app`.
-2. **The tool framework, the Thermals page with temperatures, and the new menu.** Built on
-   branch `claude/thermals-tool` (2026-11-02); the maintainer tried it and asked for a
-   Celsius/Fahrenheit setting, no gaps in the chart, and Power always opening on Now, all
-   done. Not merged. Checked on the M1 Pro: under a full CPU load the CPU reading went from 58° to 83°
-   (GPU 57° to 68°), and under a GPU load the GPU reading from 60° to 73° (CPU 61° to 69°).
-   The fans stayed at minimum. In the menu, the fans tile shows the fastest fan: two speeds
-   don't fit in a tile. The dashboard shows each fan.
+1. **The rename and the folder move.** Merged (DigitalN/pythonflow#21) and released together
+   with release 2 as 1.2.7 on 2026-11-02, when the repository became DigitalN/mac-engine-room.
+2. **The tool framework, the Thermals page with temperatures, and the new menu.** Merged
+   (DigitalN/pythonflow#22) and released as 1.2.7 on 2026-11-02. After trying it, the
+   maintainer asked for a Celsius/Fahrenheit setting, no gaps in the chart, and Power always
+   opening on Now. Checked on the M1 Pro: under a full CPU load the CPU reading went from 58°
+   to 83° (GPU 57° to 68°), and under a GPU load the GPU reading from 60° to 73° (CPU 61° to
+   69°). The fans stayed at minimum. In the menu, the fans tile shows the fastest fan: two
+   speeds don't fit in a tile. The dashboard shows each fan.
 3. **Fan control**, starting with a throwaway test of the root helper.
 
 ## Name and identity
