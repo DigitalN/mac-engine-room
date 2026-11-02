@@ -37,5 +37,30 @@ def test_check_for_updates_button_does_what_the_menu_item_does(monkeypatch):
 
 def test_live_data_carries_the_update_status_for_settings():
     app = SimpleNamespace(_updater=SimpleNamespace(status="downloading", version="1.2.5"),
-                          _sampler=SimpleNamespace(dashboard_polled=lambda: None), _live=LiveState())
+                          _sampler=SimpleNamespace(dashboard_polled=lambda thermals: None), _live=LiveState())
     assert Api(app=app).get_live(0)["update"] == ["downloading", "1.2.5"]
+
+
+def test_fans_are_read_while_the_thermals_page_is_showing():
+    polls = []
+    app = SimpleNamespace(_updater=SimpleNamespace(status="idle", version=None),
+                          _sampler=SimpleNamespace(dashboard_polled=lambda thermals: polls.append(thermals)),
+                          _live=LiveState())
+    Api(app=app).get_live(0, "thermals")
+    Api(app=app).get_live(0, "now")
+    assert polls == [True, False]
+
+
+def test_thermal_points_only_exist_where_temperatures_were_read():
+    """Temperatures are read every sample; a failed read (None) leaves no point."""
+    live = LiveState()
+    power = {"t": 1.0, "system_load": 7.0, "system_in": 0.0, "battery_power": -7.0, "screen_power": 2.0,
+             "chip_power": 3.0}
+    thermals = {"t": 2.0, "cpu": 61.4, "gpu": None, "memory": None, "ssd": None, "ambient": None}
+    live.push(power)
+    live.push({**power, "t": 2.0}, thermals)
+    live.push({**power, "t": 3.0})
+    r = live.since(0)
+    assert len(r["points"]) == 3 and r["thermal_points"] == [[2.0, 61.4, None, None, None, None]]
+    assert r["thermals"] is thermals and r["thermal_fields"][1] == "cpu"
+    assert live.since(2)["thermal_points"] == []

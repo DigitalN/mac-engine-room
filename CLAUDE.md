@@ -15,7 +15,9 @@ check. Each launch logs `started (dashboard shown)` or `started (dashboard hidde
 plus `, opened at login` for a login launch. A Mac missing any SMC key the app reads
 logs `SMC keys missing on <model>, macOS <version>: …` once per launch, with the power
 keys it does have. Reopening the app at one bar of brightness and again at full shows
-which of them is the screen.
+which of them is the screen. The first temperature reading after launch (or after an SMC
+reconnect) logs `Temperature sensors on <chip>: cpu N, gpu N, …; N fans`, plus the groups
+found by prefix when the chip isn't in the core key table.
 
 A blank dashboard has been WebKit's graphics helper hanging. At login it got stuck
 setting up audio, and macOS doesn't let WebKit kill its own helpers. The app logs
@@ -48,12 +50,24 @@ To reproduce without touching the user's data, run with
   copy can still be older than 1.2.7.
 - **Updates**: `Application Files/updater.py`. Daily check of GitHub releases after
   a wake, signature check, swap and relaunch. See *How updates work* in DEVELOPMENT.md.
-- **Sensors**: `Application Files/power.py`. Reads IOKit `AppleSmartBattery`
+- **Tools**: Thermals and Power. Each is its own module for its readings; the menu
+  (`statusbar.py`) and the page (`index.html`) have a section for each, and Settings a
+  group for each. No plugin system beyond that.
+- **Power sensors**: `Application Files/power.py`. Reads IOKit `AppleSmartBattery`
   (ctypes + PyObjC bridging) and the SMC (ctypes `IOConnectCallStructMethod`), plus
   the charge limit from powerd's `/Library/Preferences/com.apple.powerd.charging.plist`.
-  `normalize()` is pure and unit-tested with captured registry dicts.
+  `normalize()` is pure and unit-tested with captured registry dicts. Its `SMC` class
+  (read-only) is shared with the Thermals tool.
+- **Thermals sensors**: `Application Files/thermals.py`. CPU and GPU are the hottest
+  *core* sensor, from a per-chip table of core keys taken from Stats, with keys found by
+  prefix for chips it doesn't know; memory, SSD and ambient the hottest of their group;
+  fans' speed, limits and mode. Keys are found once per SMC connection, and only the
+  groups asked for are read. `sensor_keys()` and `normalize()` are pure and unit-tested
+  with a captured M1 Pro key map.
 - **Menu bar**: `Application Files/statusbar.py`. Native `NSStatusItem` and `NSMenu`
-  (PyObjC). Main thread only.
+  (PyObjC). The title shows watts or a temperature; the menu's Thermals tiles and Power
+  rows are custom views (NSTextField labels, NSBox tiles, SF Symbols), then the actions.
+  Main thread only.
 - **History**: `Application Files/history.py`. SQLite
   (`~/Library/Application Support/Mac Engine Room/history.db`), the `ChargingRecorder`
   state machine, CSV export, and the one-time read-only import from the original
@@ -62,7 +76,9 @@ To reproduce without touching the user's data, run with
   save. Open at login isn't in it: it lives in ServiceManagement, and `Api` merges it
   in for the page.
 - **Frontend**: `Application Files/index.html`. A single page in vanilla JS with a
-  hand-rolled canvas chart and no external resources.
+  hand-rolled canvas chart and no external resources. A **Thermals | Power** switcher
+  (Power always opens on Now; History is beside it) and a shared Settings page.
+  Temperatures arrive in °C and are shown in the unit chosen in Settings.
 - **Build**: `scripts/build.sh` runs PyInstaller with `Application Files/MacEngineRoom.spec`
   in `~/Library/Caches/MacEngineRoom-build` and signs the app. `scripts/install.sh` installs
   it in `/Applications`; `scripts/package.sh` makes the release disk image. The
@@ -92,6 +108,11 @@ To reproduce without touching the user's data, run with
   repainting every display frame: about 28% of a core, against 3% now (measured).
 - The sampler runs every 1 s while the page is polling (it only polls when visible)
   and every 2.5 s otherwise. These are fixed, not a setting.
+- **Temperatures are read every sample, like power**, so the chart has no gaps when the
+  page is covered or another tab shows: about 0.9 ms of CPU per sample (measured on an
+  M1 Pro), 0.03% of a core at the 2.5 s rate. **Fans only while something shows them**:
+  the Thermals page (its polls say which page is showing) or the open menu (which wakes
+  the sampler as it opens).
 - **Idle work stays on the efficiency cores.** With only the menu bar item showing,
   the sampler and the main thread run at background QoS, the only one Apple silicon
   keeps off the performance cores. The dashboard raises the sampler to utility, and the
@@ -100,9 +121,10 @@ To reproduce without touching the user's data, run with
   scheduled from when they were due, since background waits end ~90 ms late.
 - **Only pass real changes to AppKit and WebKit.** A new menu bar title costs about
   0.9 ms of redraw, and setting the same one again still costs 0.2 ms (measured). The
-  menu's rows are only filled in while it's open. On the page, the once-a-second
-  writes go through `put()`, which skips values already shown, and the Now page only
-  renders while it's the active tab. Charts draw at most one point per device pixel.
+  menu's rows and tiles are only filled in while it's open, through `_put()`, which
+  skips values already shown. On the page, the once-a-second writes go through `put()`,
+  which does the same, and the Thermals and Now pages only render while they're the
+  active tab. Charts draw at most one point per device pixel.
 - The SMC key for screen power depends on the Mac, and the first one found wins: `PDBR`
   (M1 Pro, measured), `PBLR` (base M4 Mac16,1, which has no `PDBR`; measured at 0.3 W at
   one bar and 7.2 W at full), `PBwo` (M5 and A18 per macpow's docs, not measured).
@@ -168,6 +190,13 @@ To reproduce without touching the user's data, run with
 ## Decisions already made
 
 Don't undo these without asking:
+
+- Temperatures are in Celsius unless Fahrenheit is chosen in Settings > Thermals. The app
+  doesn't follow macOS's unit: Americans who read Celsius would have no way to get it.
+- Temperatures are read all the time, like power, so the Thermals chart has no gaps.
+  Reading them only while shown left a gap whenever the page was covered or another tab
+  showed.
+- Choosing Power always opens Now, not the last Power page.
 
 - Updates are checked once a day, only when the Mac wakes from sleep (plus **Check for
   Updates…** in the menu and **Check Now** in Settings), and installed silently at a quiet

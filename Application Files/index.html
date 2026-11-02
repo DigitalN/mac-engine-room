@@ -17,6 +17,7 @@
   --accent: #007aff; --charge: #28a745; --drain: #f08c00; --screen: #af52de; --chip: #30b0c7;
   --system: #007aff; --shadow: 0 1px 2px rgba(0,0,0,.05), 0 0 0 .5px rgba(0,0,0,.06);
   --seg-bg: rgba(0,0,0,.06); --seg-on: #ffffff; --danger: #d70015;
+  --cpu: #ff8a00; --gpu: #af52de; --mem: #30b0c7; --ssd: #34c759; --amb: #007aff;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -26,6 +27,7 @@
     --accent: #0a84ff; --charge: #32d74b; --drain: #ffb340; --screen: #bf5af2; --chip: #40c8e0;
     --system: #0a84ff; --shadow: 0 0 0 .5px rgba(255,255,255,.08);
     --seg-bg: rgba(255,255,255,.08); --seg-on: #636366; --danger: #ff6961;
+    --cpu: #ff9f0a; --gpu: #bf5af2; --mem: #40c8e0; --ssd: #30d158; --amb: #0a84ff;
     color-scheme: dark;
   }
 }
@@ -35,6 +37,7 @@
   --accent: #0a84ff; --charge: #32d74b; --drain: #ffb340; --screen: #bf5af2; --chip: #40c8e0;
   --system: #0a84ff; --shadow: 0 0 0 .5px rgba(255,255,255,.08);
   --seg-bg: rgba(255,255,255,.08); --seg-on: #636366; --danger: #ff6961;
+  --cpu: #ff9f0a; --gpu: #bf5af2; --mem: #40c8e0; --ssd: #30d158; --amb: #0a84ff;
   color-scheme: dark;
 }
 
@@ -66,6 +69,8 @@ button { font: inherit; color: inherit; }
 }
 .seg button[aria-selected="true"] { background: var(--seg-on); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
 .seg.small button { padding: 2px 10px; font-size: 12px; font-weight: 400; }
+.topbar .nav { display: flex; justify-content: flex-end; align-items: center; gap: 10px; }
+.seg[hidden] { display: none; }
 
 main { height: calc(100% - 53px); overflow-y: auto; padding: 18px 20px 28px; }
 .page { display: none; max-width: 1100px; margin: 0 auto; }
@@ -151,6 +156,19 @@ main { height: calc(100% - 53px); overflow-y: auto; padding: 18px 20px 28px; }
 .toggle i { width: 8px; height: 8px; border-radius: 50%; opacity: .35; }
 .toggle.on { color: var(--text); } .toggle.on i { opacity: 1; }
 
+/* ── thermals ────────────────────────────────── */
+.tiles { display: grid; grid-template-columns: repeat(var(--n, 5), 1fr); gap: 14px; }
+.tile .v { font-size: 34px; font-weight: 600; letter-spacing: -.02em; line-height: 1.1; }
+.tile .s { color: var(--muted); font-size: 12px; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile h2 i { width: 8px; height: 8px; border-radius: 50%; }
+.fans { display: grid; grid-template-columns: repeat(var(--n, 2), 1fr); gap: 14px 28px; }
+.fan-head { display: flex; justify-content: space-between; align-items: baseline; }
+.fan-head .name { color: var(--muted); }
+.fan-head .val { font-size: 20px; font-weight: 600; }
+.fan .gauge { max-width: none; margin-top: 8px; }
+.fan .gauge > div { background: var(--accent); }
+.fan-foot { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; margin-top: 6px; }
+
 /* ── details ─────────────────────────────────── */
 .cols-3 { grid-template-columns: repeat(3, 1fr); }
 .kv { display: grid; grid-template-columns: 1fr auto; row-gap: 7px; column-gap: 12px; }
@@ -206,6 +224,7 @@ table.ap th { color: var(--muted); font-weight: 500; font-size: 12px; }
 .group .card { padding: 0 16px; }
 .srow { display: flex; align-items: center; gap: 16px; padding: 11px 0; border-bottom: 1px solid var(--line); min-height: 44px; }
 .srow:last-child { border-bottom: 0; }
+.srow[hidden] { display: none; }
 .srow .lbl { flex: 1; }
 .srow .lbl .hint { color: var(--muted); font-size: 12px; margin-top: 1px; }
 select {
@@ -256,16 +275,45 @@ dialog .actions { justify-content: flex-end; }
 <body>
 <div class="topbar">
   <div class="status"><i class="dot" id="top-dot"></i><span id="top-status">Reading sensors…</span></div>
-  <div class="seg" role="tablist" id="tabs">
-    <button role="tab" data-tab="now" aria-selected="true">Now</button>
-    <button role="tab" data-tab="history" aria-selected="false">History</button>
-    <button role="tab" data-tab="settings" aria-selected="false">Settings</button>
+  <div class="seg" role="tablist" id="tools">
+    <button role="tab" data-tab="thermals" aria-selected="true">Thermals</button>
+    <button role="tab" data-tab="power" aria-selected="false">Power</button>
+  </div>
+  <div class="nav">
+    <div class="seg small" role="tablist" id="power-tabs" hidden>
+      <button role="tab" data-tab="now" aria-selected="true">Now</button>
+      <button role="tab" data-tab="history" aria-selected="false">History</button>
+    </div>
+    <div class="seg"><button role="tab" data-tab="settings" aria-selected="false" id="settings-tab">Settings</button></div>
   </div>
 </div>
 
 <main id="main">
-  <!-- ── Now ── -->
-  <section class="page active" id="page-now">
+  <!-- ── Thermals ── -->
+  <section class="page active" id="page-thermals">
+    <div class="grid">
+      <div class="tiles" id="t-tiles"></div>
+      <div class="card" id="t-fans-card">
+        <h2>Fans</h2>
+        <div class="fans" id="t-fans"></div>
+      </div>
+      <div class="card">
+        <h2>Live temperatures
+          <span class="toggles" id="t-toggles"></span>
+          <span class="spacer"></span>
+          <span class="seg small" id="t-range">
+            <button data-range="60" aria-selected="false">1m</button>
+            <button data-range="300" aria-selected="true">5m</button>
+            <button data-range="900" aria-selected="false">15m</button>
+          </span>
+        </h2>
+        <div class="chart-wrap"><canvas id="t-chart"></canvas><div class="tip" id="t-tip"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Power: Now ── -->
+  <section class="page" id="page-now">
     <div class="grid">
       <div class="card hero" id="hero">
         <div class="level num" id="hero-level">—</div>
@@ -340,7 +388,7 @@ dialog .actions { justify-content: flex-end; }
     </div>
   </section>
 
-  <!-- ── History ── -->
+  <!-- ── Power: History ── -->
   <section class="page" id="page-history">
     <div class="history">
       <div class="list-wrap"><div class="card list" id="session-list"></div></div>
@@ -357,9 +405,15 @@ dialog .actions { justify-content: flex-end; }
           <div class="srow">
             <div class="lbl">Show in menu bar</div>
             <select id="s-metric">
-              <option value="system">System power</option>
-              <option value="screen" id="s-metric-screen">Screen power</option>
-              <option value="chip">Chip power (CPU + GPU)</option>
+              <optgroup label="Thermals">
+                <option value="cpu_temp">CPU temperature</option>
+                <option value="hottest_temp">Hottest temperature</option>
+              </optgroup>
+              <optgroup label="Power" id="s-metric-power">
+                <option value="system">System power</option>
+                <option value="screen" id="s-metric-screen">Screen power</option>
+                <option value="chip">Chip power (CPU + GPU)</option>
+              </optgroup>
             </select>
           </div>
           <div class="srow">
@@ -399,19 +453,26 @@ dialog .actions { justify-content: flex-end; }
         </div>
       </div>
 
-      <div class="group" id="s-battery-group">
-        <h3>Battery</h3>
+      <div class="group">
+        <h3>Thermals</h3>
         <div class="card">
           <div class="srow">
-            <div class="lbl">Charge limit<div class="hint">macOS can stop charging at 80%, or anywhere up to 100%, to help the battery last longer. It's set in System Settings → Battery → Charging.</div></div>
-            <button class="btn" id="s-charge-limit">Open in System Settings</button>
+            <div class="lbl">Temperature unit<div class="hint">For the dashboard, the menu and the menu bar.</div></div>
+            <div class="seg small" id="s-unit">
+              <button data-unit="celsius">Celsius</button>
+              <button data-unit="fahrenheit">Fahrenheit</button>
+            </div>
           </div>
         </div>
       </div>
 
       <div class="group">
-        <h3>History</h3>
+        <h3>Power</h3>
         <div class="card">
+          <div class="srow" id="s-charge-row">
+            <div class="lbl">Charge limit<div class="hint">macOS can stop charging at 80%, or anywhere up to 100%, to help the battery last longer. It's set in System Settings → Battery → Charging.</div></div>
+            <button class="btn" id="s-charge-limit">Open in System Settings</button>
+          </div>
           <div class="srow">
             <div class="lbl">Record charging sessions<div class="hint">Level, duration and power readings for each charge, kept on this Mac.</div></div>
             <label class="switch"><input type="checkbox" id="s-record"><span></span></label>
@@ -534,15 +595,19 @@ function drawChart(canvas, opts) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, W, H);
 
-  const { xs, series, xMin, xMax, unit = 'W', yFixed, xLabel } = opts;
+  // `fit`: the y axis spans the data (at least `fit` units) instead of starting at 0.
+  // `maxGap`: no line between points further apart than this many seconds.
+  const { xs, series, xMin, xMax, unit = 'W', yFixed, xLabel, fit, maxGap = Infinity } = opts;
   const visible = series.filter(s => s.visible !== false);
   const pad = { l: 44, r: 12, t: 8, b: 22 };
   const pw = W - pad.l - pad.r, ph = H - pad.t - pad.b;
 
-  let yMin = 0, yMax = 1;
+  let yMin = fit ? Infinity : 0, yMax = fit ? -Infinity : 1;
   if (yFixed) [yMin, yMax] = yFixed;
   else {
     for (const s of visible) for (const v of s.values) if (isNum(v)) { yMin = Math.min(yMin, v); yMax = Math.max(yMax, v); }
+    if (!isFinite(yMin)) { yMin = 0; yMax = 1; }
+    if (fit && yMax - yMin < fit) { const mid = (yMin + yMax) / 2; yMin = mid - fit / 2; yMax = mid + fit / 2; }
     const step = niceStep((yMax - yMin) / 4);
     yMax = Math.ceil(yMax / step) * step; yMin = Math.floor(yMin / step) * step;
     if (yMax === yMin) yMax = yMin + step;
@@ -557,7 +622,7 @@ function drawChart(canvas, opts) {
   for (let v = yMin; v <= yMax + 1e-9; v += ystep) {
     const yy = Math.round(y(v)) + .5;
     ctx.beginPath(); ctx.moveTo(pad.l, yy); ctx.lineTo(W - pad.r, yy); ctx.stroke();
-    ctx.fillText(`${+v.toFixed(1)}${unit === '%' ? '%' : ''}`, pad.l - 6, yy);
+    ctx.fillText(`${+v.toFixed(1)}${unit === '%' || unit === '°' ? unit : ''}`, pad.l - 6, yy);
   }
   if (yMin < 0 && yMax > 0) {
     ctx.strokeStyle = css('--line-strong'); const yy = Math.round(y(0)) + .5;
@@ -587,6 +652,7 @@ function drawChart(canvas, opts) {
     };
     s.values.forEach((v, i) => {
       if (!isNum(v) || xs[i] < xMin) { flush(); started = false; return; }
+      if (i > 0 && xs[i] - xs[i - 1] > maxGap) { flush(); started = false; }
       const px = x(xs[i]), py = y(v), c = Math.floor(px / colWidth);
       if (c !== col) { flush(); col = c; upI = downI = i; upX = downX = px; upY = downY = py; }
       else if (py < upY) { upI = i; upX = px; upY = py; }
@@ -628,7 +694,8 @@ function niceStep(raw) {
 
 // ── state ───────────────────────────────────────────────
 let settings = null, latest = null, seq = 0, points = [], pollTimer = null;
-let liveRange = 300, activeTab = 'now', sessions = [], selectedId = null, screenOffered = true;
+let liveRange = 300, activeTab = 'thermals', sessions = [], selectedId = null, screenOffered = true;
+let thermals = null, tpoints = [], tRange = 300;
 const SERIES = [
   { key: 'system_load', name: 'System', color: '--system', on: true },
   { key: 'system_in', name: 'Adapter in', color: '--charge', on: true },
@@ -766,7 +833,7 @@ function offerScreen(offered) {
   if (offered === screenOffered) return;
   screenOffered = offered;
   renderToggles();
-  if (offered) $('s-metric').insertBefore(screenOption, $('s-metric').lastElementChild);
+  if (offered) $('s-metric-power').insertBefore(screenOption, $('s-metric-power').lastElementChild);
   else screenOption.remove();
   showMetric();
 }
@@ -787,6 +854,11 @@ $('live-range').addEventListener('click', e => {
   renderLiveChart();
 });
 
+const agoLabel = xMax => t => {
+  const ago = Math.round(xMax - t), m = Math.floor(ago / 60), s = ago % 60;
+  return ago === 0 ? 'now' : m ? (s ? `-${m}m ${s}s` : `-${m}m`) : `-${s}s`;
+};
+
 function renderLiveChart() {
   if (activeTab !== 'now' || !points.length) return;
   const tIdx = pointFields.indexOf('t');
@@ -795,10 +867,7 @@ function renderLiveChart() {
   drawChart($('live-chart'), {
     xs: view.map(p => p[tIdx]), xMin, xMax, unit: 'W', tip: $('live-tip'),
     xTicks: liveRange === 60 ? 4 : 5,
-    xLabel: t => {
-      const ago = Math.round(xMax - t), m = Math.floor(ago / 60), s = ago % 60;
-      return ago === 0 ? 'now' : m ? (s ? `-${m}m ${s}s` : `-${m}m`) : `-${s}s`;
-    },
+    xLabel: agoLabel(xMax),
     tipTitle: t => new Date(t * 1000).toLocaleTimeString(),
     series: SERIES.map(s => ({
       name: s.name, color: css(s.color), visible: s.on, format: v => fmtW(v),
@@ -807,9 +876,101 @@ function renderLiveChart() {
   });
 }
 
+// ── Thermals page ───────────────────────────────────────
+// Temperatures arrive in °C and are shown in macOS's unit. They're only read while this
+// page shows (or the menu, or the menu bar, needs them), so the chart has gaps.
+const TEMPS = [
+  { key: 'cpu', name: 'CPU', color: '--cpu', cores: true },
+  { key: 'gpu', name: 'GPU', color: '--gpu', cores: true },
+  { key: 'memory', name: 'Memory', color: '--mem' },
+  { key: 'ssd', name: 'SSD', color: '--ssd' },
+  { key: 'ambient', name: 'Ambient', color: '--amb' },
+];
+const TSERIES = TEMPS.map(t => ({ ...t, on: true }));
+const STALE_AFTER = 6;  // seconds: older readings are from before the page showed
+let thermalFields = ['t', 'cpu', 'gpu', 'memory', 'ssd', 'ambient'], unitF = false, fanCount = 1;
+const toUnit = c => unitF ? c * 9 / 5 + 32 : c;
+const fmtT = c => isNum(c) ? `${Math.floor(toUnit(c) + 0.5)}°` : '—';  // halves up, as in the menu
+const fmtRpm = v => isNum(v) ? v.toLocaleString() : '—';
+const available = () => thermals ? thermals.available : TEMPS.map(t => t.key).concat('fans');
+
+function renderThermals() {
+  if (activeTab !== 'thermals') return;
+  const th = thermals && latest && latest.t - thermals.t < STALE_AFTER ? thermals : null;
+  const temps = TEMPS.filter(t => available().includes(t.key));
+  // Rebuilt only when this Mac's sensors change, which is once; then just the values are written.
+  put('t-tiles', 'html', temps.map(t =>
+    `<div class="card tile"><h2><i style="background:var(${t.color})"></i>${t.name}</h2><div class="v num"></div><div class="s num"></div></div>`).join(''));
+  put('t-tiles', '--n', String(temps.length));
+  temps.forEach((t, i) => {
+    const tile = $('t-tiles').children[i], n = th?.sensors?.[t.key] || 0;
+    put(tile.children[1], 'text', fmtT(th?.[t.key]));
+    put(tile.children[2], 'text', !th ? ' ' : n === 0 ? 'No reading' : n === 1 ? '1 sensor'
+      : `Hottest of ${n} ${t.cores ? 'cores' : 'sensors'}`);
+  });
+
+  const hasFans = available().includes('fans');
+  put('t-fans-card', 'display', hasFans ? '' : 'none');
+  if (!hasFans) return;
+  if (th?.fans?.length) fanCount = th.fans.length;
+  put('t-fans', '--n', String(fanCount));
+  put('t-fans', 'html', Array.from({ length: fanCount }, (_, i) =>
+    `<div class="fan"><div class="fan-head"><span class="name">${fanCount > 1 ? `Fan ${i + 1}` : 'Fan'}</span><span class="val num"></span></div>` +
+    '<div class="gauge"><div></div></div><div class="fan-foot num"><span></span><span></span><span></span></div></div>').join(''));
+  [...$('t-fans').children].forEach((el, i) => {
+    const f = th?.fans?.[i], [head, gauge, foot] = el.children;
+    put(head.lastElementChild, 'text', !isNum(f?.rpm) ? '—' : f.rpm === 0 ? 'Off' : `${fmtRpm(f.rpm)} rpm`);
+    put(gauge.firstElementChild, 'width', f?.max ? `${Math.min(100, Math.round(f.rpm / f.max * 200) / 2)}%` : '0%');
+    put(foot.children[0], 'text', `Min ${fmtRpm(f?.min)}`);
+    put(foot.children[1], 'text', f?.manual == null ? '' : f.manual ? 'Set by another app' : 'Controlled by macOS');
+    put(foot.children[2], 'text', `Max ${fmtRpm(f?.max)}`);
+  });
+}
+
+function renderThermalToggles() {
+  $('t-toggles').innerHTML = TSERIES.map((s, i) => !available().includes(s.key) ? '' :
+    `<button class="toggle ${s.on ? 'on' : ''}" data-i="${i}"><i style="background:var(${s.color})"></i>${esc(s.name)}</button>`).join('');
+}
+$('t-toggles').addEventListener('click', e => {
+  const b = e.target.closest('.toggle'); if (!b) return;
+  TSERIES[+b.dataset.i].on = !TSERIES[+b.dataset.i].on; renderThermalToggles(); renderThermalChart();
+});
+$('t-range').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  tRange = +b.dataset.range;
+  for (const el of $('t-range').children) el.setAttribute('aria-selected', el === b);
+  renderThermalChart();
+});
+
+function renderThermalChart() {
+  if (activeTab !== 'thermals' || !latest) return;
+  const tIdx = thermalFields.indexOf('t');
+  const xMax = Math.max(latest.t, tpoints.length ? tpoints[tpoints.length - 1][tIdx] : 0), xMin = xMax - tRange;
+  const view = tpoints.filter(p => p[tIdx] >= xMin - 5);
+  drawChart($('t-chart'), {
+    xs: view.map(p => p[tIdx]), xMin, xMax, unit: '°', fit: 10, maxGap: 8, tip: $('t-tip'),
+    yFixed: view.length ? null : (unitF ? [80, 160] : [30, 70]),
+    xTicks: tRange === 60 ? 4 : 5, xLabel: agoLabel(xMax),
+    tipTitle: t => new Date(t * 1000).toLocaleTimeString(),
+    series: TSERIES.filter(s => available().includes(s.key)).map(s => ({
+      name: s.name, color: css(s.color), visible: s.on,
+      format: v => isNum(v) ? `${v.toFixed(1)} °${unitF ? 'F' : 'C'}` : '—',
+      values: view.map(p => { const v = p[thermalFields.indexOf(s.key)]; return isNum(v) ? toUnit(v) : null; }),
+    })),
+  });
+}
+
 // ── polling ─────────────────────────────────────────────
 const POLL_MS = 1000;  // main.py samples at this rate while the page is polling
 let polling = false;
+function append(list, fresh, tIdx, newest) {
+  const lastT = list.length ? list[list.length - 1][tIdx] : -Infinity;
+  list.push(...fresh.filter(p => p[tIdx] > lastT));
+  if (!isFinite(newest)) return;
+  const firstKeep = list.findIndex(p => p[tIdx] >= newest - 900);
+  if (firstKeep > 0) list.splice(0, firstKeep);
+  else if (firstKeep < 0) list.length = 0;
+}
 async function poll() {
   clearTimeout(pollTimer);
   // One request at a time: overlapping polls (page ready + window shown both
@@ -818,19 +979,23 @@ async function poll() {
   polling = true;
   try {
     if (document.visibilityState === 'visible') {
-      const r = await api().get_live(seq);
+      // The page showing tells main.py whether to read temperatures.
+      const r = await api().get_live(seq, activeTab);
       if (r.point_fields) pointFields = r.point_fields;
-      const tIdx = pointFields.indexOf('t');
-      const lastT = points.length ? points[points.length - 1][tIdx] : -Infinity;
-      const fresh = r.points.filter(p => p[tIdx] > lastT);
-      if (fresh.length) {
-        points.push(...fresh);
-        const cutoff = points[points.length - 1][tIdx] - 900;
-        const firstKeep = points.findIndex(p => p[tIdx] >= cutoff);
-        if (firstKeep > 0) points.splice(0, firstKeep);
-      }
+      if (r.thermal_fields) thermalFields = r.thermal_fields;
+      const newest = r.latest ? r.latest.t : Infinity;
+      append(points, r.points, pointFields.indexOf('t'), newest);
+      append(tpoints, r.thermal_points || [], thermalFields.indexOf('t'), newest);
       seq = r.seq;
-      if (r.latest) { latest = r.latest; offerScreen(latest.has_screen_power); renderNow(); renderLiveChart(); }
+      if (r.thermals) {
+        const changed = !thermals || thermals.available.join() !== r.thermals.available.join();
+        thermals = r.thermals;
+        if (changed) renderThermalToggles();
+      }
+      if (r.latest) {
+        latest = r.latest; offerScreen(latest.has_screen_power);
+        renderNow(); renderLiveChart(); renderThermals(); renderThermalChart();
+      }
       if (r.update) { updateState = r.update; if (activeTab === 'settings') renderUpdateButton(); }
     }
   } catch (e) { console.error(e); }
@@ -838,19 +1003,27 @@ async function poll() {
   pollTimer = setTimeout(poll, POLL_MS);
 }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') poll(); });
-window.addEventListener('resize', () => { renderLiveChart(); if (activeTab === 'history') renderDetailCharts(); });
+window.addEventListener('resize', () => { renderLiveChart(); renderThermalChart(); if (activeTab === 'history') renderDetailCharts(); });
 
-// ── tabs ────────────────────────────────────────────────
-$('tabs').addEventListener('click', e => {
-  const b = e.target.closest('button'); if (!b) return;
-  if (b.dataset.tab !== activeTab) fitNext = true;
-  activeTab = b.dataset.tab;
-  for (const el of $('tabs').children) el.setAttribute('aria-selected', el === b);
+// ── tabs: Thermals | Power (Now, History), and the shared Settings ──
+function showTab(tab) {
+  if (tab === 'power') tab = 'now';  // Power always opens on Now
+  const isPower = tab === 'now' || tab === 'history';
+  if (tab !== activeTab) fitNext = true;
+  activeTab = tab;
+  for (const el of $('tools').children) el.setAttribute('aria-selected', el.dataset.tab === (isPower ? 'power' : tab));
+  for (const el of $('power-tabs').children) el.setAttribute('aria-selected', el.dataset.tab === tab);
+  $('power-tabs').hidden = !isPower;
+  $('settings-tab').setAttribute('aria-selected', tab === 'settings');
   for (const p of document.querySelectorAll('.page')) p.classList.toggle('active', p.id === `page-${activeTab}`);
   $('main').scrollTop = 0;
-  if (activeTab === 'now') { renderNow(); renderLiveChart(); }
-  if (activeTab === 'history') loadSessions();
-  if (activeTab === 'settings') renderSettings();
+  if (tab === 'thermals') { renderThermals(); renderThermalChart(); poll(); }  // poll now: temperatures start being read
+  if (tab === 'now') { renderNow(); renderLiveChart(); }
+  if (tab === 'history') loadSessions();
+  if (tab === 'settings') renderSettings();
+}
+document.querySelector('.topbar').addEventListener('click', e => {
+  const b = e.target.closest('button[data-tab]'); if (b) showTab(b.dataset.tab);
 });
 
 // ── History page ────────────────────────────────────────
@@ -951,11 +1124,13 @@ function renderDetailCharts() {
 }
 
 // ── Settings page ───────────────────────────────────────
-function applyTheme() {
+// The theme and the temperature unit apply to every page.
+function applySettings() {
   const t = settings?.theme || 'system';
   if (t === 'system') document.documentElement.removeAttribute('data-theme');
   else document.documentElement.setAttribute('data-theme', t);
-  renderLiveChart(); renderDetailCharts();
+  unitF = settings?.temperature_unit === 'fahrenheit';
+  renderThermals(); renderLiveChart(); renderThermalChart(); renderDetailCharts();
 }
 
 async function renderSettings() {
@@ -963,6 +1138,7 @@ async function renderSettings() {
   showMetric();
   $('s-show-charging').checked = settings.menu_bar_show_charging;
   for (const b of $('s-theme').children) b.setAttribute('aria-selected', b.dataset.theme === settings.theme);
+  for (const b of $('s-unit').children) b.setAttribute('aria-selected', b.dataset.unit === settings.temperature_unit);
   const login = $('s-open-at-login');
   login.checked = !!settings.launch_at_login;
   login.disabled = settings.launch_at_login === null;
@@ -970,7 +1146,7 @@ async function renderSettings() {
   $('s-open-at-launch').checked = settings.open_dashboard_at_launch;
   $('s-update').checked = settings.update_automatically;
   $('s-record').checked = settings.record_history;
-  $('s-battery-group').hidden = latest?.has_battery === false;  // a desktop Mac has no charge limit
+  $('s-charge-row').hidden = latest?.has_battery === false;  // a desktop Mac has no charge limit
   const info = await call('app_info');
   const noUpdates = info.update_unavailable_reason;
   $('s-update').disabled = !!noUpdates;
@@ -988,7 +1164,7 @@ async function renderSettings() {
 
 async function save(changes) {
   settings = await call('save_settings', changes);
-  applyTheme(); renderSettings();
+  applySettings(); renderSettings();
   poll();
 }
 $('s-metric').onchange = e => save({ menu_bar_metric: e.target.value });
@@ -1000,6 +1176,7 @@ $('s-record').onchange = e => save({ record_history: e.target.checked });
 $('s-theme').onclick = e => { const b = e.target.closest('button'); if (b) save({ theme: b.dataset.theme }); };
 $('s-reveal').onclick = () => call('reveal_log_file');
 $('s-charge-limit').onclick = () => call('open_charging_settings');
+$('s-unit').onclick = e => { const b = e.target.closest('button'); if (b) save({ temperature_unit: b.dataset.unit }); };
 $('s-check-updates').onclick = () => call('check_for_updates');
 
 // Mirrors the menu's "Check for Updates…" item; the status arrives with each poll.
@@ -1052,7 +1229,7 @@ window.addEventListener('unhandledrejection', e => reportError(`Unhandled: ${e.r
 
 window.addEventListener('pywebviewready', async () => {
   settings = await call('get_settings');
-  applyTheme(); renderToggles();
+  applySettings(); renderToggles(); renderThermalToggles();
   await poll();  // measure the page with data in it, so the window opens at its final height
   reportContentSize();
 });

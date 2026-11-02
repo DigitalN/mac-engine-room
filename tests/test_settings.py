@@ -54,3 +54,16 @@ def test_automatic_updates_start_on_and_can_be_turned_off(tmp_path):
     store.update({"update_automatically": False})
     assert Settings(tmp_path / "settings.json").get()["update_automatically"] is False
     assert validate({"update_automatically": "no"})["update_automatically"] is True
+
+
+def test_menu_bar_can_show_a_temperature_and_watts_stay_the_default():
+    assert DEFAULTS["menu_bar_metric"] == "system"
+    assert validate({"menu_bar_metric": "cpu_temp"})["menu_bar_metric"] == "cpu_temp"
+    assert validate({"menu_bar_metric": "hottest_temp"})["menu_bar_metric"] == "hottest_temp"
+    assert validate({"menu_bar_metric": "gpu_temp"})["menu_bar_metric"] == "system"
+
+
+def test_temperatures_are_in_celsius_unless_fahrenheit_is_chosen():
+    assert DEFAULTS["temperature_unit"] == "celsius"
+    assert validate({"temperature_unit": "fahrenheit"})["temperature_unit"] == "fahrenheit"
+    assert validate({"temperature_unit": "kelvin"})["temperature_unit"] == "celsius"

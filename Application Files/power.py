@@ -274,6 +274,10 @@ def decode_smc_value(data_type, raw, little_endian):
             # Fixed-point values are big-endian on every SMC that uses them.
             n = struct.unpack(">h" if signed else ">H", raw[:2])[0]
             return n / (1 << frac)
+        if t == "ioft":
+            # 8 bytes, of which the first 4 are 16.16 fixed point, little-endian. M5 and later
+            # use it for temperatures, and so do a few keys on earlier chips (the M1 Pro's TG0B).
+            return struct.unpack("<I", raw[:4])[0] / 65536
     except struct.error:
         return None
     return None
@@ -350,19 +354,27 @@ class SMC:
         found = self._read_raw(key)
         return decode_smc_value(found[0], found[1], self._little_endian) if found else None
 
+    def key_names(self):
+        """The name of every key this SMC has (2,181 on an M1 Pro, listed in 15 ms). Names
+        only: nothing is read."""
+        found = self._read_raw("#KEY")
+        count = struct.unpack(">I", found[1][:4])[0] if found else 0  # big-endian even on Apple silicon
+        names = []
+        for index in range(count):
+            response = self._call(_SMCKeyData(data8=_SMC_CMD_KEY_BY_INDEX, data32=index))
+            if response.result == 0:
+                names.append(struct.pack(">I", response.key).decode("latin-1"))
+        return names
+
     def power_keys(self):
         """Every key starting with P as "NAME=value", or "NAME(type)=?" if it can't be decoded.
 
         For the log. Other keys are named by the walk but never read, so nothing
         identifying can end up in it.
         """
-        found = self._read_raw("#KEY")
-        count = struct.unpack(">I", found[1][:4])[0] if found else 0  # big-endian even on Apple silicon
         keys = []
-        for index in range(count):
-            response = self._call(_SMCKeyData(data8=_SMC_CMD_KEY_BY_INDEX, data32=index))
-            name = struct.pack(">I", response.key).decode("latin-1")
-            if response.result != 0 or not name.startswith("P"):
+        for name in self.key_names():
+            if not name.startswith("P"):
                 continue
             found = self._read_raw(name)
             value = decode_smc_value(found[0], found[1], self._little_endian) if found else None
