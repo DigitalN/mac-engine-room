@@ -9,7 +9,7 @@
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data:; font-src 'none'; connect-src 'none'; media-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="color-scheme" content="light dark">
-<title>Pythonflow</title>
+<title>Mac Engine Room</title>
 <style>
 :root {
   --bg: #f5f5f7; --card: #ffffff; --card-2: #fafafa; --text: #1d1d1f; --muted: #6e6e73;
@@ -385,7 +385,7 @@ dialog .actions { justify-content: flex-end; }
             <label class="switch"><input type="checkbox" id="s-open-at-login"><span></span></label>
           </div>
           <div class="srow">
-            <div class="lbl">Open this window at launch<div class="hint">Off keeps Pythonflow in the menu bar only. At login it always starts there.</div></div>
+            <div class="lbl">Open this window at launch<div class="hint">Off keeps Mac Engine Room in the menu bar only. At login it always starts there.</div></div>
             <label class="switch"><input type="checkbox" id="s-open-at-launch"><span></span></label>
           </div>
           <div class="srow">
@@ -966,7 +966,7 @@ async function renderSettings() {
   const login = $('s-open-at-login');
   login.checked = !!settings.launch_at_login;
   login.disabled = settings.launch_at_login === null;
-  $('s-login-hint').textContent = login.disabled ? 'Available when Pythonflow runs from your Applications folder.' : '';
+  $('s-login-hint').textContent = login.disabled ? 'Available when Mac Engine Room runs from your Applications folder.' : '';
   $('s-open-at-launch').checked = settings.open_dashboard_at_launch;
   $('s-update').checked = settings.update_automatically;
   $('s-record').checked = settings.record_history;

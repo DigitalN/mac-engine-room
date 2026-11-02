@@ -1,11 +1,12 @@
-# Pythonflow
+# Mac Engine Room
 
-Building, the release checklist, how updates work, and testing the updater are in
-@docs/DEVELOPMENT.md.
+Formerly Pythonflow. Building, the release checklist, how updates work, and testing the
+updater are in @docs/DEVELOPMENT.md. The agreed plan for turning it into a power and
+thermals app, release by release, is in `docs/PLAN.md`.
 
 ## Debugging
 
-Application logs are written to `~/Library/Logs/Pythonflow/app.log` (rotating,
+Application logs are written to `~/Library/Logs/Mac Engine Room/app.log` (rotating,
 3 x 1 MB). Dashboard (JavaScript) errors are forwarded there too. When the user
 reports a bug, **read the log first** before asking questions. The updater logs
 `Automatic updates off: <reason>` at launch, and `Up to date at`, `Downloading`,
@@ -20,11 +21,16 @@ A blank dashboard has been WebKit's graphics helper hanging. At login it got stu
 setting up audio, and macOS doesn't let WebKit kill its own helpers. The app logs
 `WebKit's graphics process stopped responding; ending it` when it does that itself,
 and `…reloading the page` if the page's own process quits. The macOS log
-(`log show --predicate 'process == "Pythonflow"'`) has WebKit's side, e.g.
+(`log show --predicate 'process == "Mac Engine Room"'`) has WebKit's side, e.g.
 `GPUProcess with PID … became unresponsive`.
 
 `~/Library/Logs/Powerflow/` belongs to the original Rust app (`powerflow.log`)
 and to the first Python build, which ran under the old name.
+
+The first launch after the rename logs `Moved …/Pythonflow to …/Mac Engine Room` for the
+data and log folders, and, for a copy that updated itself, `Renamed …/Pythonflow.app to
+Mac Engine Room.app; relaunching`. A copy installed by hand next to the old one logs
+`Quit the old copy at …` and `Moved the old copy at … to the Trash`.
 
 To reproduce without touching the user's data, run with
 `PYTHONFLOW_DATA_DIR=<tmp folder>` (logs then go to `<tmp folder>/Logs/`).
@@ -36,6 +42,10 @@ To reproduce without touching the user's data, run with
   class exposed to the page. `VERSION` here is the app's only version number.
 - **Launching**: `Application Files/launch.py`. The offer to move into Applications,
   relaunching, and open at login (`SMAppService`, loaded with `objc.loadBundle`).
+- **The rename**: `Application Files/rename.py`. Moves an installed Pythonflow over once:
+  the bundle (the updater swaps new versions in under the old name), the data and log
+  folders, old copies (quit, then Trash) and the login item. Delete it once no installed
+  copy can still be older than 1.2.7.
 - **Updates**: `Application Files/updater.py`. Daily check of GitHub releases after
   a wake, signature check, swap and relaunch. See *How updates work* in DEVELOPMENT.md.
 - **Sensors**: `Application Files/power.py`. Reads IOKit `AppleSmartBattery`
@@ -45,7 +55,7 @@ To reproduce without touching the user's data, run with
 - **Menu bar**: `Application Files/statusbar.py`. Native `NSStatusItem` and `NSMenu`
   (PyObjC). Main thread only.
 - **History**: `Application Files/history.py`. SQLite
-  (`~/Library/Application Support/Pythonflow/history.db`), the `ChargingRecorder`
+  (`~/Library/Application Support/Mac Engine Room/history.db`), the `ChargingRecorder`
   state machine, CSV export, and the one-time read-only import from the original
   app's `~/Library/Application Support/Powerflow/db.sqlite`.
 - **Settings**: `Application Files/settings.py`. JSON, validated on every load and
@@ -53,8 +63,8 @@ To reproduce without touching the user's data, run with
   in for the page.
 - **Frontend**: `Application Files/index.html`. A single page in vanilla JS with a
   hand-rolled canvas chart and no external resources.
-- **Build**: `scripts/build.sh` runs PyInstaller with `Application Files/Pythonflow.spec`
-  in `~/Library/Caches/Pythonflow-build` and signs the app. `scripts/install.sh` installs
+- **Build**: `scripts/build.sh` runs PyInstaller with `Application Files/MacEngineRoom.spec`
+  in `~/Library/Caches/MacEngineRoom-build` and signs the app. `scripts/install.sh` installs
   it in `/Applications`; `scripts/package.sh` makes the release disk image. The
   `.command` files in `scripts/` are double-click wrappers around `install.sh`.
 
@@ -129,10 +139,14 @@ To reproduce without touching the user's data, run with
 
 ## Testing on the maintainer's Mac
 
-- The maintainer's own Pythonflow is running from `/Applications`. Don't quit it,
-  reinstall it or change its data to test something without asking. Test with
-  `PYTHONFLOW_DATA_DIR` and, for the updater, a copy with its own bundle identifier
-  (see *Testing the updater*).
+- The maintainer's own copy is running from `/Applications` (as Pythonflow until it
+  updates to 1.2.7). Don't quit it, reinstall it or change its data to test something
+  without asking. Test with `PYTHONFLOW_DATA_DIR` and, for the updater, a copy with its
+  own bundle identifier (see *Testing the updater*).
+- **Never launch a build with the real bundle identifier, or run from source, without
+  `PYTHONFLOW_DATA_DIR`.** `rename.py` would quit the maintainer's running Pythonflow,
+  move it to the Trash and move its data folder. Test copies with their own identifier
+  only touch copies with that identifier.
 - Say so before opening windows or menu bar items on screen for a test. The maintainer
   may be in the middle of something.
 - After testing the updater, delete the test copy, its data folder and the test disk
@@ -170,6 +184,14 @@ Don't undo these without asking:
 - The dashboard window opens as tall as the page, up to the screen's height, and can't
   be made wider or taller than the page needs: extra size only added empty space.
   Switching tabs resizes it to the new page.
+- The rename to Mac Engine Room kept these on the old name, because installed copies,
+  the test procedures or stored data depend on them: the bundle identifier
+  `com.pythonflow.monitor`, the `PYTHONFLOW_DATA_DIR` and `PYTHONFLOW_UPDATE_FEED`
+  variables (1.2.6 passes the old one on when it relaunches a test copy into an update),
+  the `pythonflow` logger, and `source = 'pythonflow'` on recorded charges.
+- Never create a new repository called `DigitalN/pythonflow`: GitHub's redirect to
+  `DigitalN/mac-engine-room`, which copies older than 1.2.7 check for updates through,
+  would stop.
 
 ## Working style
 

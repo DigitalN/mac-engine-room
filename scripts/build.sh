@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds Pythonflow.app and prints its path. Used by install.sh and package.sh.
+# Builds Mac Engine Room.app and prints its path. Used by install.sh and package.sh.
 #
 #   scripts/build.sh            sign with your Apple Development certificate, if you have one
 #   scripts/build.sh --adhoc    sign locally only (the app then can't update itself)
@@ -12,8 +12,8 @@ cd "$(dirname "$0")/.."
 
 # Build outside the repo: folders synced by iCloud Drive (like ~/Documents) add
 # Finder metadata to app bundles, which codesign rejects.
-WORK="$HOME/Library/Caches/Pythonflow-build"
-APP="$WORK/dist/Pythonflow.app"
+WORK="$HOME/Library/Caches/MacEngineRoom-build"
+APP="$WORK/dist/Mac Engine Room.app"
 LOG="$WORK/build.log"
 
 if [[ "${1:-}" == "--adhoc" ]]; then
@@ -35,7 +35,7 @@ fi
 rm -rf "$WORK"
 mkdir -p "$WORK"
 echo "Building…" >&2
-if ! python3 -m PyInstaller "Application Files/Pythonflow.spec" --noconfirm --clean \
+if ! python3 -m PyInstaller "Application Files/MacEngineRoom.spec" --noconfirm --clean \
     --distpath "$WORK/dist" --workpath "$WORK/build" >"$LOG" 2>&1; then
     tail -20 "$LOG" >&2
     echo "Build failed; full log: $LOG" >&2

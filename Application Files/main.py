@@ -1,4 +1,4 @@
-"""Pythonflow — a menu bar power monitor for macOS.
+"""Mac Engine Room (formerly Pythonflow) — a menu bar power monitor for macOS.
 
 Launcher: logging, single-instance lock, sampler thread, menu bar item and the
 pywebview dashboard window.
@@ -6,7 +6,7 @@ pywebview dashboard window.
 There is deliberately no HTTP server: the dashboard page talks to Python over
 pywebview's in-process bridge, so the app opens no network ports. Its only network
 request is the daily update check (updater.py). All data stays in
-~/Library/Application Support/Pythonflow.
+~/Library/Application Support/Mac Engine Room.
 """
 
 import ctypes
@@ -22,7 +22,8 @@ from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-APP_NAME = "Pythonflow"
+APP_NAME = "Mac Engine Room"
+OLD_NAME = "Pythonflow"  # its name until 1.2.7; see rename.py
 VERSION = "1.2.6"  # the build reads it from here; see the release checklist in docs/DEVELOPMENT.md
 if os.environ.get("PYTHONFLOW_DATA_DIR"):  # for development/testing against a throwaway folder
     DATA_DIR = Path(os.environ["PYTHONFLOW_DATA_DIR"]).expanduser()
@@ -32,6 +33,12 @@ else:
     DATA_DIR = Path.home() / "Library" / "Application Support" / APP_NAME
     LOG_DIR = Path.home() / "Library" / "Logs" / APP_NAME
     LEGACY_DIR = Path.home() / "Library" / "Application Support" / "Powerflow"
+# Moved to the new names once (rename.py). Not with PYTHONFLOW_DATA_DIR, so a test copy
+# never touches the real folders.
+OLD_FOLDERS = [] if os.environ.get("PYTHONFLOW_DATA_DIR") else [
+    (Path.home() / "Library" / "Application Support" / OLD_NAME, DATA_DIR),
+    (Path.home() / "Library" / "Logs" / OLD_NAME, LOG_DIR),
+]
 LOG_PATH = LOG_DIR / "app.log"
 # Files written by the original Rust app (Powerflow 0.2.x), imported read-only on first launch.
 LEGACY_DB = LEGACY_DIR / "db.sqlite"
@@ -236,7 +243,7 @@ class Api:
             return None
         day = datetime.fromtimestamp(session["started_at"]).strftime("%Y-%m-%d-%H%M")
         result = self._app._window.create_file_dialog(
-            webview.FileDialog.SAVE, save_filename=f"pythonflow-charge-{day}.csv",
+            webview.FileDialog.SAVE, save_filename=f"mac-engine-room-charge-{day}.csv",
             file_types=("CSV files (*.csv)",),
         )
         if not result:
@@ -276,7 +283,7 @@ class Api:
         log.warning("Dashboard error: %s", str(message)[:1000])
 
 
-class PythonflowApp:
+class EngineRoomApp:
     def __init__(self):
         import launch
         from history import ChargingRecorder, HistoryStore
@@ -425,7 +432,7 @@ class PythonflowApp:
             self.show_dashboard()
         else:
             self._update_main_qos()
-        log.info("Pythonflow %s started (dashboard %s%s)", VERSION,
+        log.info("Mac Engine Room %s started (dashboard %s%s)", VERSION,
                  "shown" if show and not at_login else "hidden", ", opened at login" if at_login else "")
 
     def _check_graphics_process(self):
@@ -483,7 +490,7 @@ class PythonflowApp:
         app delegate asks each window's `closing` handlers before terminating, and ours
         cancels closes (to hide the window instead), so a real quit request must win.
 
-        Opening Pythonflow again while it runs in the background (from Finder, Spotlight
+        Opening Mac Engine Room again while it runs in the background (from Finder, Spotlight
         or Launchpad) shows the dashboard. Otherwise nothing would seem to happen.
 
         If WebKit's process for the page quits (a crash, or macOS reclaiming memory),
@@ -540,11 +547,19 @@ class PythonflowApp:
         from PyObjCTools import AppHelper
 
         import launch
+        import rename
         from statusbar import StatusBar
 
         if self._app_path and not launch.in_applications_folder(self._app_path):
             if launch.offer_to_move(self._app_path):
                 return  # the copy in Applications starts once this one has quit
+        elif self._app_path:
+            if rename.rename_bundle(self._app_path, self._login_item):
+                return  # the renamed copy starts once this one has quit
+            if rename.trash_old_copies(self._app_path):
+                self._login_item.repoint()
+        if rename.LOGIN_ITEM_ARGUMENT in sys.argv:
+            self._login_item.set_enabled(True)
 
         # The window starts hidden, and _finish_launching shows it unless this is a login
         # launch. Relaunching into an update shouldn't pop the dashboard up either.
@@ -579,17 +594,34 @@ class PythonflowApp:
         os._exit(0)
 
 
+def _own_bundle_id():
+    if not getattr(sys, "frozen", False):
+        return None
+    from Foundation import NSBundle
+
+    return NSBundle.mainBundle().bundleIdentifier()
+
+
 def main():
+    import rename
+
+    # Before logging and the lock, which live in the folders being moved.
+    moved = rename.move_old_folders(OLD_FOLDERS, _own_bundle_id())
+    if moved is None:
+        print(f"{OLD_NAME} is still running from {OLD_FOLDERS[0][0]}; exiting", file=sys.stderr)
+        return
     _setup_logging()
+    for note in moved:
+        log.info(note)
     lock = _acquire_single_instance_lock()
     if lock is None:
-        log.info("Another Pythonflow instance is already running; exiting")
+        log.info("Another Mac Engine Room instance is already running; exiting")
         return
     sys.path.insert(0, str(_app_files_dir()))
     try:
-        PythonflowApp().run()
+        EngineRoomApp().run()
     except Exception:
-        log.exception("Pythonflow failed to start")
+        log.exception("Mac Engine Room failed to start")
         raise
 
 

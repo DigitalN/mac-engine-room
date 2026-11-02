@@ -1,11 +1,12 @@
-# PyInstaller spec for Pythonflow
+# PyInstaller spec for Mac Engine Room (called Pythonflow until 1.2.7; the bundle identifier
+# kept the old name so installed copies keep updating)
 # Builds a menu-bar-only app (LSUIElement): no Dock icon until the dashboard is opened.
-# Data lives in ~/Library/Application Support/Pythonflow, logs in ~/Library/Logs/Pythonflow.
+# Data lives in ~/Library/Application Support/Mac Engine Room, logs in ~/Library/Logs/Mac Engine Room.
 
 import os
 import re
 
-ICON_PATH = os.path.join(SPECPATH, 'Pythonflow.icns')
+ICON_PATH = os.path.join(SPECPATH, 'MacEngineRoom.icns')
 # The version lives in main.py only.
 with open(os.path.join(SPECPATH, 'main.py'), encoding='utf-8') as f:
     VERSION = re.search(r'^VERSION = "([^"]+)"', f.read(), re.MULTILINE).group(1)
@@ -50,7 +51,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='Pythonflow',
+    name='Mac Engine Room',
     debug=False,
     strip=False,
     upx=False,
@@ -63,17 +64,17 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=False,
-    name='Pythonflow',
+    name='Mac Engine Room',
 )
 
 app = BUNDLE(
     coll,
-    name='Pythonflow.app',
+    name='Mac Engine Room.app',
     icon=ICON_PATH if os.path.exists(ICON_PATH) else None,
     bundle_identifier='com.pythonflow.monitor',
     info_plist={
-        'CFBundleName': 'Pythonflow',
-        'CFBundleDisplayName': 'Pythonflow',
+        'CFBundleName': 'Mac Engine Room',
+        'CFBundleDisplayName': 'Mac Engine Room',
         'CFBundleVersion': VERSION,
         'CFBundleShortVersionString': VERSION,
         'LSUIElement': True,
