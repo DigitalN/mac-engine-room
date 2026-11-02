@@ -1,5 +1,5 @@
 #!/bin/bash
-# Double-click this file to rebuild Pythonflow.app from your copy of the code.
+# Double-click this file to rebuild Mac Engine Room.app from your copy of the code.
 # Pulls the latest from your git remote, runs the tests, then builds, installs to
 # /Applications and launches. (Installed copies also update themselves from GitHub
 # releases; this is for running your own changes.)
@@ -8,7 +8,7 @@ PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_ROOT" || exit 1
 
 echo "═══════════════════════════════════════════"
-echo "  Building Pythonflow..."
+echo "  Building Mac Engine Room..."
 echo "═══════════════════════════════════════════"
 echo ""
 

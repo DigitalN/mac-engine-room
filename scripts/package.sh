@@ -1,7 +1,7 @@
 #!/bin/bash
-# Builds Pythonflow and packages it as a disk image for a GitHub release:
-#   dist/Pythonflow-<version>.dmg
-# When opened, it shows Pythonflow and the Applications folder on a background with an
+# Builds Mac Engine Room and packages it as a disk image for a GitHub release:
+#   dist/Mac-Engine-Room-<version>.dmg
+# When opened, it shows Mac Engine Room and the Applications folder on a background with an
 # arrow between them. Attach it to a release tagged v<version>; installed copies update
 # themselves from it too.
 #
@@ -10,7 +10,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VOLUME_NAME="Pythonflow"
+VOLUME_NAME="Mac Engine Room"
 
 APP=$(scripts/build.sh)
 # Installed copies only take updates signed by their own team, so a release must be too.
@@ -21,13 +21,13 @@ if [[ -z "$TEAM" || "$TEAM" == "not set" ]]; then
 fi
 VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist")
 ICON=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIconFile" "$APP/Contents/Info.plist")
-DMG="dist/Pythonflow-$VERSION.dmg"
+DMG="dist/Mac-Engine-Room-$VERSION.dmg"
 
 # Work outside the repo, which may be synced by iCloud Drive (see build.sh).
-WORK="$HOME/Library/Caches/Pythonflow-build/dmg"
+WORK="$HOME/Library/Caches/MacEngineRoom-build/dmg"
 rm -rf "$WORK"
 mkdir -p "$WORK/source/.background"
-ditto "$APP" "$WORK/source/Pythonflow.app"
+ditto "$APP" "$WORK/source/Mac Engine Room.app"
 ln -s /Applications "$WORK/source/Applications"
 echo "Drawing the window background…" >&2
 swift scripts/make-dmg-background.swift "$WORK/source/.background/background.tiff"
@@ -59,7 +59,7 @@ tell application "Finder"
         set shows item info of viewOptions to false
         set shows icon preview of viewOptions to false
         set background picture of viewOptions to file ".background:background.tiff"
-        set position of item "Pythonflow.app" of container window to {170, 205}
+        set position of item "Mac Engine Room.app" of container window to {170, 205}
         set position of item "Applications" of container window to {490, 205}
         close
         open
@@ -81,7 +81,7 @@ for _ in $(seq 1 20); do
     sleep 0.25
 done
 
-# Show the Pythonflow icon on the mounted disk. Added after the layout step because
+# Show the app's icon on the mounted disk. Added after the layout step because
 # Finder removes .VolumeIcon.icns while it arranges the window.
 cp "$APP/Contents/Resources/$ICON" "$MOUNT/.VolumeIcon.icns"
 xcrun SetFile -a C "$MOUNT"

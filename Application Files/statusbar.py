@@ -103,7 +103,7 @@ class StatusBar:
         self._button.setImagePosition_(AppKit.NSImageLeading)
         self._title = format_watts(None)
         self._button.setTitle_(self._title)
-        self._button.setToolTip_("Pythonflow")
+        self._button.setToolTip_("Mac Engine Room")
 
         bolt = NSImage.imageWithSystemSymbolName_accessibilityDescription_("bolt.fill", "Charging")
         config = NSImageSymbolConfiguration.configurationWithPointSize_weight_(size - 2, AppKit.NSFontWeightRegular)
@@ -146,7 +146,7 @@ class StatusBar:
         menu.addItem_(NSMenuItem.separatorItem())
         self._update_item = self._action_item("Check for Updates…", "checkForUpdates:", "")
         menu.addItem_(self._update_item)
-        menu.addItem_(self._action_item("Quit Pythonflow", "quitApp:", "q"))
+        menu.addItem_(self._action_item("Quit Mac Engine Room", "quitApp:", "q"))
         self._item.setMenu_(menu)
         self._menu = menu
 
@@ -176,7 +176,7 @@ class StatusBar:
         """Mirrors updater.Updater's status: only "check" and "restart" can be clicked."""
         title, enabled = {
             "checking": ("Checking for Updates…", False),
-            "downloading": (f"Downloading Pythonflow {version}…", False),
+            "downloading": (f"Downloading Mac Engine Room {version}…", False),
             "ready": (f"Restart to Update to {version}", True),
         }.get(status, ("Check for Updates…", True))
         self._update_item.setTitle_(title)

@@ -1,8 +1,8 @@
-# Developing Pythonflow
+# Developing Mac Engine Room
 
-Notes for building Pythonflow from source and publishing releases. For installing and
-using it, see the [README](../README.md). The architecture and the rules the code follows
-are in [CLAUDE.md](../CLAUDE.md).
+Notes for building Mac Engine Room (formerly Pythonflow) from source and publishing
+releases. For installing and using it, see the [README](../README.md). The architecture
+and the rules the code follows are in [CLAUDE.md](../CLAUDE.md).
 
 ## Build from source
 
@@ -14,15 +14,15 @@ installs them). Then:
 scripts/install.sh
 ```
 
-This builds `Pythonflow.app`, signs it with your **Apple Development** certificate,
-installs it to `/Applications` and launches it. `scripts/Build Pythonflow.command` does
+This builds `Mac Engine Room.app`, signs it with your **Apple Development** certificate,
+installs it to `/Applications` and launches it. `scripts/Build Mac Engine Room.command` does
 the same after pulling the latest code and running the tests.
 
 Without a certificate the build is signed ad hoc: it works, but it can't update itself.
 A free Apple ID is enough to get one: Xcode → Settings → Apple Accounts → sign in →
 select your **Personal Team** → Manage Certificates… → **+** → **Apple Development**.
 
-Builds go to `~/Library/Caches/Pythonflow-build`, not the repository. Folders synced by
+Builds go to `~/Library/Caches/MacEngineRoom-build`, not the repository. Folders synced by
 iCloud Drive (such as `~/Documents`) add Finder metadata to app bundles, and codesign
 rejects bundles that have it.
 
@@ -32,8 +32,10 @@ To run from source without building:
 cd "Application Files" && python3 main.py
 ```
 
-Set `PYTHONFLOW_DATA_DIR=/some/folder` to run against a throwaway data folder. Run the
-tests with `python3 -m pytest`.
+Set `PYTHONFLOW_DATA_DIR=/some/folder` to run against a throwaway data folder. Without
+it, a run from source moves `~/Library/Application Support/Pythonflow` to the new name
+(`rename.py`), or waits for a running Pythonflow and gives up. Run the tests with
+`python3 -m pytest`.
 
 ## Release checklist
 
@@ -57,15 +59,15 @@ doesn't release anything: the download links only change when a release is publi
 
 ### Build and check the disk image
 
-- [ ] `scripts/package.sh` makes `dist/Pythonflow-<version>.dmg`. That's the only file a
+- [ ] `scripts/package.sh` makes `dist/Mac-Engine-Room-<version>.dmg`. That's the only file a
   release has: people download it, and installed copies update from it.
-- [ ] Open the DMG: Pythonflow and Applications with the arrow between them, and the
+- [ ] Open the DMG: Mac Engine Room and Applications with the arrow between them, and the
   first-launch card at the bottom easy to read.
 - [ ] The app inside has the new version, a valid signature, and the right team:
   ```bash
-  M=$(hdiutil attach -nobrowse -readonly -noautoopen dist/Pythonflow-1.1.0.dmg | grep -o '/Volumes/.*$')
-  defaults read "$M/Pythonflow.app/Contents/Info" CFBundleShortVersionString
-  codesign --verify --deep --strict "$M/Pythonflow.app" && codesign -dvv "$M/Pythonflow.app" 2>&1 | grep TeamIdentifier
+  M=$(hdiutil attach -nobrowse -readonly -noautoopen dist/Mac-Engine-Room-1.2.7.dmg | grep -o '/Volumes/.*$')
+  defaults read "$M/Mac Engine Room.app/Contents/Info" CFBundleShortVersionString
+  codesign --verify --deep --strict "$M/Mac Engine Room.app" && codesign -dvv "$M/Mac Engine Room.app" 2>&1 | grep TeamIdentifier
   hdiutil detach "$M"
   ```
 
@@ -83,7 +85,7 @@ doesn't release anything: the download links only change when a release is publi
   the current version: no notes for people on older versions.
 - [ ] Publish it, tagged `v<version>`, from the commit it was built from:
   ```bash
-  gh release create v1.1.0 dist/Pythonflow-1.1.0.dmg --title "Pythonflow 1.1.0" --notes-file notes.md
+  gh release create v1.2.7 dist/Mac-Engine-Room-1.2.7.dmg --title "Mac Engine Room 1.2.7" --notes-file notes.md
   ```
   Drafts and pre-releases are skipped by the updater, so publish a pre-release first to
   try a build before everyone gets it.
@@ -92,10 +94,10 @@ doesn't release anything: the download links only change when a release is publi
 
 ### After publishing
 
-- [ ] `https://github.com/DigitalN/pythonflow/releases/latest` goes to the new tag.
+- [ ] `https://github.com/DigitalN/mac-engine-room/releases/latest` goes to the new tag.
 - [ ] GitHub's API, which the updater reads, shows the new tag with only the `.dmg`:
   ```bash
-  curl -s https://api.github.com/repos/DigitalN/pythonflow/releases/latest | grep -E '"tag_name"|"name": "Pythonflow'
+  curl -s https://api.github.com/repos/DigitalN/mac-engine-room/releases/latest | grep -E '"tag_name"|"name": "Mac-Engine-Room'
   ```
 - [ ] The DMG downloaded from the page is identical to the one in `dist/`
   (`shasum -a 256`).
@@ -122,7 +124,8 @@ certificate from the same Apple account before the old one expires.
   [latest release](https://docs.github.com/en/rest/releases/releases#get-the-latest-release),
   through `/usr/bin/curl` (the bundled Python has no certificates of its own). Drafts and
   pre-releases don't count. If its tag is newer, it downloads the release's `.dmg`.
-- **Checks:** copies `Pythonflow.app` out of the disk image and runs
+- **Checks:** copies the app with this bundle identifier out of the disk image (by
+  identifier, not name, since copies older than 1.2.7 are still called Pythonflow) and runs
   `codesign --verify --deep --strict` with the requirement
   `identifier "com.pythonflow.monitor" and anchor apple generic and certificate leaf[subject.OU] = "<this copy's team>"`.
   The version inside must also be newer than the installed one.
@@ -137,7 +140,9 @@ certificate from the same Apple account before the old one expires.
 ## Testing the updater
 
 Test with a separate copy that has its own bundle identifier, so it can't touch the
-installed Pythonflow and Launch Services doesn't mix the two up.
+installed app and Launch Services doesn't mix the two up. Name the test copy
+`Pythonflow.app` to also test the rename (`rename.py`): after the update it renames itself
+to `Mac Engine Room.app` in the same folder.
 
 1. Build, then make the test copy and a higher-version update from it, each re-signed
    with your certificate after editing its `Info.plist`:
@@ -151,15 +156,15 @@ installed Pythonflow and Launch Services doesn't mix the two up.
        -c "Set :CFBundleShortVersionString $2" -c "Set :CFBundleVersion $2" "$1/Contents/Info.plist"
      codesign --force --deep -s "$ID" "$1"
    }
-   copy "$HOME/Applications/Pythonflow Test.app" 1.0
-   copy /tmp/pf-update/Pythonflow.app 9.9
-   hdiutil create -volname Pythonflow -srcfolder /tmp/pf-update -format UDZO /tmp/pf-feed/Pythonflow-9.9.dmg
+   copy "$HOME/Applications/Mac Engine Room Test.app" 1.0
+   copy "/tmp/pf-update/Mac Engine Room.app" 9.9
+   hdiutil create -volname "Mac Engine Room" -srcfolder /tmp/pf-update -format UDZO /tmp/pf-feed/Mac-Engine-Room-9.9.dmg
    ```
 2. Write a stand-in for GitHub's latest-release response whose `.dmg` asset's
    `browser_download_url` is a `file://` URL, e.g. `/tmp/pf-feed/latest.json`:
    ```json
-   {"tag_name": "v9.9", "assets": [{"name": "Pythonflow-9.9.dmg",
-     "browser_download_url": "file:///tmp/pf-feed/Pythonflow-9.9.dmg"}]}
+   {"tag_name": "v9.9", "assets": [{"name": "Mac-Engine-Room-9.9.dmg",
+     "browser_download_url": "file:///tmp/pf-feed/Mac-Engine-Room-9.9.dmg"}]}
    ```
 3. Give the test copy its own data folder. Keep its dashboard closed and its history off,
    and keep it out of Login Items:
@@ -167,7 +172,7 @@ installed Pythonflow and Launch Services doesn't mix the two up.
    mkdir -p /tmp/pf-data && touch /tmp/pf-data/.open-at-login-default-applied
    echo '{"open_dashboard_at_launch": false, "record_history": false}' > /tmp/pf-data/settings.json
    open -n --env PYTHONFLOW_DATA_DIR=/tmp/pf-data --env PYTHONFLOW_UPDATE_FEED=file:///tmp/pf-feed/latest.json \
-     "$HOME/Applications/Pythonflow Test.app"
+     "$HOME/Applications/Mac Engine Room Test.app"
    ```
    Choose **Check for Updates…** in the test copy's menu (it installs right away), or
    sleep and wake the Mac (it waits for a quiet moment). The signature check still applies.

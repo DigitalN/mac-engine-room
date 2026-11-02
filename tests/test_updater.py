@@ -20,20 +20,20 @@ def test_versions_compare_number_by_number():
 def test_release_gives_version_and_disk_image():
     release = {"tag_name": "v1.2.0", "draft": False, "assets": [
         {"name": "notes.txt", "browser_download_url": "https://example.invalid/notes.txt"},
-        {"name": "Pythonflow-1.2.0.dmg", "browser_download_url": "https://example.invalid/Pythonflow-1.2.0.dmg"},
+        {"name": "Mac-Engine-Room-1.2.0.dmg", "browser_download_url": "https://example.invalid/Mac-Engine-Room-1.2.0.dmg"},
     ]}
-    assert parse_release(release) == ("1.2.0", "https://example.invalid/Pythonflow-1.2.0.dmg")
+    assert parse_release(release) == ("1.2.0", "https://example.invalid/Mac-Engine-Room-1.2.0.dmg")
 
 
 def test_release_without_disk_image_or_tag_is_refused():
     with pytest.raises(UpdateError, match="no disk image"):
-        parse_release({"tag_name": "v1.2.0", "assets": [{"name": "Pythonflow.zip", "browser_download_url": "x"}]})
+        parse_release({"tag_name": "v1.2.0", "assets": [{"name": "Mac-Engine-Room.zip", "browser_download_url": "x"}]})
     with pytest.raises(UpdateError):
         parse_release({"message": "Not Found"})
 
 
 def test_team_comes_from_codesign_details():
-    details = "Executable=/Applications/Pythonflow.app/Contents/MacOS/Pythonflow\nIdentifier=com.pythonflow.monitor\nTeamIdentifier=XT4LT7MS6Y\n"
+    details = "Executable=/Applications/Mac Engine Room.app/Contents/MacOS/Mac Engine Room\nIdentifier=com.pythonflow.monitor\nTeamIdentifier=XT4LT7MS6Y\n"
     assert team_identifier(details) == "XT4LT7MS6Y"
     assert team_identifier("Identifier=com.pythonflow.monitor\nTeamIdentifier=not set\n") is None
     assert team_identifier("code object is not signed at all") is None
@@ -53,7 +53,7 @@ def test_checks_once_a_day():
 
 
 def test_applications_folder(tmp_path):
-    assert in_applications_folder("/Applications/Pythonflow.app")
-    assert not in_applications_folder("/Applications Old/Pythonflow.app")
-    assert not in_applications_folder(tmp_path / "Pythonflow.app")
-    assert not in_applications_folder("/private/var/folders/xy/T/AppTranslocation/1234/d/Pythonflow.app")
+    assert in_applications_folder("/Applications/Mac Engine Room.app")
+    assert not in_applications_folder("/Applications Old/Mac Engine Room.app")
+    assert not in_applications_folder(tmp_path / "Mac Engine Room.app")
+    assert not in_applications_folder("/private/var/folders/xy/T/AppTranslocation/1234/d/Mac Engine Room.app")

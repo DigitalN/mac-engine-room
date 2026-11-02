@@ -1,6 +1,6 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════
-#  Pythonflow — First Time Setup
+#  Mac Engine Room — First Time Setup
 #  Double-click this file to install what's needed, then build and
 #  install the app. Only needs to be run once on a new machine.
 # ═══════════════════════════════════════════════════════════════
@@ -10,7 +10,7 @@ PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo ""
 echo "═══════════════════════════════════════════════════════════"
-echo "  Pythonflow — First Time Setup"
+echo "  Mac Engine Room — First Time Setup"
 echo "═══════════════════════════════════════════════════════════"
 echo ""
 
@@ -41,7 +41,7 @@ echo "  ✓ All packages installed"
 echo ""
 
 # ── 3. Build, install and launch the app ─────────────────────
-echo "→ Building Pythonflow.app..."
+echo "→ Building Mac Engine Room.app..."
 echo ""
 if ! "$PROJECT_ROOT/scripts/install.sh"; then
     echo "  ✗ Build failed — check output above"
@@ -54,11 +54,11 @@ fi
 # ── Done ──────────────────────────────────────────────────────
 echo ""
 echo "═══════════════════════════════════════════════════════════"
-echo "  ✓ Setup complete! Pythonflow is running in the menu bar."
+echo "  ✓ Setup complete! Mac Engine Room is running in the menu bar."
 echo ""
 echo "  It opens at login and keeps itself up to date; you can"
 echo "  turn either off in its Settings."
-echo "  To rebuild your own changes: double-click 'Build Pythonflow.command' in scripts"
+echo "  To rebuild your own changes: double-click 'Build Mac Engine Room.command' in scripts"
 echo "═══════════════════════════════════════════════════════════"
 echo ""
 

@@ -1,6 +1,6 @@
-"""Where Pythonflow runs from, relaunching it, and opening it at login.
+"""Where Mac Engine Room runs from, relaunching it, and opening it at login.
 
-Pythonflow has to run from an Applications folder. Opened straight from the
+Mac Engine Room has to run from an Applications folder. Opened straight from the
 downloaded disk image or the Downloads folder, macOS runs a temporary hidden copy
 ("app translocation"): a login item would point at that copy, and the app can't
 replace itself with an update. On launch from anywhere else, it offers to move.
@@ -17,7 +17,7 @@ from pathlib import Path
 
 log = logging.getLogger("pythonflow")
 
-REPOSITORY = "DigitalN/pythonflow"
+REPOSITORY = "DigitalN/mac-engine-room"
 RELEASES_URL = f"https://github.com/{REPOSITORY}/releases"
 # Passed when relaunching into an update, so the dashboard doesn't pop up on its own.
 BACKGROUND_ARGUMENT = "--background"
@@ -32,7 +32,7 @@ _LAUNCHED_AS_LOGIN_ITEM = int.from_bytes(b"lgit", "big")  # keyAELaunchedAsLogIn
 
 
 def bundle_path():
-    """The running Pythonflow.app, or None when running from source."""
+    """The running app bundle, or None when running from source."""
     if not getattr(sys, "frozen", False):
         return None
     from Foundation import NSBundle
@@ -75,8 +75,8 @@ def offer_to_move(source):
 
     activate_app()
     alert = AppKit.NSAlert.alloc().init()
-    alert.setMessageText_("Move Pythonflow to your Applications folder?")
-    alert.setInformativeText_("Pythonflow needs to be in Applications to open at login and keep itself up to date.")
+    alert.setMessageText_("Move Mac Engine Room to your Applications folder?")
+    alert.setInformativeText_("Mac Engine Room needs to be in Applications to open at login and keep itself up to date.")
     alert.addButtonWithTitle_("Move to Applications")
     alert.addButtonWithTitle_("Not Now")
     if alert.runModal() != AppKit.NSAlertFirstButtonReturn:
@@ -94,33 +94,35 @@ def offer_to_move(source):
                     raise OSError(str(error))
             subprocess.run(["/usr/bin/ditto", str(source), str(destination)], check=True, capture_output=True)
         except (OSError, subprocess.CalledProcessError) as e:
-            log.warning("Couldn't move Pythonflow to %s: %s", folder, e)
+            log.warning("Couldn't move Mac Engine Room to %s: %s", folder, e)
             continue
         # The user already chose to open this download; don't make them approve the copy again.
         subprocess.run(["/usr/bin/xattr", "-dr", "com.apple.quarantine", str(destination)], capture_output=True)
-        log.info("Moved Pythonflow to %s; relaunching", destination)
+        log.info("Moved Mac Engine Room to %s; relaunching", destination)
         relaunch(destination)
         return True
 
     failure = AppKit.NSAlert.alloc().init()
-    failure.setMessageText_("Pythonflow couldn't move itself")
-    failure.setInformativeText_("Quit Pythonflow, drag it into your Applications folder in Finder, then open it from there.")
+    failure.setMessageText_("Mac Engine Room couldn't move itself")
+    failure.setInformativeText_("Quit Mac Engine Room, drag it into your Applications folder in Finder, then open it from there.")
     failure.runModal()
     return False
 
 
-def relaunch(app, background=False):
-    """Opens `app` once this process has exited. The caller quits right after.
+def relaunch(app, background=False, arguments=()):
+    """Opens `app` once this process has exited, passing it `arguments`. The caller
+    quits right after.
 
     Waiting for the exit matters: until then this copy holds the single-instance
     lock, and the new one would quit straight away.
     """
+    app_arguments = [BACKGROUND_ARGUMENT, *arguments] if background else list(arguments)
     arguments = ["-g"] if background else []
     if os.environ.get("PYTHONFLOW_DATA_DIR"):  # keep a test copy on its test folder
         arguments += ["--env", f"PYTHONFLOW_DATA_DIR={os.environ['PYTHONFLOW_DATA_DIR']}"]
     arguments.append(str(app))
-    if background:
-        arguments += ["--args", BACKGROUND_ARGUMENT]
+    if app_arguments:
+        arguments += ["--args", *app_arguments]
     script = (
         'pid=$1; shift; tries=0\n'
         'while kill -0 "$pid" 2>/dev/null && [ $tries -lt 100 ]; do sleep 0.1; tries=$((tries + 1)); done\n'
@@ -175,6 +177,12 @@ class LoginItem:
             log.info("Open at login turned %s", "on" if on else "off")
         else:
             log.warning("Couldn't turn open at login %s: %s", "on" if on else "off", error)
+
+    def repoint(self):
+        """After an old copy was replaced, registers the login item again from here."""
+        if self.enabled:
+            self._service.unregisterAndReturnError_(None)
+            self.set_enabled(True)
 
     def turn_on_by_default(self):
         """Open at login starts out on. It's only switched on once, so turning it off sticks."""

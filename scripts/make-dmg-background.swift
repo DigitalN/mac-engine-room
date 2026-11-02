@@ -1,6 +1,6 @@
 #!/usr/bin/env swift
 // Draws the background of the installer disk image window: an arrow from the app icon
-// to the Applications folder with "Drag Pythonflow into Applications" above it.
+// to the Applications folder with "Drag Mac Engine Room into Applications" above it.
 //
 //   swift scripts/make-dmg-background.swift <output.tiff>
 //
@@ -72,7 +72,7 @@ func render(scale: CGFloat) -> NSBitmapImageRep {
     }
 
     drawText(
-        "Drag Pythonflow into Applications",
+        "Drag Mac Engine Room into Applications",
         font: .systemFont(ofSize: 21, weight: .semibold),
         color: color(0x1D1D1F),
         centeredAt: 38
@@ -171,7 +171,7 @@ func drawFirstLaunchNote() {
     bold[.foregroundColor] = color(0x1D1D1F)
 
     let text = NSMutableAttributedString(
-        string: "Opening Pythonflow for the first time?\n",
+        string: "Opening Mac Engine Room for the first time?\n",
         attributes: [
             .font: NSFont.systemFont(ofSize: 15, weight: .semibold),
             .foregroundColor: color(0x1D1D1F),

@@ -1,4 +1,4 @@
-"""Keeps Pythonflow up to date from its GitHub releases, with nothing to click.
+"""Keeps Mac Engine Room up to date from its GitHub releases, with nothing to click.
 
 Once a day, the first time the Mac wakes from sleep, it asks GitHub for the latest
 release. If that's newer, it downloads the release's disk image in the background,
@@ -154,13 +154,14 @@ def _detach_image(image):
 
 
 def copy_app_from_image(image, destination, bundle_id):
-    """Copies Pythonflow out of the disk image, then ejects it."""
+    """Copies the app out of the disk image, then ejects it. It's found by bundle
+    identifier, not name: until 1.2.7 the app was called Pythonflow."""
     mount = _attach(image)
     try:
         apps = [p for p in Path(mount).iterdir() if p.suffix == ".app" and not p.is_symlink()]
         app = next((p for p in apps if info_value(p, "CFBundleIdentifier") == bundle_id), None)
         if app is None:
-            raise UpdateError("The latest release's disk image doesn't contain Pythonflow.")
+            raise UpdateError("The latest release's disk image doesn't contain Mac Engine Room.")
         copied = _run(["/usr/bin/ditto", str(app), str(destination)])
         if copied.returncode != 0:
             raise UpdateError(f"ditto failed ({copied.returncode}).")
@@ -175,10 +176,10 @@ def verify(app, team, bundle_id):
                    "-R", signing_requirement(bundle_id, team), str(app)], text=True)
     if result.returncode != 0:
         log.warning("Rejected update: %s", result.stderr.strip())
-        raise UpdateError("The downloaded app was changed or isn't signed by the Pythonflow developer.")
+        raise UpdateError("The downloaded app was changed or isn't signed by the Mac Engine Room developer.")
     version = info_value(app, "CFBundleShortVersionString")
     if not version:
-        raise UpdateError("The latest release's disk image doesn't contain Pythonflow.")
+        raise UpdateError("The latest release's disk image doesn't contain Mac Engine Room.")
     return version
 
 
@@ -216,9 +217,9 @@ class Updater:
         if self._team is None:
             return "this copy isn't signed by a developer team, so updates can't be verified"
         if not in_applications_folder(self._app):
-            return "Pythonflow isn't in the Applications folder"
+            return "Mac Engine Room isn't in the Applications folder"
         if not (os.access(self._app, os.W_OK) and os.access(self._app.parent, os.W_OK)):
-            return f"Pythonflow can't replace itself in {self._app.parent}"
+            return f"Mac Engine Room can't replace itself in {self._app.parent}"
         return None
 
     def start(self):
@@ -284,7 +285,7 @@ class Updater:
                 self._set_status(IDLE)
                 log.info("Up to date at %s", self._current)
                 if user_initiated:
-                    AppHelper.callAfter(_alert, "Pythonflow is up to date",
+                    AppHelper.callAfter(_alert, "Mac Engine Room is up to date",
                                         f"You have the latest version, {self._current}.")
                 return
             version, url = release
@@ -381,7 +382,7 @@ class Updater:
         if not ok:
             self._set_status(IDLE)
             log.error("Couldn't install %s: %s", version, error)
-            _alert_failure("Pythonflow couldn't replace itself in the Applications folder.")
+            _alert_failure("Mac Engine Room couldn't replace itself in the Applications folder.")
             return
         log.info("Installed %s; relaunching", version)
         relaunch(self._app, background=True)
@@ -412,7 +413,7 @@ def _alert(title, message, buttons=()):
 def _alert_failure(reason):
     import AppKit
 
-    choice = _alert("Pythonflow couldn't update itself",
+    choice = _alert("Mac Engine Room couldn't update itself",
                     f"{reason} You can download the latest version from GitHub instead.",
                     ("Open Releases Page", "Cancel"))
     if choice == AppKit.NSAlertFirstButtonReturn:
