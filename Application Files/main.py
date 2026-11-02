@@ -11,6 +11,7 @@ request is the daily update check (updater.py). All data stays in
 
 import ctypes
 import fcntl
+import json
 import logging
 import os
 import signal
@@ -49,10 +50,13 @@ BACKGROUND_INTERVAL = 2.5  # seconds, menu bar only
 DASHBOARD_IDLE_AFTER = 3.0  # seconds without a poll from the page before dropping back
 LIVE_BUFFER_POINTS = 900  # 15 minutes at the dashboard interval
 THERMAL_FIELDS = ["t", "cpu", "gpu", "memory", "ssd", "ambient"]
-# The dashboard opens as tall as its first page (Thermals), or the screen, whichever is
+FAN_PAGES = ("dashboard", "thermals")  # the page's tabs that show the fans
+# The dashboard opens as tall as its first page (Dashboard), or the screen, whichever is
 # smaller. The page then reports its exact size (Api.set_content_size); this just avoids a jump.
 WINDOW_WIDTH = 1060
-FIRST_PAGE_HEIGHT = 664
+FIRST_PAGE_HEIGHT = 411
+# A frame size, title bar included. Lower than the Dashboard, so it never has empty space under it.
+MIN_WINDOW_SIZE = (860, 400)
 # System Settings → Battery → Charging, where macOS's charge limit (80–100%) is set.
 # "charging" is that sheet's anchor in the Battery pane; "batteryhealth" opens Battery Health.
 CHARGING_SETTINGS_URL = "x-apple.systempreferences:com.apple.Battery-Settings.extension?charging"
@@ -112,6 +116,12 @@ def _set_thread_qos(qos_class):
         log.warning("Couldn't set thread QoS %#x (error %d)", qos_class, err)
 
 
+def _fans_qos(holding):
+    """Fan control's thread: on the efficiency cores while the fans are with macOS, utility
+    while it holds them, so its check-ins reach the helper even on a busy Mac."""
+    _set_thread_qos(QOS_CLASS_UTILITY if holding else QOS_CLASS_BACKGROUND)
+
+
 class LiveState:
     """Latest power and thermals samples plus a ring buffer of chart points for each, shared
     with the page."""
@@ -151,35 +161,42 @@ class LiveState:
 
 class Sampler(threading.Thread):
     """Reads power every tick, and in the same tick the thermals parts `thermal_parts()`
-    names (see EngineRoomApp._thermal_parts)."""
+    names (see EngineRoomApp._thermal_parts). `fans_running`: a fan profile is in charge, so
+    the curve needs a reading every second; `fans_held`: it holds the fans."""
 
-    def __init__(self, reader, on_sample, thermals=None, thermal_parts=lambda: ()):
+    def __init__(self, reader, on_sample, thermals=None, thermal_parts=lambda: (),
+                 fans_running=lambda: False, fans_held=lambda: False):
         super().__init__(name="pythonflow-sampler", daemon=True)
         self._reader = reader
         self._on_sample = on_sample
         self._thermals = thermals
         self._thermal_parts = thermal_parts
+        self._fans_running = fans_running
+        self._fans_held = fans_held
         self._last_poll = float("-inf")
-        self._last_thermals_poll = float("-inf")
+        self._last_fans_poll = float("-inf")
         self._wake = threading.Event()
 
+    def dashboard_watched(self):
+        return time.monotonic() - self._last_poll < DASHBOARD_IDLE_AFTER
+
     def interval(self):
-        watched = time.monotonic() - self._last_poll < DASHBOARD_IDLE_AFTER
-        return DASHBOARD_INTERVAL if watched else BACKGROUND_INTERVAL
+        fast = self.dashboard_watched() or self._fans_running()
+        return DASHBOARD_INTERVAL if fast else BACKGROUND_INTERVAL
 
-    def thermals_watched(self):
-        return time.monotonic() - self._last_thermals_poll < DASHBOARD_IDLE_AFTER
+    def fans_watched(self):
+        return time.monotonic() - self._last_fans_poll < DASHBOARD_IDLE_AFTER
 
-    def dashboard_polled(self, thermals=False):
+    def dashboard_polled(self, fans=False):
         """The page only polls while it is visible (not hidden, minimised or covered),
-        so its polls are what keep the faster rate on. `thermals`: the Thermals page is
-        the one showing."""
+        so its polls are what keep the faster rate on. `fans`: the page showing has the
+        fans on it (the Dashboard or Thermals)."""
         was_background = self.interval() == BACKGROUND_INTERVAL
-        newly_thermals = thermals and not self.thermals_watched()
+        newly_fans = fans and not self.fans_watched()
         self._last_poll = time.monotonic()
-        if thermals:
-            self._last_thermals_poll = self._last_poll
-        if was_background or newly_thermals:
+        if fans:
+            self._last_fans_poll = self._last_poll
+        if was_background or newly_fans:
             self._wake.set()  # sample now rather than at the end of a wait
 
     def wake(self):
@@ -192,9 +209,11 @@ class Sampler(threading.Thread):
         self._on_sample(sample, self._thermals.read(parts) if parts else None)
 
     def qos(self):
-        """Menu bar only: background QoS, on the efficiency cores. While the dashboard is
-        watched, utility, so a busy Mac can't stall the chart for seconds."""
-        return QOS_CLASS_BACKGROUND if self.interval() == BACKGROUND_INTERVAL else QOS_CLASS_UTILITY
+        """Background QoS, on the efficiency cores, even with a fan profile watching the
+        temperatures. While the dashboard is watched or the fans are held, utility, so a busy
+        Mac can't stall the chart or the fans for seconds."""
+        busy = self.dashboard_watched() or self._fans_held()
+        return QOS_CLASS_UTILITY if busy else QOS_CLASS_BACKGROUND
 
     def next_due(self, due):
         """One interval after the last sample was due, not after it ran: waits end up to
@@ -232,12 +251,19 @@ class Api:
         self._app = app
 
     def get_live(self, since_seq=0, page=None):
-        """`page` is the page showing; fans are read while it's "thermals"."""
-        self._app._sampler.dashboard_polled(thermals=page == "thermals")
+        """`page` is the page showing; fans are read while it's one with fans on it."""
+        self._app._sampler.dashboard_polled(fans=page in FAN_PAGES)
         live = self._app._live.since(int(since_seq or 0))
         # Settings' Check for Updates button follows a check through these polls.
         live["update"] = [self._app._updater.status, self._app._updater.version]
+        live["fan_control"] = self._app._fans.status
         return live
+
+    def open_fan_approval(self):
+        """Login Items & Extensions, where the user allows the fan helper."""
+        from PyObjCTools import AppHelper
+
+        AppHelper.callAfter(self._app._fans.open_login_items)
 
     def check_for_updates(self):
         """Settings' button does what "Check for Updates…" in the menu does."""
@@ -301,9 +327,12 @@ class Api:
         AppHelper.callAfter(NSWorkspace.sharedWorkspace().openURL_, NSURL.URLWithString_(CHARGING_SETTINGS_URL))
 
     def app_info(self):
+        import fans
+
         return {"version": VERSION, "log_path": str(LOG_PATH),
                 "history_recording": self._app._settings.get()["record_history"],
-                "update_unavailable_reason": self._app._updater.unavailable_reason}
+                "update_unavailable_reason": self._app._updater.unavailable_reason,
+                "fan_profiles": fans.page_profiles(), "fan_tuning_limits": fans.TUNING_LIMITS}
 
     def set_content_size(self, width, height, fit=False):
         """The page reports the size it needs; the window can't be made bigger.
@@ -320,6 +349,7 @@ class Api:
 class EngineRoomApp:
     def __init__(self):
         import launch
+        from fans import FanControl, Helper
         from history import ChargingRecorder, HistoryStore
         from power import PowerReader
         from settings import Settings
@@ -332,8 +362,12 @@ class EngineRoomApp:
         self._reader = PowerReader()
         prefs = self._settings.get()
         self._recorder = ChargingRecorder(self._store, enabled=prefs["record_history"])
-        self._sampler = Sampler(self._reader, self._on_sample, ThermalsReader(), self._thermal_parts)
         self._app_path = launch.bundle_path()
+        thermals = ThermalsReader()
+        self._fans = FanControl(self._settings, Helper(self._app_path, _own_bundle_id() or "com.pythonflow.monitor"),
+                                thermals.fan_limits, set_qos=_fans_qos)
+        self._sampler = Sampler(self._reader, self._on_sample, thermals, self._thermal_parts,
+                                fans_running=lambda: self._fans.running, fans_held=lambda: self._fans.holding)
         self._login_item = launch.LoginItem(self._app_path, DATA_DIR)
         self._updater = Updater(
             self._app_path, VERSION, settings=self._settings, data_dir=DATA_DIR,
@@ -346,6 +380,7 @@ class EngineRoomApp:
         self._dashboard_shown = False
         self._main_qos = None
         self._quitting = False
+        self._wake_observer = None
         self._settings.on_change(self._on_settings_changed)
 
     # ── sampling (runs on the sampler thread) ──
@@ -355,16 +390,20 @@ class EngineRoomApp:
 
         self._live.push(sample, thermals)
         self._recorder.feed(sample)
+        self._fans.feed(thermals, sample)
         if self._statusbar is not None:
             # One trip to the main thread per sample: each one wakes it.
             AppHelper.callAfter(self._show_sample, sample, thermals, self._settings.get())
 
     def _thermal_parts(self):
         """Temperatures every sample, like power, so the chart has no gaps (about 0.9 ms of
-        CPU per sample on an M1 Pro). Fans only while the Thermals page or the menu shows them."""
+        CPU per sample on an M1 Pro). Fans only while the page or the menu shows them, or fan
+        control holds them, and the safety override's sensors only while it holds them."""
         import thermals
 
-        if self._sampler.thermals_watched() or (self._statusbar is not None and self._statusbar.menu_open):
+        if self._fans.holding:
+            return thermals.ALL_PARTS | {thermals.SAFETY}
+        if self._sampler.fans_watched() or (self._statusbar is not None and self._statusbar.menu_open):
             return thermals.ALL_PARTS
         return thermals.TEMPERATURES
 
@@ -377,6 +416,7 @@ class EngineRoomApp:
         from PyObjCTools import AppHelper
 
         self._recorder.enabled = values["record_history"]
+        self._fans.nudge()  # a profile chosen, or Manual's slider moved: act on it now
         AppHelper.callAfter(self._apply_theme, values["theme"])
 
     # ── window lifecycle (main thread) ──
@@ -469,8 +509,16 @@ class EngineRoomApp:
         self._update_main_qos()
         AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyRegular)
         self._apply_theme(self._settings.get()["theme"])
+        self._show_tab("dashboard")
         self._window.show()
         self._fit_window(grow=True)
+
+    def _show_tab(self, tab):
+        """Switch the page to a tab, e.g. the Dashboard as the window opens. WebKit is asked
+        directly: on the main thread, pywebview's evaluate_js would wait for itself."""
+        view = self._window.native.contentView() if self._window and self._window.native else None
+        if view is not None and view.respondsToSelector_("evaluateJavaScript:completionHandler:"):
+            view.evaluateJavaScript_completionHandler_(f"showTab({json.dumps(tab)})", None)
 
     def _finish_launching(self, show):
         """Runs as the app finishes launching, while macOS's "open application" event is
@@ -556,6 +604,7 @@ class EngineRoomApp:
 
         def applicationShouldTerminate_(self, sender):
             app._quitting = True
+            app._fans.stop()  # the fans go back to macOS before the app goes
             return AppKit.NSTerminateNow
 
         def reopen(self, sender, has_visible_windows):
@@ -621,16 +670,23 @@ class EngineRoomApp:
         self._html = (_app_files_dir() / "index.html").read_text(encoding="utf-8")
         self._window = webview.create_window(
             APP_NAME, html=self._html, js_api=Api(self), width=WINDOW_WIDTH, height=self._initial_height(),
-            min_size=(860, 600), hidden=True, background_color=self._background_color(),
+            min_size=MIN_WINDOW_SIZE, hidden=True, background_color=self._background_color(),
         )
         self._window.events.closing += self._on_closing
         # Non-locking pywebview events fire on a worker thread; AppKit needs the main one.
         self._window.events.loaded += lambda: AppHelper.callAfter(
             self._apply_theme, self._settings.get()["theme"])
 
-        self._statusbar = StatusBar(on_open=self.show_dashboard, on_check_updates=self._updater.check_now,
-                                    on_quit=self.quit, on_menu_open=self._on_menu_open)
+        self._statusbar = StatusBar(
+            on_open=self.show_dashboard, on_check_updates=self._updater.check_now, on_quit=self.quit,
+            on_menu_open=self._on_menu_open, fan_status=lambda: self._fans.status,
+            on_profile=lambda pid: self._settings.update({"fan_profile": pid}),
+            on_manual_level=lambda level: self._settings.update({"fan_manual_level": level}),
+            on_allow_fans=self._fans.open_login_items)
         self._sampler.start()
+        self._fans.start()
+        self._wake_observer = AppKit.NSWorkspace.sharedWorkspace().notificationCenter().addObserverForName_object_queue_usingBlock_(
+            AppKit.NSWorkspaceDidWakeNotification, None, None, lambda notification: self._fans.did_wake())
         threading.Thread(target=self._import_legacy_history, name="legacy-import", daemon=True).start()
         self._login_item.turn_on_by_default()
         self._updater.start()

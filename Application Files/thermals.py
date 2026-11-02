@@ -51,9 +51,14 @@ CORE_KEYS = {
 FALLBACK_PREFIXES = {"cpu": ("Tp", "Te"), "gpu": ("Tg",)}
 # Memory, SSD and ambient: the hottest key in the group. Ta… isn't ambient (several read 0).
 GROUP_PREFIXES = {"memory": ("Tm",), "ssd": ("TH",), "ambient": ("TA",)}
+# For fan control's safety override only, never shown: the chip's hotspot and cluster keys
+# (TCDX, TCMb, TCMz, TC10…), judged by their second-highest reading, and the case.
+HOTSPOT_PREFIXES = ("TC",)
+CHASSIS_KEY = "TS0P"
 
 TEMPERATURES = ("cpu", "gpu", "memory", "ssd", "ambient")
 ALL_PARTS = frozenset(TEMPERATURES + ("fans",))
+SAFETY = "safety"  # the hotspots and the case, read while fan control holds the fans
 MIN_C, MAX_C = 1.0, 130.0
 MAX_RPM = 20000
 SMC_RETRY_SECONDS = 30.0
@@ -96,6 +101,8 @@ def sensor_keys(names, chip, fan_count=0):
     keys["fans"] = tuple(
         (f"F{i}Ac", f"F{i}Mn", f"F{i}Mx", f"F{i}md" if f"F{i}md" in names else f"F{i}Md")
         for i in range(fan_count))
+    keys["hotspots"] = tuple(sorted(n for n in names if n.startswith(HOTSPOT_PREFIXES)))
+    keys["chassis"] = (CHASSIS_KEY,) if CHASSIS_KEY in names else ()
     return keys
 
 
@@ -131,6 +138,10 @@ def normalize(readings, keys, now=None):
         fans.append({"rpm": _rpm(readings[actual]), "min": _rpm(readings.get(minimum)),
                      "max": _rpm(readings.get(maximum)), "manual": None if md is None else md == 1})
     sample["fans"] = fans
+    hotspots = sorted((readings[k] for k in keys.get("hotspots", ()) if _temperature(readings.get(k))), reverse=True)
+    sample["hotspot"] = round(hotspots[1], 1) if len(hotspots) > 1 else None  # one bad sensor can't decide
+    chassis = [readings[k] for k in keys.get("chassis", ()) if _temperature(readings.get(k))]
+    sample["chassis"] = round(chassis[0], 1) if chassis else None
     return sample
 
 
@@ -165,9 +176,16 @@ class ThermalsReader:
                  ", ".join(f"{g} {len(keys[g])}" for g in TEMPERATURES), fan_count, "" if fan_count == 1 else "s",
                  f"; not in the core key table, so by prefix: {', '.join(by_prefix)}" if by_prefix else "")
 
+    def fan_limits(self):
+        """Each fan's (minimum, maximum) rpm, or [] if there are no fans, they're unknown, or
+        nothing has been read yet. Safe from any thread: it only looks at what read() found."""
+        keys, found = self._keys, self._fan_limits
+        limits = [(_rpm(found.get(lo)), _rpm(found.get(hi))) for _, lo, hi, _ in (keys or {}).get("fans", ())]
+        return limits if limits and all(lo and hi and hi > lo for lo, hi in limits) else []
+
     def read(self, parts=ALL_PARTS):
-        """A sample with the parts asked for ("cpu", "gpu", …, "fans"); the rest are None or
-        empty. None if the SMC can't be read."""
+        """A sample with the parts asked for ("cpu", "gpu", …, "fans", "safety"); the rest are
+        None or empty. None if the SMC can't be read."""
         if self._smc is None and time.monotonic() >= self._retry_at:
             self._connect()
         if self._smc is None:
@@ -176,6 +194,8 @@ class ThermalsReader:
             wanted = [k for g in TEMPERATURES if g in parts for k in self._keys[g]]
             fans = self._keys["fans"] if "fans" in parts else ()
             wanted += [k for actual, _, _, mode in fans for k in (actual, mode)]
+            safety = {g: self._keys[g] if SAFETY in parts else () for g in ("hotspots", "chassis")}
+            wanted += [k for g in safety.values() for k in g]
             try:
                 readings = self._smc.read_all(wanted)
             except OSError as e:
@@ -186,6 +206,6 @@ class ThermalsReader:
                 return None
             readings.update(self._fan_limits)
             keys = {g: self._keys[g] if g in parts else () for g in TEMPERATURES}
-            sample = normalize(readings, {**keys, "fans": fans})
+            sample = normalize(readings, {**keys, "fans": fans, **safety})
             sample["available"] = list(self.available)
             return sample

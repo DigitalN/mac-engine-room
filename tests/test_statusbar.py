@@ -203,3 +203,33 @@ def test_menu_bar_falls_back_to_system_on_a_mac_with_no_screen_sensor():
     assert menu_bar_value(s, {"menu_bar_metric": "screen"}) == 27.0
     # A missed reading on a Mac that has the sensor shows as missing, not as another number.
     assert menu_bar_value({**s, "has_screen_power": True}, {"menu_bar_metric": "screen"}) is None
+
+
+def test_fan_profiles_show_with_fans_and_follow_the_setting(monkeypatch):
+    import AppKit
+
+    _fake_status_item(monkeypatch)
+    status = {"profile": "balanced", "state": "watching", "start": 55}
+    chosen = []
+    bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None,
+                    fan_status=lambda: status, on_profile=chosen.append)
+    on = lambda: [b.title() for b in bar._profile_buttons if b.state() == AppKit.NSControlStateValueOn]
+
+    bar.update({}, _thermals(), {"fan_profile": "balanced"})
+    bar._target.menuNeedsUpdate_(bar._menu)
+    assert not bar._profiles_item.isHidden() and on() == ["Balanced"]
+    assert bar._manual_item.isHidden() and bar._allow_fans_item.isHidden()
+
+    bar._target.chooseProfile_(bar._profile_buttons[5])  # Manual
+    assert chosen == ["manual"] and on() == ["Manual"] and not bar._manual_item.isHidden()
+    assert bar._manual_label.stringValue() == "1,499 rpm"  # the slider at its left: each fan's minimum
+
+    status.update(state="approval")
+    bar.update({}, _thermals(), {"fan_profile": "manual", "fan_manual_level": 1.0})
+    bar._target.menuNeedsUpdate_(bar._menu)
+    assert not bar._allow_fans_item.isHidden()
+    assert bar._manual_label.stringValue() == "4,296 and 4,744 rpm"
+
+    status.update(state="nofans")
+    bar._target.menuNeedsUpdate_(bar._menu)
+    assert bar._profiles_item.isHidden() and bar._manual_item.isHidden() and bar._allow_fans_item.isHidden()

@@ -19,6 +19,17 @@ which of them is the screen. The first temperature reading after launch (or afte
 reconnect) logs `Temperature sensors on <chip>: cpu N, gpu N, …; N fans`, plus the groups
 found by prefix when the chip isn't in the core key table.
 
+Fan control logs `Fan profile: <name>` when one is chosen (and at launch), `Asked macOS to
+allow the fan helper`, `Fan control is waiting for the helper to be allowed in Login Items`,
+`Fans held by <profile> at <rpm> rpm (cores N°)`, `Fans back to macOS: <why>`,
+`Safety override: fans at full speed (<why>)` and `Safety override over`, `Another app is
+controlling the fans; leaving them alone`, and `Fan control unavailable: …` or `Fan control
+failed: …`. The helper logs to the unified log, not app.log:
+`/usr/bin/log show --last 1h --predicate 'subsystem == "com.pythonflow.monitor"'` (zsh's own
+`log` command shadows it) shows `Holding the fans at [rpm, rpm] rpm` and `Fans back with
+macOS (<why>)`, where why is the app asking, it disconnecting, no word for 10 seconds, or
+sleep. `/var/run/<bundle id>.fans.holding` exists while the helper holds the fans.
+
 A blank dashboard has been WebKit's graphics helper hanging. At login it got stuck
 setting up audio, and macOS doesn't let WebKit kill its own helpers. The app logs
 `WebKit's graphics process stopped responding; ending it` when it does that itself,
@@ -52,7 +63,7 @@ To reproduce without touching the user's data, run with
   a wake, signature check, swap and relaunch. See *How updates work* in DEVELOPMENT.md.
 - **Tools**: Thermals and Power. Each is its own module for its readings; the menu
   (`statusbar.py`) and the page (`index.html`) have a section for each, and Settings a
-  group for each. No plugin system beyond that.
+  group for each, and the Dashboard a row of tiles for each. No plugin system beyond that.
 - **Power sensors**: `Application Files/power.py`. Reads IOKit `AppleSmartBattery`
   (ctypes + PyObjC bridging) and the SMC (ctypes `IOConnectCallStructMethod`), plus
   the charge limit from powerd's `/Library/Preferences/com.apple.powerd.charging.plist`.
@@ -64,10 +75,20 @@ To reproduce without touching the user's data, run with
   fans' speed, limits and mode. Keys are found once per SMC connection, and only the
   groups asked for are read. `sensor_keys()` and `normalize()` are pure and unit-tested
   with a captured M1 Pro key map.
+- **Fan control**: `Application Files/fans.py`. The profiles (ThermalForge's numbers), the
+  curve (`Curve`) and the safety override (`Safety`), both pure and unit-tested, and
+  `FanControl`, a thread that runs the chosen profile on each sample and talks to the helper
+  (`Helper`: its `SMAppService` daemon registration and a socket connection).
+- **Fan helper**: `Fan Helper/`. The only code that runs as root: Swift, launched by launchd
+  on the first connection to `/var/run/<bundle id>.fans.sock` (its plist,
+  `com.pythonflow.monitor.fans.plist`, goes in `Contents/Library/LaunchDaemons`). Four
+  commands (`set`, `auto`, `checkin`, `status`), only from a caller signed with the app's
+  identifier by the helper's own team, and the safety nets: the fans go back to macOS when
+  the app disconnects, after 10 s without a word, and before sleep.
 - **Menu bar**: `Application Files/statusbar.py`. Native `NSStatusItem` and `NSMenu`
-  (PyObjC). The title shows watts or a temperature; the menu's Thermals tiles and Power
-  rows are custom views (NSTextField labels, NSBox tiles, SF Symbols), then the actions.
-  Main thread only.
+  (PyObjC). The title shows watts or a temperature; the menu's fan profile buttons, Manual
+  slider, Thermals tiles and Power rows are custom views (NSButtons, NSSlider, NSTextField
+  labels, NSBox tiles, SF Symbols), then the actions. Main thread only.
 - **History**: `Application Files/history.py`. SQLite
   (`~/Library/Application Support/Mac Engine Room/history.db`), the `ChargingRecorder`
   state machine, CSV export, and the one-time read-only import from the original
@@ -76,11 +97,15 @@ To reproduce without touching the user's data, run with
   save. Open at login isn't in it: it lives in ServiceManagement, and `Api` merges it
   in for the page.
 - **Frontend**: `Application Files/index.html`. A single page in vanilla JS with a
-  hand-rolled canvas chart and no external resources. A **Thermals | Power** switcher
-  (Power always opens on Now; History is beside it) and a shared Settings page.
+  hand-rolled canvas chart and no external resources. A **Dashboard | Thermals | Power**
+  switcher and a shared Settings page. The window opens on the Dashboard, and **Open
+  Dashboard** in the menu switches to it (`EngineRoomApp._show_tab`); Power always opens on
+  Now, with History beside it.
   Temperatures arrive in °C and are shown in the unit chosen in Settings.
 - **Build**: `scripts/build.sh` runs PyInstaller with `Application Files/MacEngineRoom.spec`
-  in `~/Library/Caches/MacEngineRoom-build` and signs the app. `scripts/install.sh` installs
+  in `~/Library/Caches/MacEngineRoom-build`, compiles the fan helper into
+  `Contents/MacOS/Mac Engine Room Fans` with `swiftc` (no compiler, no fan control), and
+  signs the app. `scripts/install.sh` installs
   it in `/Applications`; `scripts/package.sh` makes the release disk image. The
   `.command` files in `scripts/` are double-click wrappers around `install.sh`.
 
@@ -106,19 +131,23 @@ To reproduce without touching the user's data, run with
 - **Nothing on the dashboard may animate continuously**, and no CSS transition may
   outlast the 1 s refresh. The original flowing pipes and eased bars kept WebKit
   repainting every display frame: about 28% of a core, against 3% now (measured).
-- The sampler runs every 1 s while the page is polling (it only polls when visible)
-  and every 2.5 s otherwise. These are fixed, not a setting.
+- The sampler runs every 1 s while the page is polling (it only polls when visible) or a
+  fan profile is in charge (the curve runs once a second), and every 2.5 s otherwise.
+  These are fixed, not a setting.
 - **Temperatures are read every sample, like power**, so the chart has no gaps when the
   page is covered or another tab shows: about 0.9 ms of CPU per sample (measured on an
   M1 Pro), 0.03% of a core at the 2.5 s rate. **Fans only while something shows them**:
-  the Thermals page (its polls say which page is showing) or the open menu (which wakes
-  the sampler as it opens).
+  the Dashboard or Thermals page (its polls say which page is showing), the open menu
+  (which wakes the sampler as it opens), or fan control holding them. The safety
+  override's hotspot and case sensors only while fan control holds the fans.
 - **Idle work stays on the efficiency cores.** With only the menu bar item showing,
   the sampler and the main thread run at background QoS, the only one Apple silicon
   keeps off the performance cores. The dashboard raises the sampler to utility, and the
   dashboard or the menu raises the main thread to user-interactive: with every core
   busy, a background thread waited up to 1.6 s for a turn (measured). Samples are
-  scheduled from when they were due, since background waits end ~90 ms late.
+  scheduled from when they were due, since background waits end ~90 ms late. A fan profile
+  watching the temperatures stays at background QoS; holding the fans raises the sampler
+  and the fan thread to utility, so check-ins reach the helper on a busy Mac.
 - **Only pass real changes to AppKit and WebKit.** A new menu bar title costs about
   0.9 ms of redraw, and setting the same one again still costs 0.2 ms (measured). The
   menu's rows and tiles are only filled in while it's open, through `_put()`, which
@@ -135,7 +164,20 @@ To reproduce without touching the user's data, run with
   `codesign`, so `scripts/build.sh` builds in `~/Library/Caches` and runs `xattr -cr`
   before signing.
 - **Don't relaunch into an update while a charge is being recorded.** A session in
-  progress lives in memory until it ends, so quitting loses it.
+  progress lives in memory until it ends, so quitting loses it. A running fan profile
+  doesn't hold updates back: the fans go back to macOS at quit and the profile resumes.
+- **The fan helper stays small and Swift.** It's the only code that runs as root, and the
+  bundle it runs from is writable by the user, so it never runs anything from the bundle,
+  takes no command beyond the four, clamps every speed to the fan's own minimum and
+  maximum, never writes a target of 0 (in manual mode it stops the fan), and writes
+  nothing while another app has a fan in manual mode. Its sockets set `SO_NOSIGPIPE`.
+- **Mode keys read back late.** `F%dMd` written as root reads as the old mode for up to a
+  second (measured on the M1 Pro), so the helper only rewrites a mode after 2 s, and
+  macOS turns a handed-back 0 into 3 within about 20 s by itself.
+- **Ask `backgroundtaskmanagementd` as little as possible.** `SMAppService.status()` is
+  answered by it, and it took 8 s once while busy. Fan control asks while waiting for the
+  user's approval, and after that only when the helper can't be reached. A daemon that
+  was never registered reports *not found*, not *not registered*.
 - WebKit pauses rendering in a window that's covered or hidden, so `ResizeObserver` and
   `requestAnimationFrame` don't run there. A test that drives the page while other
   windows cover it sees no size reports; that's not a bug.
@@ -173,6 +215,13 @@ To reproduce without touching the user's data, run with
   may be in the middle of something.
 - After testing the updater, delete the test copy, its data folder and the test disk
   images, and make sure no test copy is left in Login Items.
+- **Fan control is tested with a test copy too** (see *Testing fan control* in
+  DEVELOPMENT.md): its own identifier, helper label and socket, so it can't touch the
+  maintainer's helper. Allowing each new helper in Login Items is the maintainer's click
+  and password, so ask first, and say the fans will be audible. Afterwards, unregister its
+  helper from inside its own bundle before deleting it, or launchd keeps a dead job.
+- The settings, the profile tuning and the curve can be tested without the helper: the
+  pure parts of `fans.py` and `FanControl` with a stand-in helper (`tests/test_fans.py`).
 - To test a login launch without logging out, open the app with
   `NSWorkspace.openApplicationAtURL_configuration_completionHandler_` and a configuration
   whose `appleEvent` is `oapp` with `keyAEPropData` ('prdt') set to the enum 'lgit', which
@@ -191,6 +240,10 @@ To reproduce without touching the user's data, run with
 
 Don't undo these without asking:
 
+- The window opens on the Dashboard, a short page with a row of tiles per tool, rather
+  than cutting Power's Battery, Adapter and System cards to make Now shorter.
+- Fan control starts on macOS default, and the helper is only registered the first time
+  another profile is chosen. The choice is remembered across relaunches and logins.
 - Temperatures are in Celsius unless Fahrenheit is chosen in Settings > Thermals. The app
   doesn't follow macOS's unit: Americans who read Celsius would have no way to get it.
 - Temperatures are read all the time, like power, so the Thermals chart has no gaps.

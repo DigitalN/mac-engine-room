@@ -8,7 +8,8 @@ and the rules the code follows are in [CLAUDE.md](../CLAUDE.md).
 
 You need Python 3 from [python.org](https://www.python.org/downloads/) and the pinned
 packages in `Application Files/requirements.txt` (`scripts/First Time Setup.command`
-installs them). Then:
+installs them). Fan control also needs a Swift compiler, from Xcode or its Command Line
+Tools (`xcode-select --install`); without one the build has no fan control. Then:
 
 ```bash
 scripts/install.sh
@@ -70,6 +71,19 @@ doesn't release anything: the download links only change when a release is publi
   codesign --verify --deep --strict "$M/Mac Engine Room.app" && codesign -dvv "$M/Mac Engine Room.app" 2>&1 | grep TeamIdentifier
   hdiutil detach "$M"
   ```
+- [ ] The fan helper is inside, signed by the same team with the hardened runtime, next to
+  its launchd job (before the `hdiutil detach` above):
+  ```bash
+  codesign -dvv "$M/Mac Engine Room.app/Contents/MacOS/Mac Engine Room Fans" 2>&1 | grep -E "^Identifier|flags|TeamIdentifier"
+  plutil -p "$M/Mac Engine Room.app/Contents/Library/LaunchDaemons/com.pythonflow.monitor.fans.plist" | grep Label
+  ```
+
+### Test fan control, if fans.py, the helper or signing changed
+
+- [ ] A test copy holds the fans, and hands them back on quit, when killed, and when it
+  stops responding (see *Testing fan control* below).
+- [ ] After the release, the maintainer's own copy still runs its profile after updating,
+  without being asked to allow the helper again.
 
 ### Test updating, if the updater, packaging or signing changed
 
@@ -136,6 +150,67 @@ certificate from the same Apple account before the old one expires.
 - **Off** for copies that run from source, aren't team-signed, aren't in an Applications
   folder, or can't replace themselves. Settings says why, and **Check for Updates…**
   (**Open Releases Page** in Settings) opens the releases page instead.
+
+## How fan control works
+
+`Application Files/fans.py` and `Fan Helper/`:
+
+- **The curve runs in the app**, once a second, on the hottest CPU or GPU core, in
+  `FanControl`'s own thread. Setting a fan's speed needs root, so the app asks the helper.
+- **The helper** is a small Swift program in the app bundle
+  (`Contents/MacOS/Mac Engine Room Fans`). The app registers it with `SMAppService` the
+  first time a profile other than macOS default is chosen, and the user allows it once in
+  System Settings → General → Login Items & Extensions. launchd then starts it as root on
+  the first connection to `/var/run/com.pythonflow.monitor.fans.sock`, and it exits once
+  the fans are back with macOS and nobody is connected.
+- **Who may talk to it:** the socket is open to every user, so the helper checks each
+  caller's code signature: the app's bundle identifier, signed by the helper's own team.
+- **What it does:** `set` holds each fan at a speed (clamped to its range; the mode key
+  `F%dMd`, or `F%dmd` from M5, set to 1, then the target `F%dTg`), `auto` sets the modes
+  back to 0 and watches them for 10 seconds, `checkin` keeps the hold, and `status`
+  reports. The app keeps its connection open while it holds the fans: the helper hands
+  them back when it closes, after 10 seconds without a word, and before sleep.
+
+## Testing fan control
+
+Test with a copy that has its own bundle identifier, and its own helper label and socket,
+so it can't touch the installed app's helper. The app looks for
+`<bundle identifier>.fans.plist`, so a copy whose plist wasn't renamed has no fan control.
+
+1. Build, then make the test copy:
+   ```bash
+   APP=$(scripts/build.sh)
+   T="$HOME/Applications/Mac Engine Room Test.app"
+   ID=$(security find-identity -v -p codesigning | awk '/"Apple Development/ {print $2; exit}')
+   ditto "$APP" "$T"
+   /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.pythonflow.monitor.test" "$T/Contents/Info.plist"
+   P="$T/Contents/Library/LaunchDaemons"
+   mv "$P/com.pythonflow.monitor.fans.plist" "$P/com.pythonflow.monitor.test.fans.plist"
+   /usr/libexec/PlistBuddy -c "Set :Label com.pythonflow.monitor.test.fans" \
+     -c "Set :AssociatedBundleIdentifiers:0 com.pythonflow.monitor.test" \
+     -c "Set :Sockets:Listener:SockPathName /var/run/com.pythonflow.monitor.test.fans.sock" \
+     "$P/com.pythonflow.monitor.test.fans.plist"
+   codesign --force -s "$ID" -o runtime -i com.pythonflow.monitor.test.fans "$T/Contents/MacOS/Mac Engine Room Fans"
+   codesign --force -s "$ID" "$T"
+   ```
+2. Give it its own data folder, starting on a profile, and keep it out of Login Items:
+   ```bash
+   mkdir -p /tmp/pf-data && touch /tmp/pf-data/.open-at-login-default-applied
+   echo '{"open_dashboard_at_launch": false, "record_history": false, "fan_profile": "manual", "fan_manual_level": 0.1}' > /tmp/pf-data/settings.json
+   open -n --env PYTHONFLOW_DATA_DIR=/tmp/pf-data "$T"
+   ```
+   It registers its helper and logs that it's waiting; allow "Mac Engine Room Test" in Login
+   Items. `/tmp/pf-data/Logs/app.log` then shows `Fans held by Manual at …`, and
+   `python3 -c 'import power; s = power.SMC(); print(s.read("F0Md"), s.read("F0Tg"))'` in
+   `Application Files` shows mode 1 and the target.
+3. Quit it, `kill -9` it, and `kill -STOP` it: each time the fans go back to mode 0 (within
+   a second, or 10 seconds for the stopped app), and the helper's unified log says why.
+   After `kill -CONT` the app logs that it's taking the fans again.
+4. Clean up. The helper has to be unregistered by the app it belongs to, so put a small
+   tool that calls `SMAppService.daemon(plistName: "com.pythonflow.monitor.test.fans.plist").unregister()`
+   in the test copy's `Contents/MacOS`, sign it and the copy again, run it, then delete the
+   copy and `/tmp/pf-data`. `launchctl print system/com.pythonflow.monitor.test.fans` should
+   no longer find the job.
 
 ## Testing the updater
 
