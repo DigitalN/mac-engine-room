@@ -1,8 +1,9 @@
 # Mac Engine Room
 
-A macOS menu bar app that shows where your Mac's power goes: what the charger
-delivers, what the Mac uses, and what goes into or out of the battery. It also keeps
-a history of every charge.
+A macOS menu bar app with two tools. **Thermals** shows how hot your Mac's CPU, GPU,
+memory and SSD are, and how fast its fans spin. **Power** shows where its power goes:
+what the charger delivers, what the Mac uses, and what goes into or out of the battery,
+with a history of every charge.
 
 Formerly **Pythonflow**. Installed copies rename themselves when they update, and keep
 your history and settings.
@@ -17,11 +18,17 @@ macOS 27 and is no longer maintained.
 
 ## Features
 
-- **Menu bar wattage**: system, screen or chip power, or the charger's input while
-  charging. Click it for a quick summary.
+- **Menu bar reading**: the CPU's temperature, the hottest temperature, or system,
+  screen or chip power, or the charger's input while charging. Click it for a quick
+  summary of temperatures, fans and power.
+- **Temperatures** of the CPU and GPU (their hottest core), memory, SSD and ambient
+  air, with a live chart of the last 1, 5 or 15 minutes. In Celsius, or Fahrenheit if
+  you choose it in Settings.
+- **Fans**: each fan's speed, its range, and whether macOS is in control. Macs without
+  fans show temperatures only.
 - **Power flow** from charger to Mac to battery, with the charger's conversion loss and
   where the Mac's power goes.
-- **Live chart** of the last 1, 5 or 15 minutes.
+- **Live power chart** of the last 1, 5 or 15 minutes.
 - **Battery and charger details**: battery health, cycle count, temperature, voltage and
   current, and the charger's rating and negotiated voltage.
 - **Charging history**: each charge's levels, duration and power curve, exportable to CSV.
@@ -66,6 +73,8 @@ Tested on macOS 27.0 with Apple silicon. To build from source, see
 | **Screen** | Display backlight. On mini-LED screens it rises with bright content. Not shown on a Mac with no screen sensor. |
 | **Chip (CPU + GPU)** | The Apple silicon chip. Apple names the sensor after the heatpipe, but it measures the chip. |
 | **Time to full / remaining** | macOS's own estimate, rough above about 80%, where charging slows down. With a charge limit set, the time to the limit instead, since macOS's estimate counts to 100%. |
+| **CPU, GPU** | The hottest of the chip's per-core sensors. Not its hotspot sensors, which run up to 10° hotter, and not the battery sensors some apps mistake for the GPU. |
+| **Memory, SSD, Ambient** | The hottest sensor in each group. Ambient is the Mac's air temperature sensor. |
 
 ## Coming from Pythonflow
 
@@ -90,6 +99,9 @@ Based on [Powerflow](https://github.com/lzt1008/powerflow) by The Powerflow Team
 requests [#19](https://github.com/lzt1008/powerflow/pull/19),
 [#21](https://github.com/lzt1008/powerflow/pull/21) and
 [#22](https://github.com/lzt1008/powerflow/pull/22).
+
+The per-chip list of CPU and GPU core sensors comes from
+[Stats](https://github.com/exelban/stats) by Serhiy Mytrovtsiy (MIT).
 
 ## License
 

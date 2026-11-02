@@ -1,26 +1,44 @@
-"""Menu bar item: live wattage in the title, current readings in its menu.
+"""Menu bar item: one reading in the title (watts, or a temperature), and a menu.
 
 A plain NSStatusItem with a native NSMenu. The Rust app used a Tauri tray icon
 plus an NSPopover, and on macOS 27 AppKit swallowed the clicks so the panel
 never opened; a standard status-item menu has no such dependency.
 
+The menu's top rows are custom views: Thermals as tiles with a small grey label above
+each value (fans in the last tile), then Power rows with an SF Symbol, a grey label and
+the value on the right, then the actions. They're only filled in while the menu is open,
+and only values that changed are passed to AppKit.
+
 Every method here must run on the main thread (main.py dispatches with
 AppHelper.callAfter).
 """
 
+import math
+import time
+
 import AppKit
 from AppKit import (
-    NSAttributedString, NSColor, NSFont, NSFontAttributeName, NSForegroundColorAttributeName,
-    NSImage, NSImageSymbolConfiguration, NSMenu, NSMenuItem, NSMutableParagraphStyle,
-    NSParagraphStyleAttributeName, NSStatusBar, NSTextTab, NSVariableStatusItemLength,
+    NSBox, NSColor, NSFont, NSImage, NSImageSymbolConfiguration, NSImageView, NSMenu,
+    NSMenuItem, NSStatusBar, NSTextField, NSVariableStatusItemLength, NSView,
 )
 from Foundation import NSObject
 
-FIGURE_SPACE = " "  # same width as a digit in a monospaced-digit font
+FIGURE_SPACE = "\u2007"  # same width as a digit in a monospaced-digit font
+TEMPERATURE_METRICS = {"cpu_temp": "cpu", "hottest_temp": "hottest"}
+TILES = ("cpu", "gpu", "memory", "ssd", "ambient", "fans")
+TILE_LABELS = {"cpu": "CPU", "gpu": "GPU", "memory": "Memory", "ssd": "SSD", "ambient": "Ambient",
+               "fans": "Fans · rpm"}
 ROWS = ("battery", "system", "screen", "chip", "adapter")
 ROW_LABELS = {"battery": "Battery", "system": "System", "screen": "Screen",
               "chip": "Chip (CPU + GPU)", "adapter": "Adapter"}
-VALUE_TAB_LOCATION = 250.0
+ROW_SYMBOLS = {"system": "laptopcomputer", "screen": "sun.max", "chip": "cpu", "adapter": "powerplug"}
+# A reading older than this isn't shown: it was read before the menu last opened.
+THERMALS_FRESH_FOR = 6.0
+
+MENU_WIDTH = 300
+INSET = 14
+TILE_COLUMNS, TILE_GAP, TILE_HEIGHT = 3, 6, 42
+ROW_HEIGHT = 22
 
 
 def format_watts(value, pad_to=4):
@@ -28,6 +46,19 @@ def format_watts(value, pad_to=4):
     if not isinstance(value, (int, float)):
         return "— W"
     return f"{value:.1f}".rjust(pad_to, FIGURE_SPACE) + " W"
+
+
+def uses_fahrenheit(settings):
+    return settings.get("temperature_unit") == "fahrenheit"
+
+
+def format_temperature(celsius, fahrenheit=False, pad_to=0):
+    """'58°', in Fahrenheit if asked, padded to `pad_to` digits with figure spaces. Halves
+    round up, as on the dashboard."""
+    if not isinstance(celsius, (int, float)):
+        return "—°"
+    value = celsius * 9 / 5 + 32 if fahrenheit else celsius
+    return str(math.floor(value + 0.5)).rjust(pad_to, FIGURE_SPACE) + "°"
 
 
 def format_minutes(minutes):
@@ -57,8 +88,31 @@ def battery_status(sample):
     return f"{level}% · {state}"
 
 
+def battery_symbol(sample):
+    if sample.get("is_charging"):
+        return "battery.100percent.bolt"
+    level = sample.get("battery_level") or 0
+    return f"battery.{min(100, (level + 12) // 25 * 25)}percent"
+
+
+def fans_text(fans):
+    """The fastest fan's speed, or 'Off' when they've all stopped (Apple silicon stops them
+    when cool). Two speeds don't fit in a tile; the dashboard shows each fan."""
+    speeds = [f["rpm"] for f in fans if f.get("rpm") is not None]
+    if not speeds:
+        return "—"
+    return str(max(speeds)) if any(speeds) else "Off"
+
+
+def menu_bar_temperature(sample, settings):
+    """Which temperature the menu bar shows ("cpu" or "hottest"), or None while it shows watts."""
+    if settings.get("menu_bar_show_charging") and sample.get("is_charging"):
+        return None
+    return TEMPERATURE_METRICS.get(settings.get("menu_bar_metric"))
+
+
 def menu_bar_value(sample, settings):
-    """The number shown in the menu bar for the user's chosen metric."""
+    """The watts shown in the menu bar for the user's chosen metric."""
     if settings.get("menu_bar_show_charging") and sample.get("is_charging"):
         return sample.get("system_in")
     metric = settings.get("menu_bar_metric")
@@ -69,6 +123,14 @@ def menu_bar_value(sample, settings):
         "screen": sample.get("screen_power"),
         "chip": sample.get("chip_power"),
     }.get(metric, sample.get("system_load"))
+
+
+def menu_bar_title(sample, thermals, settings):
+    """A temperature keeps three digits' width (130 °C is 266 °F), watts four."""
+    reading = menu_bar_temperature(sample, settings)
+    if reading:
+        return format_temperature((thermals or {}).get(reading), uses_fahrenheit(settings), pad_to=3)
+    return format_watts(menu_bar_value(sample, settings))
 
 
 class _MenuTarget(NSObject):
@@ -94,6 +156,42 @@ class _MenuTarget(NSObject):
         self.on_menu_open(False)
 
 
+class _View(NSView):
+    """A flipped container whose `relayout` (a Python callable) runs when its width changes."""
+
+    def isFlipped(self):
+        return True
+
+    def resizeSubviewsWithOldSize_(self, old_size):
+        relayout = getattr(self, "relayout", None)
+        if relayout is not None:
+            relayout()
+
+
+def _label(font, color):
+    field = NSTextField.labelWithString_("")
+    field.setFont_(font)
+    field.setTextColor_(color)
+    field.setLineBreakMode_(AppKit.NSLineBreakByTruncatingTail)
+    return field
+
+
+def _view_item(height):
+    view = _View.alloc().initWithFrame_(((0, 0), (MENU_WIDTH, height)))
+    view.setAutoresizingMask_(AppKit.NSViewWidthSizable)
+    item = NSMenuItem.alloc().init()
+    item.setView_(view)
+    return item, view
+
+
+def _section_header(title):
+    if hasattr(NSMenuItem, "sectionHeaderWithTitle_"):  # macOS 14 and later
+        return NSMenuItem.sectionHeaderWithTitle_(title)
+    item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title, None, "")
+    item.setEnabled_(False)
+    return item
+
+
 class StatusBar:
     def __init__(self, on_open, on_check_updates, on_quit, on_menu_open):
         self._item = NSStatusBar.systemStatusBar().statusItemWithLength_(NSVariableStatusItemLength)
@@ -105,42 +203,31 @@ class StatusBar:
         self._button.setTitle_(self._title)
         self._button.setToolTip_("Mac Engine Room")
 
-        bolt = NSImage.imageWithSystemSymbolName_accessibilityDescription_("bolt.fill", "Charging")
-        config = NSImageSymbolConfiguration.configurationWithPointSize_weight_(size - 2, AppKit.NSFontWeightRegular)
-        self._bolt = bolt.imageWithSymbolConfiguration_(config) if bolt else None
-        if self._bolt:
-            self._bolt.setTemplate_(True)
+        self._bolt = self._symbol("bolt.fill", size - 2, "Charging")
         self._showing_bolt = False
 
         self._target = _MenuTarget.alloc().init()
         self._target.on_open = on_open
         self._target.on_check_updates = on_check_updates
         self._target.on_quit = on_quit
-        self._target.on_menu_needs_update = self._fill_rows
+        self._target.on_menu_needs_update = self._fill
         self._target.on_menu_open = self._set_menu_open
         self._on_menu_open = on_menu_open
         self._sample = None  # the latest, for filling in the rows when the menu opens
+        self._thermals = None  # likewise
+        self._settings = {}
+        self._available = TILES  # the tiles this Mac has, once a reading says
+        self._shown = {}  # what each view shows, so only changes reach AppKit
         self.menu_open = False
-
-        self._menu_font = NSFont.menuFontOfSize_(0)
-        self._value_font = NSFont.monospacedDigitSystemFontOfSize_weight_(
-            self._menu_font.pointSize(), AppKit.NSFontWeightRegular)
-        style = NSMutableParagraphStyle.alloc().init()
-        style.setTabStops_([NSTextTab.alloc().initWithTextAlignment_location_options_(
-            AppKit.NSTextAlignmentRight, VALUE_TAB_LOCATION, {})])
-        self._paragraph = style
 
         menu = NSMenu.alloc().init()
         menu.setAutoenablesItems_(False)
         menu.setDelegate_(self._target)
-        self._rows = {}
-        self._row_values = {}
-        for key in ROWS:
-            row = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(ROW_LABELS[key], None, "")
-            row.setEnabled_(False)
-            menu.addItem_(row)
-            self._rows[key] = row
-            self._set_row(key, "—")
+        self._thermals_header = _section_header("Thermals")
+        menu.addItem_(self._thermals_header)
+        self._build_tiles(menu)
+        menu.addItem_(_section_header("Power"))
+        self._build_rows(menu)
         menu.addItem_(NSMenuItem.separatorItem())
         menu.addItem_(self._action_item("Open Dashboard", "openDashboard:", "d"))
         menu.addItem_(NSMenuItem.separatorItem())
@@ -150,27 +237,122 @@ class StatusBar:
         self._item.setMenu_(menu)
         self._menu = menu
 
+    @staticmethod
+    def _symbol(name, point_size, description=None):
+        image = NSImage.imageWithSystemSymbolName_accessibilityDescription_(name, description)
+        if image is None:
+            return None
+        config = NSImageSymbolConfiguration.configurationWithPointSize_weight_(point_size, AppKit.NSFontWeightRegular)
+        image = image.imageWithSymbolConfiguration_(config)
+        image.setTemplate_(True)
+        return image
+
     def _action_item(self, title, selector, key):
         item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title, selector, key)
         item.setTarget_(self._target)
         return item
 
-    def _set_row(self, key, value):
-        if self._row_values.get(key) == value:
-            return
-        self._row_values[key] = value
-        text = f"{ROW_LABELS[key]}\t{value}"
-        title = AppKit.NSMutableAttributedString.alloc().initWithString_attributes_(text, {
-            NSFontAttributeName: self._menu_font,
-            NSForegroundColorAttributeName: NSColor.secondaryLabelColor(),
-            NSParagraphStyleAttributeName: self._paragraph,
-        })
-        start = len(ROW_LABELS[key]) + 1
-        title.addAttributes_range_({
-            NSFontAttributeName: self._value_font,
-            NSForegroundColorAttributeName: NSColor.labelColor(),
-        }, (start, len(text) - start))
-        self._rows[key].setAttributedTitle_(title)
+    # ── views ──
+
+    def _build_tiles(self, menu):
+        self._tiles_item, self._tiles_view = _view_item(TILE_HEIGHT)
+        fill = (NSColor.quaternarySystemFillColor() if hasattr(NSColor, "quaternarySystemFillColor")
+                else NSColor.quaternaryLabelColor())
+        label_font = NSFont.systemFontOfSize_(NSFont.smallSystemFontSize() - 0.5)
+        value_font = NSFont.monospacedDigitSystemFontOfSize_weight_(15, AppKit.NSFontWeightMedium)
+        self._tiles = {}
+        for key in TILES:
+            box = NSBox.alloc().init()
+            box.setBoxType_(AppKit.NSBoxCustom)
+            box.setBorderWidth_(0)
+            box.setCornerRadius_(6)
+            box.setFillColor_(fill)
+            box.setTitlePosition_(AppKit.NSNoTitle)
+            label = _label(label_font, NSColor.secondaryLabelColor())
+            label.setStringValue_(TILE_LABELS[key])
+            value = _label(value_font, NSColor.labelColor())
+            value.setStringValue_("—")
+            for view in (box, label, value):
+                self._tiles_view.addSubview_(view)
+            self._tiles[key] = (box, label, value)
+        self._tiles_view.relayout = self._layout_tiles
+        self._layout_tiles()
+        menu.addItem_(self._tiles_item)
+
+    def _layout_tiles(self):
+        width = self._tiles_view.frame().size.width
+        shown = [k for k in TILES if k in self._available]
+        tile_width = (width - 2 * INSET - (TILE_COLUMNS - 1) * TILE_GAP) / TILE_COLUMNS
+        for key, (box, label, value) in self._tiles.items():
+            for view in (box, label, value):
+                view.setHidden_(key not in shown)
+        for i, key in enumerate(shown):
+            box, label, value = self._tiles[key]
+            x = INSET + i % TILE_COLUMNS * (tile_width + TILE_GAP)
+            y = 2 + i // TILE_COLUMNS * (TILE_HEIGHT + TILE_GAP)
+            box.setFrame_(((x, y), (tile_width, TILE_HEIGHT)))
+            label.setFrame_(((x + 8, y + 5), (tile_width - 12, 14)))
+            value.setFrame_(((x + 8, y + 19), (tile_width - 12, 19)))
+        rows = max(1, math.ceil(len(shown) / TILE_COLUMNS))
+        height = 2 + rows * TILE_HEIGHT + (rows - 1) * TILE_GAP + 6
+        if abs(self._tiles_view.frame().size.height - height) > 0.5:
+            self._tiles_view.setFrameSize_((width, height))
+
+    def _build_rows(self, menu):
+        font = NSFont.menuFontOfSize_(0)
+        value_font = NSFont.monospacedDigitSystemFontOfSize_weight_(font.pointSize(), AppKit.NSFontWeightRegular)
+        self._rows = {}
+        self._row_views = {}
+        for key in ROWS:
+            item, view = _view_item(ROW_HEIGHT)
+            icon = NSImageView.alloc().initWithFrame_(((INSET, 3), (18, 16)))
+            icon.setContentTintColor_(NSColor.secondaryLabelColor())
+            label = _label(font, NSColor.secondaryLabelColor())
+            label.setStringValue_(ROW_LABELS[key])
+            value = _label(value_font, NSColor.labelColor())
+            value.setAlignment_(AppKit.NSTextAlignmentRight)
+            value.setStringValue_("—")
+            for v in (icon, label, value):
+                view.addSubview_(v)
+            view.relayout = lambda key=key: self._layout_row(key)
+            menu.addItem_(item)
+            self._rows[key] = item
+            self._row_views[key] = (view, icon, label, value)
+            self._set_symbol(key, ROW_SYMBOLS.get(key, "battery.100percent"))
+            self._layout_row(key)
+
+    def _layout_row(self, key):
+        """The value gets the width it needs; the label (an adapter's name can be long) the rest."""
+        view, icon, label, value = self._row_views[key]
+        width = view.frame().size.width
+        value_width = min(math.ceil(value.fittingSize().width), width / 2)
+        height = math.ceil(label.fittingSize().height)
+        y = (ROW_HEIGHT - height) / 2
+        value.setFrame_(((width - INSET - value_width, y), (value_width, height)))
+        label.setFrame_(((INSET + 24, y), (width - 2 * INSET - 24 - value_width - 8, height)))
+
+    def _put(self, view, setter, value):
+        """Pass `value` to AppKit only if it isn't already showing. Returns True if it was new."""
+        key = (id(view), setter)
+        if self._shown.get(key) == value:
+            return False
+        self._shown[key] = value
+        getattr(view, setter)(value)
+        return True
+
+    def _set_symbol(self, key, name):
+        if self._shown.get((key, "symbol")) != name:
+            self._shown[(key, "symbol")] = name
+            self._row_views[key][1].setImage_(self._symbol(name, 13))
+
+    def _set_row(self, key, value, label=None):
+        _, _, label_field, value_field = self._row_views[key]
+        changed = self._put(value_field, "setStringValue_", value)
+        changed = self._put(label_field, "setStringValue_", label or ROW_LABELS[key]) or changed
+        if changed:
+            self._layout_row(key)
+
+    # ── updates ──
 
     def set_update_status(self, status, version):
         """Mirrors updater.Updater's status: only "check" and "restart" can be clicked."""
@@ -182,12 +364,13 @@ class StatusBar:
         self._update_item.setTitle_(title)
         self._update_item.setEnabled_(enabled)
 
-    def update(self, sample, settings):
-        """Called for every sample. A new title costs a redraw (about 0.9 ms, measured)
-        and even setting the same one again costs 0.2 ms, so only changes go through.
-        The menu's rows are only filled in while it's open."""
+    def update(self, sample, thermals, settings):
+        """Called for every sample, with `thermals` when temperatures were read for it. A new
+        title costs a redraw (about 0.9 ms, measured) and even setting the same one again
+        costs 0.2 ms, so only changes go through. The menu's rows are only filled in
+        while it's open."""
         charging_title = bool(settings.get("menu_bar_show_charging") and sample.get("is_charging"))
-        title = format_watts(menu_bar_value(sample, settings))
+        title = menu_bar_title(sample, thermals, settings)
         if title != self._title:
             self._button.setTitle_(title)
             self._title = title
@@ -196,26 +379,52 @@ class StatusBar:
             self._showing_bolt = charging_title
 
         self._sample = sample
+        self._settings = settings
+        if thermals is not None:
+            self._thermals = thermals
         if self.menu_open:
-            self._fill_rows()
+            self._fill()
 
     def _set_menu_open(self, is_open):
         self.menu_open = is_open
         self._on_menu_open()
 
-    def _fill_rows(self):
+    def _fill(self):
+        self._fill_tiles()
         sample = self._sample
         if sample is None:
             return
         self._set_row("battery", battery_status(sample))
+        self._set_symbol("battery", battery_symbol(sample))
+        self._set_symbol("system", "laptopcomputer" if sample.get("has_battery") else "desktopcomputer")
         self._set_row("system", format_watts(sample.get("system_load"), pad_to=0))
         self._set_row("screen", format_watts(sample.get("screen_power"), pad_to=0))
         self._set_row("chip", format_watts(sample.get("chip_power"), pad_to=0))
         adapter = sample.get("adapter")
         if sample.get("external_connected") and adapter:
             name = adapter.get("name") or (f"{adapter['watts']}W adapter" if adapter.get("watts") else "Adapter")
-            self._set_row("adapter", f"{name} · {format_watts(sample.get('adapter_power'), pad_to=0)}")
+            self._set_row("adapter", format_watts(sample.get("adapter_power"), pad_to=0), label=name)
         else:
             self._set_row("adapter", "Not connected")
-        self._rows["battery"].setHidden_(not sample.get("has_battery"))
-        self._rows["screen"].setHidden_(not sample.get("has_screen_power"))
+        self._put(self._rows["battery"], "setHidden_", not sample.get("has_battery"))
+        self._put(self._rows["screen"], "setHidden_", not sample.get("has_screen_power"))
+
+    def _fill_tiles(self):
+        thermals = self._thermals
+        if thermals is not None and tuple(thermals["available"]) != self._available:
+            self._available = tuple(thermals["available"])  # this Mac's sensors: never stale
+            self._layout_tiles()
+        if thermals is not None and time.time() - thermals["t"] > THERMALS_FRESH_FOR:
+            thermals = None  # from before the menu opened: a fresh reading is on its way
+        none = not self._available
+        self._put(self._thermals_header, "setHidden_", none)
+        self._put(self._tiles_item, "setHidden_", none)
+        thermals = thermals or {}
+        for key in self._available:
+            if key == "fans":
+                fans = thermals.get("fans") or []
+                self._put(self._tiles[key][1], "setStringValue_", "Fan · rpm" if len(fans) == 1 else TILE_LABELS[key])
+                text = fans_text(fans or [{"rpm": None}])
+            else:
+                text = format_temperature(thermals.get(key), uses_fahrenheit(self._settings))
+            self._put(self._tiles[key][2], "setStringValue_", text)

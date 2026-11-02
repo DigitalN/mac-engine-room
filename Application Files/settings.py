@@ -13,13 +13,15 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-MENU_BAR_METRICS = ("system", "screen", "chip")
+MENU_BAR_METRICS = ("system", "screen", "chip", "cpu_temp", "hottest_temp")
 THEMES = ("system", "light", "dark")
+TEMPERATURE_UNITS = ("celsius", "fahrenheit")  # Celsius unless chosen: macOS's own unit isn't followed
 
 DEFAULTS = {
     "menu_bar_metric": "system",
     "menu_bar_show_charging": True,
     "theme": "system",
+    "temperature_unit": "celsius",
     "open_dashboard_at_launch": True,
     "record_history": True,
     "update_automatically": True,
@@ -35,6 +37,8 @@ def validate(raw):
         s["menu_bar_metric"] = raw["menu_bar_metric"]
     if raw.get("theme") in THEMES:
         s["theme"] = raw["theme"]
+    if raw.get("temperature_unit") in TEMPERATURE_UNITS:
+        s["temperature_unit"] = raw["temperature_unit"]
     for key in ("menu_bar_show_charging", "open_dashboard_at_launch", "record_history", "update_automatically"):
         if isinstance(raw.get(key), bool):
             s[key] = raw[key]

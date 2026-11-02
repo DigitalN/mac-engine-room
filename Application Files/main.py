@@ -1,4 +1,4 @@
-"""Mac Engine Room (formerly Pythonflow) — a menu bar power monitor for macOS.
+"""Mac Engine Room (formerly Pythonflow) — a menu bar thermals and power monitor for macOS.
 
 Launcher: logging, single-instance lock, sampler thread, menu bar item and the
 pywebview dashboard window.
@@ -48,10 +48,11 @@ DASHBOARD_INTERVAL = 1.0  # seconds, while the dashboard page is visible
 BACKGROUND_INTERVAL = 2.5  # seconds, menu bar only
 DASHBOARD_IDLE_AFTER = 3.0  # seconds without a poll from the page before dropping back
 LIVE_BUFFER_POINTS = 900  # 15 minutes at the dashboard interval
-# The dashboard opens as tall as its Now page, or the screen, whichever is smaller.
-# The page then reports its exact size (Api.set_content_size); this just avoids a jump.
+THERMAL_FIELDS = ["t", "cpu", "gpu", "memory", "ssd", "ambient"]
+# The dashboard opens as tall as its first page (Thermals), or the screen, whichever is
+# smaller. The page then reports its exact size (Api.set_content_size); this just avoids a jump.
 WINDOW_WIDTH = 1060
-NOW_PAGE_HEIGHT = 1040
+FIRST_PAGE_HEIGHT = 664
 # System Settings → Battery → Charging, where macOS's charge limit (80–100%) is set.
 # "charging" is that sheet's anchor in the Battery pane; "batteryhealth" opens Battery Health.
 CHARGING_SETTINGS_URL = "x-apple.systempreferences:com.apple.Battery-Settings.extension?charging"
@@ -112,21 +113,28 @@ def _set_thread_qos(qos_class):
 
 
 class LiveState:
-    """Latest sample plus a ring buffer of chart points, shared with the page."""
+    """Latest power and thermals samples plus a ring buffer of chart points for each, shared
+    with the page."""
 
     def __init__(self):
         self._lock = threading.Lock()
         self._seq = 0
         self._latest = None
         self._points = deque(maxlen=LIVE_BUFFER_POINTS)
+        self._thermals = None
+        self._thermal_points = deque(maxlen=LIVE_BUFFER_POINTS)
 
-    def push(self, s):
+    def push(self, s, thermals=None):
         point = [round(s["t"], 2), s["system_load"], s["system_in"], s["battery_power"],
                  s["screen_power"], s["chip_power"]]
         with self._lock:
             self._seq += 1
             self._latest = s
             self._points.append((self._seq, point))
+            if thermals is not None:
+                self._thermals = thermals
+                self._thermal_points.append(
+                    (self._seq, [round(thermals["t"], 2)] + [thermals[k] for k in THERMAL_FIELDS[1:]]))
 
     def since(self, seq):
         with self._lock:
@@ -135,28 +143,53 @@ class LiveState:
                 "latest": self._latest,
                 "point_fields": ["t", "system_load", "system_in", "battery_power", "screen_power", "chip_power"],
                 "points": [p for n, p in self._points if n > seq],
+                "thermals": self._thermals,
+                "thermal_fields": THERMAL_FIELDS,
+                "thermal_points": [p for n, p in self._thermal_points if n > seq],
             }
 
 
 class Sampler(threading.Thread):
-    def __init__(self, reader, on_sample):
+    """Reads power every tick, and in the same tick the thermals parts `thermal_parts()`
+    names (see EngineRoomApp._thermal_parts)."""
+
+    def __init__(self, reader, on_sample, thermals=None, thermal_parts=lambda: ()):
         super().__init__(name="pythonflow-sampler", daemon=True)
         self._reader = reader
         self._on_sample = on_sample
+        self._thermals = thermals
+        self._thermal_parts = thermal_parts
         self._last_poll = float("-inf")
+        self._last_thermals_poll = float("-inf")
         self._wake = threading.Event()
 
     def interval(self):
         watched = time.monotonic() - self._last_poll < DASHBOARD_IDLE_AFTER
         return DASHBOARD_INTERVAL if watched else BACKGROUND_INTERVAL
 
-    def dashboard_polled(self):
+    def thermals_watched(self):
+        return time.monotonic() - self._last_thermals_poll < DASHBOARD_IDLE_AFTER
+
+    def dashboard_polled(self, thermals=False):
         """The page only polls while it is visible (not hidden, minimised or covered),
-        so its polls are what keep the faster rate on."""
+        so its polls are what keep the faster rate on. `thermals`: the Thermals page is
+        the one showing."""
         was_background = self.interval() == BACKGROUND_INTERVAL
+        newly_thermals = thermals and not self.thermals_watched()
         self._last_poll = time.monotonic()
-        if was_background:
-            self._wake.set()  # sample now rather than at the end of a 2.5 s wait
+        if thermals:
+            self._last_thermals_poll = self._last_poll
+        if was_background or newly_thermals:
+            self._wake.set()  # sample now rather than at the end of a wait
+
+    def wake(self):
+        """Sample now, e.g. as the menu opens, rather than at the end of a wait."""
+        self._wake.set()
+
+    def sample(self):
+        sample = self._reader.read()
+        parts = self._thermal_parts() if self._thermals else ()
+        self._on_sample(sample, self._thermals.read(parts) if parts else None)
 
     def qos(self):
         """Menu bar only: background QoS, on the efficiency cores. While the dashboard is
@@ -179,7 +212,7 @@ class Sampler(threading.Thread):
                 _set_thread_qos(qos)
             with objc.autorelease_pool():
                 try:
-                    self._on_sample(self._reader.read())
+                    self.sample()
                 except Exception:
                     log.exception("Sampling failed")
             due = self.next_due(due)
@@ -198,8 +231,9 @@ class Api:
     def __init__(self, app):
         self._app = app
 
-    def get_live(self, since_seq=0):
-        self._app._sampler.dashboard_polled()
+    def get_live(self, since_seq=0, page=None):
+        """`page` is the page showing; fans are read while it's "thermals"."""
+        self._app._sampler.dashboard_polled(thermals=page == "thermals")
         live = self._app._live.since(int(since_seq or 0))
         # Settings' Check for Updates button follows a check through these polls.
         live["update"] = [self._app._updater.status, self._app._updater.version]
@@ -289,6 +323,7 @@ class EngineRoomApp:
         from history import ChargingRecorder, HistoryStore
         from power import PowerReader
         from settings import Settings
+        from thermals import ThermalsReader
         from updater import Updater
 
         self._settings = Settings(DATA_DIR / "settings.json", legacy_path=LEGACY_PREFS)
@@ -297,7 +332,7 @@ class EngineRoomApp:
         self._reader = PowerReader()
         prefs = self._settings.get()
         self._recorder = ChargingRecorder(self._store, enabled=prefs["record_history"])
-        self._sampler = Sampler(self._reader, self._on_sample)
+        self._sampler = Sampler(self._reader, self._on_sample, ThermalsReader(), self._thermal_parts)
         self._app_path = launch.bundle_path()
         self._login_item = launch.LoginItem(self._app_path, DATA_DIR)
         self._updater = Updater(
@@ -315,14 +350,23 @@ class EngineRoomApp:
 
     # ── sampling (runs on the sampler thread) ──
 
-    def _on_sample(self, sample):
+    def _on_sample(self, sample, thermals=None):
         from PyObjCTools import AppHelper
 
-        self._live.push(sample)
+        self._live.push(sample, thermals)
         self._recorder.feed(sample)
         if self._statusbar is not None:
             # One trip to the main thread per sample: each one wakes it.
-            AppHelper.callAfter(self._show_sample, sample, self._settings.get())
+            AppHelper.callAfter(self._show_sample, sample, thermals, self._settings.get())
+
+    def _thermal_parts(self):
+        """Temperatures every sample, like power, so the chart has no gaps (about 0.9 ms of
+        CPU per sample on an M1 Pro). Fans only while the Thermals page or the menu shows them."""
+        import thermals
+
+        if self._sampler.thermals_watched() or (self._statusbar is not None and self._statusbar.menu_open):
+            return thermals.ALL_PARTS
+        return thermals.TEMPERATURES
 
     def _page_settings(self):
         """Settings plus "open at login" (None where it isn't available, e.g. from source)."""
@@ -337,9 +381,14 @@ class EngineRoomApp:
 
     # ── window lifecycle (main thread) ──
 
-    def _show_sample(self, sample, settings):
-        self._statusbar.update(sample, settings)
+    def _show_sample(self, sample, thermals, settings):
+        self._statusbar.update(sample, thermals, settings)
         self._check_graphics_process()
+
+    def _on_menu_open(self):
+        self._update_main_qos()
+        if self._statusbar.menu_open:
+            self._sampler.wake()  # the fans, which are only read while shown
 
     def _update_main_qos(self):
         """With only the menu bar item showing, the main thread (which redraws it) runs
@@ -397,7 +446,9 @@ class EngineRoomApp:
                 frame.size.height = visible.size.height
             top = visible.origin.y + visible.size.height
             frame.origin.y = min(max(frame.origin.y, visible.origin.y), top - frame.size.height)
-        window.setFrame_display_animate_(frame, True, bool(window.isVisible()))
+        # Not animated: while a window grows animated, the part it uncovers stays blank until
+        # the animation ends (the Now page's charts, switching to it from Thermals).
+        window.setFrame_display_animate_(frame, True, False)
 
     @staticmethod
     def _initial_height():
@@ -405,11 +456,11 @@ class EngineRoomApp:
 
         screen = AppKit.NSScreen.mainScreen()
         if screen is None:
-            return NOW_PAGE_HEIGHT
+            return FIRST_PAGE_HEIGHT
         style = (AppKit.NSWindowStyleMaskTitled | AppKit.NSWindowStyleMaskClosable
                  | AppKit.NSWindowStyleMaskMiniaturizable | AppKit.NSWindowStyleMaskResizable)
         fits = AppKit.NSWindow.contentRectForFrameRect_styleMask_(screen.visibleFrame(), style).size.height
-        return int(min(NOW_PAGE_HEIGHT, fits))
+        return int(min(FIRST_PAGE_HEIGHT, fits))
 
     def show_dashboard(self):
         import AppKit
@@ -578,7 +629,7 @@ class EngineRoomApp:
             self._apply_theme, self._settings.get()["theme"])
 
         self._statusbar = StatusBar(on_open=self.show_dashboard, on_check_updates=self._updater.check_now,
-                                    on_quit=self.quit, on_menu_open=self._update_main_qos)
+                                    on_quit=self.quit, on_menu_open=self._on_menu_open)
         self._sampler.start()
         threading.Thread(target=self._import_legacy_history, name="legacy-import", daemon=True).start()
         self._login_item.turn_on_by_default()

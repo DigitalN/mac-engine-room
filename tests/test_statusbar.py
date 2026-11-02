@@ -1,10 +1,12 @@
 """Menu bar text formatting, and what an update touches. No status item is created:
 the update test swaps in a stand-in for it."""
 
+import time
 from types import SimpleNamespace
 
 import statusbar
-from statusbar import FIGURE_SPACE, StatusBar, battery_status, format_watts, menu_bar_value
+from statusbar import (FIGURE_SPACE, StatusBar, battery_status, fans_text, format_temperature, format_watts,
+                       menu_bar_temperature, menu_bar_title, menu_bar_value)
 
 
 class _FakeButton:
@@ -26,16 +28,25 @@ def _fake_status_item(monkeypatch):
     return button
 
 
+def _row(bar, key):
+    _, _, label, value = bar._row_views[key]
+    return f"{label.stringValue()}\t{value.stringValue()}"
+
+
+def _tile(bar, key):
+    return bar._tiles[key][2].stringValue()
+
+
 def test_screen_row_only_shows_on_a_mac_with_a_screen_sensor(monkeypatch):
     _fake_status_item(monkeypatch)
     bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None)
-    bar.update({"has_screen_power": False}, {})
+    bar.update({"has_screen_power": False}, None, {})
     bar._target.menuNeedsUpdate_(bar._menu)
     assert bar._rows["screen"].isHidden()
-    bar.update({"has_screen_power": True, "screen_power": 7.2}, {})
+    bar.update({"has_screen_power": True, "screen_power": 7.2}, None, {})
     bar._target.menuNeedsUpdate_(bar._menu)
     assert not bar._rows["screen"].isHidden()
-    assert bar._rows["screen"].attributedTitle().string() == "Screen\t7.2 W"
+    assert _row(bar, "screen") == "Screen\t7.2 W"
 
 
 def test_update_only_redraws_what_changed(monkeypatch):
@@ -43,29 +54,111 @@ def test_update_only_redraws_what_changed(monkeypatch):
     menu_events = []
     bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None,
                     on_menu_open=lambda: menu_events.append(bar.menu_open))
-    system_row = bar._rows["system"]
     settings = {"menu_bar_metric": "system"}
     sample = {"system_load": 7.04, "screen_power": 2.0, "chip_power": 3.0, "has_battery": True,
               "battery_level": 80}
 
-    bar.update(sample, settings)
-    bar.update({**sample, "system_load": 6.98}, settings)  # still "7.0 W"
+    bar.update(sample, None, settings)
+    bar.update({**sample, "system_load": 6.98}, None, settings)  # still "7.0 W"
     assert button.titles == ["— W", f"{FIGURE_SPACE}7.0 W"]
-    assert system_row.attributedTitle().string() == "System\t—"  # menu closed: rows untouched
+    assert _row(bar, "system") == "System\t—"  # menu closed: rows untouched
 
     bar._target.menuNeedsUpdate_(bar._menu)  # what AppKit calls as the menu opens
     bar._target.menuWillOpen_(bar._menu)
-    assert system_row.attributedTitle().string() == "System\t7.0 W"
-    bar.update({**sample, "system_load": 9.5}, settings)
-    assert system_row.attributedTitle().string() == "System\t9.5 W"  # open: rows follow along
+    assert _row(bar, "system") == "System\t7.0 W"
+    bar.update({**sample, "system_load": 9.5}, None, settings)
+    assert _row(bar, "system") == "System\t9.5 W"  # open: rows follow along
 
     bar._target.menuDidClose_(bar._menu)
-    bar.update({**sample, "system_load": 12.0}, settings)
-    assert system_row.attributedTitle().string() == "System\t9.5 W"
+    bar.update({**sample, "system_load": 12.0}, None, settings)
+    assert _row(bar, "system") == "System\t9.5 W"
     assert menu_events == [True, False]
 
 
+def _thermals(**values):
+    return {"t": time.time(), "cpu": 61.4, "gpu": 58.5, "memory": 50.0, "ssd": 34.2, "ambient": 27.0,
+            "hottest": 61.4, "available": list(statusbar.TILES),
+            "fans": [{"rpm": 1517, "min": 1499, "max": 4296, "manual": False},
+                     {"rpm": 1649, "min": 1499, "max": 4744, "manual": False}], **values}
+
+
+def test_tiles_show_temperatures_and_fans_and_only_pass_changes_to_appkit(monkeypatch):
+    _fake_status_item(monkeypatch)
+    bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None)
+    sample = {"system_load": 7.0, "has_battery": True, "battery_level": 80}
+    bar.update(sample, _thermals(), {})
+    bar._target.menuNeedsUpdate_(bar._menu)
+    assert [_tile(bar, k) for k in statusbar.TILES] == ["61°", "59°", "50°", "34°", "27°", "1649"]
+    bar.update(sample, _thermals(), {"temperature_unit": "fahrenheit"})
+    bar._target.menuNeedsUpdate_(bar._menu)
+    assert _tile(bar, "cpu") == "143°"
+    bar.update(sample, _thermals(), {})
+    bar._target.menuNeedsUpdate_(bar._menu)
+
+    writes = []
+    cpu = bar._tiles["cpu"][2]
+    bar._put = lambda view, setter, value, put=bar._put: (writes.append(value) if view is cpu else None, put(view, setter, value))[1]
+    bar._target.menuWillOpen_(bar._menu)
+    bar.update(sample, _thermals(cpu=61.3), {})  # still 61°
+    bar.update(sample, _thermals(cpu=62.0), {})
+    assert writes == ["61°", "62°"] and cpu.stringValue() == "62°"
+
+
+def test_a_mac_without_fans_has_no_fans_tile_and_stale_readings_show_dashes(monkeypatch):
+    _fake_status_item(monkeypatch)
+    bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None)
+    fanless = _thermals(available=["cpu", "gpu", "memory", "ssd"], fans=[], t=time.time() - 60)
+    bar.update({}, fanless, {})
+    bar._target.menuNeedsUpdate_(bar._menu)
+    assert bar._tiles["fans"][0].isHidden() and bar._tiles["ambient"][0].isHidden()
+    assert not bar._tiles["ssd"][0].isHidden()
+    assert _tile(bar, "cpu") == "—°"  # read a minute ago, before the menu opened
+    bar.update({}, {**fanless, "t": time.time()}, {})
+    bar._target.menuNeedsUpdate_(bar._menu)
+    assert _tile(bar, "cpu") == "61°"
+
+
+def test_a_mac_without_temperatures_hides_the_thermals_section(monkeypatch):
+    _fake_status_item(monkeypatch)
+    bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None)
+    bar.update({}, _thermals(available=[], fans=[]), {})
+    bar._target.menuNeedsUpdate_(bar._menu)
+    assert bar._thermals_header.isHidden() and bar._tiles_item.isHidden()
+
+
+def test_temperatures_in_the_menu_bar_keep_their_width():
+    assert format_temperature(61.4, pad_to=3) == f"{FIGURE_SPACE}61°"
+    assert format_temperature(100.2, pad_to=3) == "100°"
+    assert format_temperature(61.4, fahrenheit=True, pad_to=3) == "143°"
+    assert menu_bar_title({}, _thermals(), {"menu_bar_metric": "cpu_temp", "temperature_unit": "fahrenheit"}) == "143°"
+    assert format_temperature(60.5) == "61°" and format_temperature(None, pad_to=3) == "—°"
+    assert len(format_temperature(9.0, pad_to=3)) == len(format_temperature(130.0, fahrenheit=True, pad_to=3))
+
+
+def test_menu_bar_temperature_choices():
+    sample = {"is_charging": False, "system_load": 7.0}
+    thermals = _thermals(cpu=61.4, hottest=70.2)
+    assert menu_bar_title(sample, thermals, {"menu_bar_metric": "cpu_temp"}) == f"{FIGURE_SPACE}61°"
+    assert menu_bar_title(sample, thermals, {"menu_bar_metric": "hottest_temp"}) == f"{FIGURE_SPACE}70°"
+    assert menu_bar_title(sample, None, {"menu_bar_metric": "cpu_temp"}) == "—°"
+    assert menu_bar_title(sample, thermals, {"menu_bar_metric": "system"}) == f"{FIGURE_SPACE}7.0 W"
+    # Adapter input while charging wins over a temperature too, and then none is needed.
+    charging = {"is_charging": True, "system_in": 95.0}
+    settings = {"menu_bar_metric": "cpu_temp", "menu_bar_show_charging": True}
+    assert menu_bar_temperature(charging, settings) is None
+    assert menu_bar_title(charging, thermals, settings) == "95.0 W"
+    assert menu_bar_temperature(charging, {**settings, "menu_bar_show_charging": False}) == "cpu"
+
+
+def test_fans_text():
+    assert fans_text([{"rpm": 0}, {"rpm": 0}]) == "Off"
+    assert fans_text([{"rpm": 1517}, {"rpm": 1649}]) == "1649"  # the fastest: two don't fit in a tile
+    assert fans_text([{"rpm": 1517}, {"rpm": 0}]) == "1517"
+    assert fans_text([{"rpm": None}]) == "—"
+
+
 def test_title_width_is_stable():
+    assert FIGURE_SPACE == "\u2007"  # a plain space is narrower than a digit
     assert format_watts(9.84) == f"{FIGURE_SPACE}9.8 W"
     assert len(format_watts(9.8)) == len(format_watts(27.1))
     assert format_watts(None) == "— W"
