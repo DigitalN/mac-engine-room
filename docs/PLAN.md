@@ -18,8 +18,8 @@ Each is the usual +0.0.1 with the whole release checklist in DEVELOPMENT.md.
    69°). The fans stayed at minimum. In the menu, the fans tile shows the fastest fan: two
    speeds don't fit in a tile. The dashboard shows each fan.
 3. **Fan control and the Dashboard**, in one release. Fan control starts with a throwaway
-   test of the root helper. Built on the `claude/fan-control-dashboard` branch on
-   2026-11-02; not merged or released yet. The throwaway test passed (see Fan control).
+   test of the root helper. Merged (DigitalN/mac-engine-room#24) and released as 1.2.8 on
+   2026-11-02. The throwaway test passed (see Fan control).
    End to end on the M1 Pro with a test copy: after one Allow in Login Items, Manual at 10%
    held the fans at 1,779 and 1,824 rpm (each fan's own range), and Balanced at 59° held
    both at their minimum, 1,499 rpm. The fans went back to macOS on quit, 0.6 seconds after
