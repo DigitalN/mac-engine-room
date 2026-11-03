@@ -181,10 +181,10 @@ certificate from the same Apple account before the old one expires.
   the fans are back with macOS and nobody is connected.
 - **Who may talk to it:** the socket is open to every user, so the helper checks each
   caller's code signature: the app's bundle identifier, signed by the helper's own team.
-- **What it does:** `set` holds each fan at a speed (clamped to its range; the mode key
-  `F%dMd`, or `F%dmd` from M5, set to 1, then the target `F%dTg`), `auto` sets the modes
-  back to 0 and watches them for 10 seconds, `checkin` keeps the hold, and `status`
-  reports. The app keeps its connection open while it holds the fans: the helper hands
+- **What it does:** `set` holds each fan at a speed (clamped to its range; `Ftst` set to 1
+  first on Macs that have it, such as the M4, then the target `F%dTg` and the mode key
+  `F%dMd`, or `F%dmd` from M5, set to 1), `auto` sets the modes back to 0, then `Ftst`, and
+  watches them for 10 seconds, `checkin` keeps the hold, and `status` reports. The app keeps its connection open while it holds the fans: the helper hands
   them back when it closes, after 10 seconds without a word, and before sleep.
 
 ## Testing fan control

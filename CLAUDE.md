@@ -86,7 +86,9 @@ To reproduce without touching the user's data, run with
   `com.pythonflow.monitor.fans.plist`, goes in `Contents/Library/LaunchDaemons`). Four
   commands (`set`, `auto`, `checkin`, `status`), only from a caller signed with the app's
   identifier by the helper's own team, and the safety nets: the fans go back to macOS when
-  the app disconnects, after 10 s without a word, and before sleep.
+  the app disconnects, after 10 s without a word, and before sleep. `main.swift` is the
+  server; `Fans.swift` holds and hands back the fans, and `tests/test_fan_helper.py` runs it
+  against a simulated SMC (`tests/fan_helper/FakeSMC.swift`) behaving like an M4 or the M1 Pro.
 - **Menu bar**: `Application Files/statusbar.py`. Native `NSStatusItem` and `NSMenu`
   (PyObjC). The title shows watts or a temperature; the menu's fan profile buttons,
   Thermals tiles and Power rows are custom views (NSTextField labels, NSBox tiles,
@@ -181,6 +183,10 @@ To reproduce without touching the user's data, run with
 - **Mode keys read back late.** `F%dMd` written as root reads as the old mode for up to a
   second (measured on the M1 Pro), so the helper only rewrites a mode after 2 s, and
   macOS turns a handed-back 0 into 3 within about 20 s by itself.
+- **Macs with `Ftst` refuse a manual mode until it's 1.** It keeps macOS's thermalmonitord
+  off the fans, so it must go back to 0 with them: left at 1, nothing runs the fans. The M4
+  has it (every mode write failed for 30 s without it, "error unlock" in 1.2.11); the M1 Pro
+  doesn't. The helper sets it before the modes and clears it after them, on every hand-back.
 - **Ask `backgroundtaskmanagementd` as little as possible.** `SMAppService.status()` is
   answered by it, and it took 8 s once while busy. Fan control asks while waiting for the
   user's approval, and after that only when the helper can't be reached. A daemon that
@@ -311,4 +317,5 @@ Don't undo these without asking:
 ## Tests
 
 `python3 -m pytest`. `tests/test_power.py::test_reads_this_mac` does a live
-hardware read, and is skipped where there's no battery or SMC.
+hardware read, and is skipped where there's no battery or SMC. `tests/test_fan_helper.py`
+compiles the fan helper with `swiftc` (about 3 s), and is skipped without it.

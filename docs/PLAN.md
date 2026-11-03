@@ -224,6 +224,11 @@ This M1 Pro (MacBookPro18,1), lightly loaded on 2026-11-02, has 2,181 SMC keys:
   - This Mac has **no `Ftst`** (not even listed), yet writing `F0Md`/`F1Md` = 1 as root
     worked on the first try, and the fans followed `F0Tg`/`F1Tg` from 0 to 2,000 rpm in about
     4 seconds. The mode reads back as 3 for up to a second after the write before showing 1.
+  - **Found on 2026-11-03 with 1.2.11:** the maintainer's M4 MacBook Pro refused every mode
+    write for 30 seconds ("Fan control stopped because the fan helper reported an error
+    (unlock)"). Leaving out ThermalForge's `Ftst` step, because the M1 Pro has no `Ftst`,
+    broke the M4, which does. The helper now sets `Ftst` = 1 before the modes and back to 0
+    after them, where the key exists.
   - Handing back is `F%dMd` = 0: it reads 0 at once, the fans stopped, and macOS set the
     mode back to 3 (status 3) within about 20 seconds by itself.
   - Fan keys seen here besides the known ones: `F0Dc`, `F0Fb`, `F0Fc`, `F0Sf`, `F0St`
