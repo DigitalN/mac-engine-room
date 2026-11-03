@@ -4,8 +4,8 @@ A plain NSStatusItem with a native NSMenu. The Rust app used a Tauri tray icon
 plus an NSPopover, and on macOS 27 AppKit swallowed the clicks so the panel
 never opened; a standard status-item menu has no such dependency.
 
-The menu's top rows are custom views: Thermals' fan profile buttons (3 × 2), Manual's
-slider while Manual is chosen, then the temperatures as tiles with a small grey label above
+The menu's top rows are custom views: Thermals' fan profile buttons (the three chosen in
+Settings), Manual's slider while Manual is chosen, then the temperatures as tiles with a small grey label above
 each value (fans in the last tile); then Power rows with an SF Symbol, a grey label and the
 value on the right, then the actions. They're only filled in while the menu is open, and
 only values that changed are passed to AppKit.
@@ -205,6 +205,17 @@ def _view_item(height):
     return item, view
 
 
+def _tile_box(fill):
+    """The rounded, filled box behind a tile, as in the Thermals tiles."""
+    box = NSBox.alloc().init()
+    box.setBoxType_(AppKit.NSBoxCustom)
+    box.setBorderWidth_(0)
+    box.setCornerRadius_(6)
+    box.setFillColor_(fill)
+    box.setTitlePosition_(AppKit.NSNoTitle)
+    return box
+
+
 def _section_header(title):
     if hasattr(NSMenuItem, "sectionHeaderWithTitle_"):  # macOS 14 and later
         return NSMenuItem.sectionHeaderWithTitle_(title)
@@ -242,6 +253,8 @@ class StatusBar:
         self._on_profile = on_profile
         self._on_manual_level = on_manual_level
         self._dragging_manual = False
+        self._tile_fill = (NSColor.quaternarySystemFillColor() if hasattr(NSColor, "quaternarySystemFillColor")
+                           else NSColor.quaternaryLabelColor())
         self._sample = None  # the latest, for filling in the rows when the menu opens
         self._thermals = None  # likewise
         self._settings = {}
@@ -292,18 +305,11 @@ class StatusBar:
 
     def _build_tiles(self, menu):
         self._tiles_item, self._tiles_view = _view_item(TILE_HEIGHT)
-        fill = (NSColor.quaternarySystemFillColor() if hasattr(NSColor, "quaternarySystemFillColor")
-                else NSColor.quaternaryLabelColor())
         label_font = NSFont.systemFontOfSize_(NSFont.smallSystemFontSize() - 0.5)
         value_font = NSFont.monospacedDigitSystemFontOfSize_weight_(15, AppKit.NSFontWeightMedium)
         self._tiles = {}
         for key in TILES:
-            box = NSBox.alloc().init()
-            box.setBoxType_(AppKit.NSBoxCustom)
-            box.setBorderWidth_(0)
-            box.setCornerRadius_(6)
-            box.setFillColor_(fill)
-            box.setTitlePosition_(AppKit.NSNoTitle)
+            box = _tile_box(self._tile_fill)
             label = _label(label_font, NSColor.secondaryLabelColor())
             label.setStringValue_(TILE_LABELS[key])
             value = _label(value_font, NSColor.labelColor())
@@ -335,18 +341,22 @@ class StatusBar:
             self._tiles_view.setFrameSize_((width, height))
 
     def _build_profiles(self, menu):
-        """The fan profiles as buttons, 3 × 2, and Manual's slider under them."""
-        self._profiles_item, self._profiles_view = _view_item(2 * PROFILE_HEIGHT + TILE_GAP + 4)
-        self._profile_buttons = []
-        for i, pid in enumerate(fan_control.PROFILE_IDS):
+        """Three fan profiles in a row, the ones chosen in Settings, as tiles like the
+        temperatures', the chosen one in the accent colour: a borderless button over a box,
+        so it still clicks and reads as a button. Manual's slider goes under them."""
+        self._profiles_item, self._profiles_view = _view_item(PROFILE_HEIGHT + TILE_GAP)
+        font = NSFont.systemFontOfSize_weight_(NSFont.smallSystemFontSize(), AppKit.NSFontWeightMedium)
+        self._profile_tiles = []
+        for pid in fan_control.MENU_PROFILES:  # filled in from the setting as the menu opens
+            box = _tile_box(self._tile_fill)
             button = NSButton.buttonWithTitle_target_action_(fan_control.PROFILE_NAMES[pid], self._target, "chooseProfile:")
-            button.setButtonType_(AppKit.NSButtonTypePushOnPushOff)
-            button.setBezelStyle_(AppKit.NSBezelStyleRounded)
-            button.setControlSize_(AppKit.NSControlSizeSmall)
-            button.setFont_(NSFont.systemFontOfSize_(NSFont.smallSystemFontSize()))
-            button.setTag_(i)
-            self._profiles_view.addSubview_(button)
-            self._profile_buttons.append(button)
+            button.setBordered_(False)
+            button.setButtonType_(AppKit.NSButtonTypeMomentaryChange)
+            button.setFont_(font)
+            button.setTag_(fan_control.PROFILE_IDS.index(pid))
+            for view in (box, button):
+                self._profiles_view.addSubview_(view)
+            self._profile_tiles.append((box, button))
         self._profiles_view.relayout = self._layout_profiles
         self._layout_profiles()
         menu.addItem_(self._profiles_item)
@@ -361,22 +371,24 @@ class StatusBar:
         self._manual_label.setAlignment_(AppKit.NSTextAlignmentRight)
         for v in (self._manual_slider, self._manual_label):
             view.addSubview_(v)
-        view.relayout = lambda: self._layout_manual(view)
-        self._layout_manual(view)
+        view.relayout = self._layout_manual
+        self._layout_manual()
         menu.addItem_(self._manual_item)
 
     def _layout_profiles(self):
         width = self._profiles_view.frame().size.width
-        button_width = (width - 2 * INSET - (TILE_COLUMNS - 1) * TILE_GAP) / TILE_COLUMNS
-        for i, button in enumerate(self._profile_buttons):
-            x = INSET + i % TILE_COLUMNS * (button_width + TILE_GAP)
-            y = 2 + i // TILE_COLUMNS * (PROFILE_HEIGHT + TILE_GAP)
-            button.setFrame_(((x, y), (button_width, PROFILE_HEIGHT)))
+        tile_width = (width - 2 * INSET - (TILE_COLUMNS - 1) * TILE_GAP) / TILE_COLUMNS
+        for i, (box, button) in enumerate(self._profile_tiles):
+            x = INSET + i * (tile_width + TILE_GAP)
+            box.setFrame_(((x, 2), (tile_width, PROFILE_HEIGHT)))
+            button.setFrame_(((x, 2), (tile_width, PROFILE_HEIGHT)))
 
-    def _layout_manual(self, view):
-        width = view.frame().size.width
-        self._manual_label.setFrame_(((width - INSET - 110, 4), (110, 16)))
-        self._manual_slider.setFrame_(((INSET, 2), (width - 2 * INSET - 118, 20)))
+    def _layout_manual(self):
+        """The speeds get the width they need ("2,198 and 2,310 rpm"); the slider the rest."""
+        width = self._manual_item.view().frame().size.width
+        label_width = min(math.ceil(self._manual_label.fittingSize().width), width / 2)
+        self._manual_label.setFrame_(((width - INSET - label_width, 4), (label_width, 16)))
+        self._manual_slider.setFrame_(((INSET, 2), (width - 2 * INSET - label_width - 8, 20)))
 
     def _choose_profile(self, pid):
         self._fill_profiles(pid)  # at once, not at the next sample
@@ -391,7 +403,8 @@ class StatusBar:
     def _show_manual_rpm(self, level):
         fans = [f for f in (self._thermals or {}).get("fans") or [] if f.get("min") and f.get("max")]
         limits = [(f["min"], f["max"]) for f in fans]
-        self._put(self._manual_label, "setStringValue_", rpm_text(fan_control.manual_speeds(level, limits)) if limits else "")
+        if self._put(self._manual_label, "setStringValue_", rpm_text(fan_control.manual_speeds(level, limits)) if limits else ""):
+            self._layout_manual()
 
     def _build_rows(self, menu):
         font = NSFont.menuFontOfSize_(0)
@@ -512,9 +525,15 @@ class StatusBar:
         chosen = chosen or self._settings.get("fan_profile") or status.get("profile") or fan_control.MACOS
         usable = state in PROFILES_USABLE
         self._put(self._profiles_item, "setHidden_", not has_fans)
-        for i, button in enumerate(self._profile_buttons):
-            self._put(button, "setState_", AppKit.NSControlStateValueOn if fan_control.PROFILE_IDS[i] == chosen
-                      else AppKit.NSControlStateValueOff)
+        # If the profile in use isn't one of the three (chosen on the Thermals page), none is lit.
+        shown = self._settings.get("menu_fan_profiles") or fan_control.MENU_PROFILES
+        for pid, (box, button) in zip(shown, self._profile_tiles):
+            self._put(button, "setTitle_", fan_control.PROFILE_NAMES[pid])
+            self._put(button, "setTag_", fan_control.PROFILE_IDS.index(pid))
+            on = pid == chosen
+            self._put(box, "setFillColor_", NSColor.controlAccentColor() if on else self._tile_fill)
+            self._put(button, "setContentTintColor_", NSColor.whiteColor() if on else NSColor.labelColor())
+            self._put(button, "setAccessibilityValue_", "selected" if on else "")
             self._put(button, "setEnabled_", usable)
         self._put(self._allow_fans_item, "setHidden_", not (has_fans and state == "approval"))
         self._put(self._fans_unavailable_item, "setHidden_", not (has_fans and state == "unavailable"))

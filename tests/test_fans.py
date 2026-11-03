@@ -107,6 +107,13 @@ def test_settings_start_on_macos_default_and_keep_valid_choices():
     assert validate({"fan_profile": "manual"})["fan_profile"] == "manual"
 
 
+def test_the_menu_shows_three_different_profiles():
+    assert DEFAULTS["menu_fan_profiles"] == ["macos", "balanced", "max"]
+    assert validate({"menu_fan_profiles": ["manual", "smart", "macos"]})["menu_fan_profiles"] == ["manual", "smart", "macos"]
+    for bad in (["macos", "balanced"], ["macos", "macos", "max"], ["macos", "balanced", "turbo"], "max", None):
+        assert validate({"menu_fan_profiles": bad})["menu_fan_profiles"] == ["macos", "balanced", "max"]
+
+
 def test_manual_spans_each_fans_own_range():
     assert manual_speeds(0, M1_PRO) == [1499, 1499]
     assert manual_speeds(1, M1_PRO) == [4296, 4744]

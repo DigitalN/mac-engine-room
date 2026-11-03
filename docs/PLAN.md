@@ -64,6 +64,11 @@ System cards, a Dashboard gives a short page to land on:
   - **Power:** System (W), Battery (% and time left, or charging), Adapter (W in, or "Not
     connected")
 - No charts; those stay on the tool tabs, so the page stays short. A future tool adds a row.
+- **Added on 2026-11-02 after trying 1.2.8:** the fan profile buttons (all six) in the Thermals
+  row's heading. Under the tiles, a slim card shows Manual's slider while Manual is chosen,
+  and a status line only when something needs attention (approving the helper, another app,
+  the safety override, an error). The Fans tile says who has the fans: macOS, the profile,
+  or another app.
 - Power and Thermals don't change: Battery, Adapter and System stay on Power's Now page, and
   charging history stays where it is.
 
@@ -130,6 +135,11 @@ This M1 Pro (MacBookPro18,1), lightly loaded on 2026-11-02, has 2,181 SMC keys:
   (at least 5° above start, at most 94°) and **Top speed** (30–100%). **Fans stop at** follows
   Fans start, keeping the profile's own gap. Max only has Fans start. Each profile has Reset.
   Smart's rate boost, trigger delays, ramp rates and the safety override stay fixed.
+  **Changed on 2026-11-02 after trying 1.2.8:** "Full speed at" beside "Top speed 60%" made
+  no sense, and the section was too wordy. Settings has a Fan profiles group: the menu's three
+  pickers, then a compact table with the headings once (Starts at, Top speed, Top speed at)
+  and a row of numbers per profile (Max: 100%, At once), Reset only on a changed one. No
+  descriptions, and Fans stop isn't shown.
 - Defaults: Balanced 55° to 70° at 60%, Performance 55° to 65° at 85%, Smart 53° to 85° at
   100%, Max from 65°.
 - Macs without fans show temperatures only. Desktops get everything. Where the helper can't
@@ -139,6 +149,11 @@ This M1 Pro (MacBookPro18,1), lightly loaded on 2026-11-02, has 2,181 SMC keys:
 
 - One native menu with custom row views, Thermals first: profile buttons (3 × 2), the Manual
   slider only when Manual is chosen, then temperatures as tiles with fans in the last tile.
+  **Changed on 2026-11-02 after trying 1.2.8:** one row of three profile buttons, drawn as
+  tiles like the temperatures' (stock push buttons looked out of place), the chosen one in
+  the accent colour. Settings chooses the three: macOS default, Balanced and Max by default.
+  If the profile in use isn't one of them, none is lit; Manual's slider shows whenever
+  Manual is chosen.
   Power rows below, then Open Dashboard, Check for Updates… and Quit. Release 2 has the
   temperature tiles and the new Power rows; the profile buttons and slider come with fan
   control in release 3. A mockup was approved in the planning chat: compact tiles with a

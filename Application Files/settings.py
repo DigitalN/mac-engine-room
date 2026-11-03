@@ -31,6 +31,7 @@ DEFAULTS = {
     "fan_profile": fans.MACOS,  # until a profile is chosen, the fans are macOS's
     "fan_manual_level": 0.0,  # Manual's slider: 0 is each fan's minimum speed, 1 its maximum
     "fan_tuning": {},  # {profile: {"start", "full", "top"}}, only what differs from its defaults
+    "menu_fan_profiles": fans.MENU_PROFILES,  # three different profiles, in the menu's order
 }
 
 
@@ -54,6 +55,9 @@ def validate(raw):
     if isinstance(level, (int, float)) and not isinstance(level, bool) and math.isfinite(level):
         s["fan_manual_level"] = round(min(max(float(level), 0.0), 1.0), 3)
     s["fan_tuning"] = fans.validate_tuning(raw.get("fan_tuning"))
+    shown = raw.get("menu_fan_profiles")
+    valid = isinstance(shown, list) and len(shown) == 3 and len(set(shown)) == 3 and all(p in fans.PROFILE_IDS for p in shown)
+    s["menu_fan_profiles"] = list(shown if valid else fans.MENU_PROFILES)
     return s
 
 
