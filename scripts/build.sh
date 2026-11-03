@@ -48,7 +48,7 @@ HELPER="$APP/Contents/MacOS/Mac Engine Room Fans"
 if xcrun --find swiftc >/dev/null 2>&1; then
     echo "Building the fan helper…" >&2
     if ! xcrun swiftc -O -target arm64-apple-macos13.0 -import-objc-header "Fan Helper/bridge.h" \
-        "Fan Helper/main.swift" "Fan Helper/SMC.swift" -lbsm -o "$HELPER" >>"$LOG" 2>&1; then
+        "Fan Helper/main.swift" "Fan Helper/Fans.swift" "Fan Helper/SMC.swift" -lbsm -o "$HELPER" >>"$LOG" 2>&1; then
         tail -20 "$LOG" >&2
         echo "Building the fan helper failed; full log: $LOG" >&2
         exit 1
