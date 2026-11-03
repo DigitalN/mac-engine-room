@@ -23,8 +23,8 @@ Fan control logs `Fan profile: <name>` when one is chosen (and at launch), `Aske
 allow the fan helper`, `Fan control is waiting for the helper to be allowed in Login Items`,
 `Fans held by <profile> at <rpm> rpm (cores N°)`, `Fans back to macOS: <why>`,
 `Safety override: fans at full speed (<why>)` and `Safety override over`, `Another app is
-controlling the fans; leaving them alone`, and `Fan control unavailable: …` or `Fan control
-failed: …`. The helper logs to the unified log, not app.log:
+controlling the fans; leaving them alone`, and `Fan control isn't available …` or `Fan
+control stopped because …`. The helper logs to the unified log, not app.log:
 `/usr/bin/log show --last 1h --predicate 'subsystem == "com.pythonflow.monitor"'` (zsh's own
 `log` command shadows it) shows `Holding the fans at [rpm, rpm] rpm` and `Fans back with
 macOS (<why>)`, where why is the app asking, it disconnecting, no word for 10 seconds, or
@@ -87,8 +87,11 @@ To reproduce without touching the user's data, run with
   the app disconnects, after 10 s without a word, and before sleep.
 - **Menu bar**: `Application Files/statusbar.py`. Native `NSStatusItem` and `NSMenu`
   (PyObjC). The title shows watts or a temperature; the menu's fan profile buttons, Manual
-  slider, Thermals tiles and Power rows are custom views (NSButtons, NSSlider, NSTextField
-  labels, NSBox tiles, SF Symbols), then the actions. Main thread only.
+  slider, Thermals tiles and Power rows are custom views (NSTextField labels, NSBox tiles,
+  NSSlider, SF Symbols), then the actions. The profile buttons are the three chosen in
+  Settings, drawn as tiles like the temperatures' (a borderless NSButton over an NSBox), the
+  chosen one in the accent colour: stock push buttons looked out of place there. Main
+  thread only.
 - **History**: `Application Files/history.py`. SQLite
   (`~/Library/Application Support/Mac Engine Room/history.db`), the `ChargingRecorder`
   state machine, CSV export, and the one-time read-only import from the original
@@ -100,7 +103,8 @@ To reproduce without touching the user's data, run with
   hand-rolled canvas chart and no external resources. A **Dashboard | Thermals | Power**
   switcher and a shared Settings page. The window opens on the Dashboard, and **Open
   Dashboard** in the menu switches to it (`EngineRoomApp._show_tab`); Power always opens on
-  Now, with History beside it.
+  Now, with History beside it. The Dashboard and the Thermals page share the fan controls
+  (`renderFanControls`): all six profiles, Manual's slider and the status line.
   Temperatures arrive in °C and are shown in the unit chosen in Settings.
 - **Build**: `scripts/build.sh` runs PyInstaller with `Application Files/MacEngineRoom.spec`
   in `~/Library/Caches/MacEngineRoom-build`, compiles the fan helper into
@@ -244,6 +248,13 @@ Don't undo these without asking:
   than cutting Power's Battery, Adapter and System cards to make Now shorter.
 - Fan control starts on macOS default, and the helper is only registered the first time
   another profile is chosen. The choice is remembered across relaunches and logins.
+- The menu offers three fan profiles, chosen in Settings (macOS default, Balanced and Max by
+  default); all six are on the Dashboard and the Thermals page.
+- Settings shows the fan profiles as a compact table (Starts at, Top speed, Top speed at),
+  with no descriptions and no Fans stop: the maintainer found the wordier version text-heavy.
+- Fan text is plain English, checked as whole sentences: the fans go back to macOS (they
+  don't "stop"), and a reason completes "Fan control isn't available …" or "Fan control
+  stopped because …".
 - Temperatures are in Celsius unless Fahrenheit is chosen in Settings > Thermals. The app
   doesn't follow macOS's unit: Americans who read Celsius would have no way to get it.
 - Temperatures are read all the time, like power, so the Thermals chart has no gaps.

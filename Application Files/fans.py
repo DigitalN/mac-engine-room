@@ -64,6 +64,7 @@ PROFILES = {
 MACOS, MANUAL = "macos", "manual"
 PROFILE_IDS = (MACOS, "balanced", "performance", "smart", "max", MANUAL)
 PROFILE_NAMES = {MACOS: "macOS default", MANUAL: "Manual", **{k: p.name for k, p in PROFILES.items()}}
+MENU_PROFILES = [MACOS, "balanced", "max"]  # the three the menu shows until others are chosen in Settings
 
 # Settings > Thermals limits: Fans start 50–85°, Full speed at least 5° above it and at most
 # 94°, Top speed 30–100%. Max only has Fans start.
@@ -271,7 +272,7 @@ class Safety:
     def describe(reason, pressure=0):
         if reason == "pressure":
             return f"macOS reports {PRESSURE_NAMES[max(pressure, 1)]} thermal pressure"
-        return {"hotspot": "the chip's hotspots passed 118°", "chassis": "the case passed 95°",
+        return {"hotspot": "part of the chip passed 118°", "chassis": "the case passed 95°",
                 "battery": "the battery passed 50°"}.get(reason, reason)
 
 
@@ -318,8 +319,9 @@ class Helper:
 
     @property
     def unavailable_reason(self):
-        """Why fan control can't work in this copy, or None. Worked out the first time a
-        profile is chosen, so a Mac left on macOS default never pays for it."""
+        """Why fan control can't work in this copy, or None: the end of "Fan control isn't
+        available …". Worked out the first time a profile is chosen, so a Mac left on macOS
+        default never pays for it."""
         if self._reason is None:
             self._reason = self._why_unavailable(self._app_path, self._plist) or ""
         return self._reason or None
@@ -332,17 +334,17 @@ class Helper:
         import updater
 
         if app_path is None:
-            return "it isn't available when running from source"
+            return "when Mac Engine Room runs from source"
         if not power._is_apple_silicon():
-            return "it needs a Mac with Apple silicon"
+            return "on a Mac with an Intel processor"
         if int((platform.mac_ver()[0] or "0").split(".")[0]) < 13:
-            return "it needs macOS 13 or later"
+            return "before macOS 13"
         if not launch.in_applications_folder(app_path):
-            return "it's available when Mac Engine Room runs from your Applications folder"
+            return "until Mac Engine Room is in your Applications folder"
         if not (Path(app_path) / "Contents" / "Library" / "LaunchDaemons" / plist).exists():
-            return "this copy was built without the fan helper"
+            return "in this copy, which was built without the fan helper"
         if updater.own_team(app_path) is None:
-            return "this copy isn't signed by a developer team, which the fan helper checks for"
+            return "in this copy, which isn't signed by a developer team"
         try:
             import objc
 
@@ -355,7 +357,7 @@ class Helper:
             self._service = service_class.daemonServiceWithPlistName_(plist)
         except Exception as e:
             log.exception("Fan control isn't available")
-            return f"macOS didn't offer the background service it needs ({e})"
+            return f"because macOS didn't offer the background service it needs ({e})"
         return None
 
     def status(self):
@@ -366,7 +368,7 @@ class Helper:
         approve it, as documented; the status is then REQUIRES_APPROVAL."""
         ok, error = self._service.registerAndReturnError_(None)
         if not ok and self.status() not in (REQUIRES_APPROVAL, ENABLED):
-            raise HelperError(f"macOS refused it ({error.localizedDescription() if error else 'no reason given'})")
+            raise HelperError(f"because macOS refused the fan helper ({error.localizedDescription() if error else 'no reason given'})")
 
     def open_login_items(self):
         import objc
@@ -435,7 +437,8 @@ class FanControl(threading.Thread):
     (macOS default), "nofans", "unavailable" (with a "reason"), "approval" (waiting for the
     user to allow the helper), "watching" (fans with macOS until "start"), "holding" (at
     "targets" rpm), "override" (full speed, "reason"), "other" (another app has the fans) or
-    "error" ("reason"). An override's reason is Safety's ("pressure", "hotspot", "chassis" or
+    "error" ("reason"). An "unavailable" reason finishes "Fan control isn't available …", an
+    "error" one "Fan control stopped because …". An override's reason is Safety's ("pressure", "hotspot", "chassis" or
     "battery"), with "pressure" 0–3, so the page can put temperatures in the user's unit."""
 
     # Seconds between asking macOS whether the user has allowed the helper. Once allowed, it's
@@ -609,7 +612,7 @@ class FanControl(threading.Thread):
         if self._service in (REQUIRES_APPROVAL, NOT_REGISTERED):
             self._set_status("approval")
         else:
-            self._set_status("unavailable", reason="macOS can't find the fan helper in this copy")
+            self._set_status("unavailable", reason="because macOS can't find the fan helper in this copy")
         return False
 
     def _hold(self, targets, temp, now):
@@ -639,12 +642,12 @@ class FanControl(threading.Thread):
             return self._set_status("other")
         if reason == "not-allowed":
             self._retry_at = now + 3600
-            return self._set_status("unavailable", reason="the fan helper didn't accept this copy's signature")
+            return self._set_status("unavailable", reason="because the fan helper didn't accept this copy's signature")
         if reason == "unreachable":
             self._next_check = 0.0  # perhaps it was turned off in Login Items
-            text = "couldn't reach the fan helper"
+            text = "it couldn't reach the fan helper"
         else:
-            text = f"the fan helper reported {reason}"
+            text = f"the fan helper reported an error ({reason})"
         self._retry_at = now + self.RETRY_AFTER
         self._set_status("error", reason=text)
 
@@ -673,9 +676,10 @@ class FanControl(threading.Thread):
             if self._last_state == "override":
                 log.info("Safety override over")
             self._last_state = state
-            if state in ("unavailable", "error"):
-                log.warning("Fan control %s: %s", "unavailable" if state == "unavailable" else "failed",
-                            details.get("reason"))
+            if state == "unavailable":
+                log.warning("Fan control isn't available %s", details.get("reason"))
+            elif state == "error":
+                log.warning("Fan control stopped because %s", details.get("reason"))
             elif state == "approval":
                 log.info("Fan control is waiting for the helper to be allowed in Login Items")
             elif state == "other":

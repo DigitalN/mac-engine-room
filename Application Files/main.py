@@ -54,7 +54,7 @@ FAN_PAGES = ("dashboard", "thermals")  # the page's tabs that show the fans
 # The dashboard opens as tall as its first page (Dashboard), or the screen, whichever is
 # smaller. The page then reports its exact size (Api.set_content_size); this just avoids a jump.
 WINDOW_WIDTH = 1060
-FIRST_PAGE_HEIGHT = 411
+FIRST_PAGE_HEIGHT = 421
 # A frame size, title bar included. Lower than the Dashboard, so it never has empty space under it.
 MIN_WINDOW_SIZE = (860, 400)
 # System Settings → Battery → Charging, where macOS's charge limit (80–100%) is set.
