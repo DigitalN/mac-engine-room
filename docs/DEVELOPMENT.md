@@ -117,7 +117,8 @@ doesn't release anything: the download links only change when a release is publi
   (`shasum -a 256`).
 - [ ] An older installed copy picks it up: choose **Check for Updates…** in its menu bar
   menu, or wait for the next wake. `app.log` shows `Downloading`, `ready to install`, then
-  `Installed <version>; relaunching`.
+  `Installed <version>; relaunching`, then `Mac Engine Room <version> started`. Without that
+  last line the new copy didn't start: open it, and see *How updates work*.
 
 ### Signing
 
@@ -146,7 +147,12 @@ certificate from the same Apple account before the old one expires.
 - **Installing:** at a quiet moment (dashboard closed, no charge being recorded, no
   keyboard or mouse input for 10 seconds), it swaps the new app in with one
   `replaceItemAtURL` call and relaunches it in the background (`--background`, so the
-  dashboard doesn't pop up).
+  dashboard doesn't pop up). The relaunch waits for the old copy to exit, opens the new one
+  with `open -n`, and opens it again if it isn't running 5 seconds later
+  (`launch.RELAUNCH_SCRIPT`): LaunchServices can still list a copy that has just quit as
+  running, and a plain `open` then goes to it and nothing starts. That happened updating the
+  maintainer's copy from 1.2.8 to 1.2.9; the quitting copy runs the relaunch, so copies
+  older than the fix can still hit it, and come back at the next login or when opened.
 - **Off** for copies that run from source, aren't team-signed, aren't in an Applications
   folder, or can't replace themselves. Settings says why, and **Check for Updates…**
   (**Open Releases Page** in Settings) opens the releases page instead.

@@ -11,7 +11,9 @@ Application logs are written to `~/Library/Logs/Mac Engine Room/app.log` (rotati
 reports a bug, **read the log first** before asking questions. The updater logs
 `Automatic updates off: <reason>` at launch, and `Up to date at`, `Downloading`,
 `ready to install`, `Installed …; relaunching` or `Update check failed: …` after a
-check. Each launch logs `started (dashboard shown)` or `started (dashboard hidden)`,
+check. `Installed …; relaunching` and `Quitting` with no `started` after them means the
+relaunch didn't start the new copy: `/usr/bin/log show` then has `open` logging `LAUNCH`,
+and no new `Mac Engine Room` process (see *How updates work* in DEVELOPMENT.md). Each launch logs `started (dashboard shown)` or `started (dashboard hidden)`,
 plus `, opened at login` for a login launch. A Mac missing any SMC key the app reads
 logs `SMC keys missing on <model>, macOS <version>: …` once per launch, with the power
 keys it does have. Reopening the app at one bar of brightness and again at full shows
