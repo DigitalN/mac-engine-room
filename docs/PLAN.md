@@ -17,7 +17,18 @@ Each is the usual +0.0.1 with the whole release checklist in DEVELOPMENT.md.
    to 83° (GPU 57° to 68°), and under a GPU load the GPU reading from 60° to 73° (CPU 61° to
    69°). The fans stayed at minimum. In the menu, the fans tile shows the fastest fan: two
    speeds don't fit in a tile. The dashboard shows each fan.
-3. **Fan control**, starting with a throwaway test of the root helper.
+3. **Fan control and the Dashboard**, in one release. Fan control starts with a throwaway
+   test of the root helper. Built on the `claude/fan-control-dashboard` branch on
+   2026-11-02; not merged or released yet. The throwaway test passed (see Fan control).
+   End to end on the M1 Pro with a test copy: after one Allow in Login Items, Manual at 10%
+   held the fans at 1,779 and 1,824 rpm (each fan's own range), and Balanced at 59° held
+   both at their minimum, 1,499 rpm. The fans went back to macOS on quit, 0.6 seconds after
+   `kill -9`, and 11 seconds after the app was stopped (`SIGSTOP`); resumed, it took them
+   again. Relaunching brought the profile back without asking again. The window opened on
+   the Dashboard at 1060 × 439. **Not yet tried on hardware:** sleep and wake, the safety
+   override, another app holding the fans, Fahrenheit tuning in the app's own WebKit, and
+   an update replacing the helper (BTM keeps a checksum of the job, so check after the
+   first update that changes it that no new Allow is asked for).
 
 ## Name and identity
 
@@ -35,9 +46,26 @@ Each is the usual +0.0.1 with the whole release checklist in DEVELOPMENT.md.
 
 - A **Thermals | Power** switcher at the top of the window, Thermals first. Power keeps its
   Now and History pages, and always opens on Now. Settings is shared, with a section for
-  each tool.
+  each tool. Release 3 puts a **Dashboard** in front of them (see Dashboard).
 - Each tool is its own Python module that adds its readings, its menu section and its
   settings. No plugin system beyond that.
+
+## Dashboard
+
+Agreed on 2026-11-02, for release 3. Power's Now page is much taller than Thermals, so the
+window changed size a lot between them. Rather than cutting Power's Battery, Adapter and
+System cards, a Dashboard gives a short page to land on:
+
+- The switcher becomes **Dashboard | Thermals | Power**, Dashboard first. The window opens on
+  it, and **Open Dashboard** in the menu opens it too.
+- One row of tiles per tool, each row headed by the tool's name with a "Thermals ›" or
+  "Power ›" link to its tab:
+  - **Thermals:** CPU, GPU, Fans (RPM, plus the active profile once fan control exists)
+  - **Power:** System (W), Battery (% and time left, or charging), Adapter (W in, or "Not
+    connected")
+- No charts; those stay on the tool tabs, so the page stays short. A future tool adds a row.
+- Power and Thermals don't change: Battery, Adapter and System stay on Power's Now page, and
+  charging history stays where it is.
 
 ## Sensors
 
@@ -157,6 +185,33 @@ This M1 Pro (MacBookPro18,1), lightly loaded on 2026-11-02, has 2,181 SMC keys:
 - Installed with `SMAppService` (one Allow and password in System Settings), proven first
   with a throwaway app on the maintainer's Mac. If that fails without notarization, fall back
   to a one-time admin-password install into a root-owned folder.
+- **The throwaway test passed** on the M1 Pro, macOS 27.2, on 2026-11-02, with an app and
+  helper signed with the Apple Development certificate and not notarized:
+  - `register()` reports "Operation not permitted" with status *requires approval*, as
+    documented; after one Allow and password in Login Items & Extensions it's *enabled*.
+  - launchd starts the helper as root on the first connection to its socket
+    (`SockPathMode` 0666 in `/var/run`), it exits when idle, and the next connection starts it
+    again. It still started after the whole bundle was given a browser's quarantine flag.
+  - The caller check (the socket's `LOCAL_PEERTOKEN` audit token, checked against
+    `identifier "…" and anchor apple generic and certificate leaf[subject.OU] = "<the
+    helper's own team>"`) let the signed app in and refused a plain `python3`.
+  - This Mac has **no `Ftst`** (not even listed), yet writing `F0Md`/`F1Md` = 1 as root
+    worked on the first try, and the fans followed `F0Tg`/`F1Tg` from 0 to 2,000 rpm in about
+    4 seconds. The mode reads back as 3 for up to a second after the write before showing 1.
+  - Handing back is `F%dMd` = 0: it reads 0 at once, the fans stopped, and macOS set the
+    mode back to 3 (status 3) within about 20 seconds by itself.
+  - Fan keys seen here besides the known ones: `F0Dc`, `F0Fb`, `F0Fc`, `F0Sf`, `F0St`
+    (3 under macOS, 2 just after handing back), `FBAD`, `FOFC`, `FOff`, `FRmp`.
+- Found while building it:
+  - A daemon that was never registered reports *not found*, not *not registered*, so the
+    app registers on either the first time.
+  - `SMAppService.status()` once took 8 seconds, while `backgroundtaskmanagementd` was busy
+    right after an approval; the app only asks while waiting for approval, and when the
+    helper can't be reached.
+  - "Minimum speed" puts every fan at its own minimum: a curve's fraction is of each fan's
+    maximum, never below its minimum, and starts from the slowest fan's minimum.
+  - A profile chosen but with the fans still with macOS samples once a second at
+    background QoS; holding the fans raises the sampler and the fan thread to utility.
 - Set up only the first time a profile other than macOS default is chosen. Until it's
   approved, the fans stay with macOS and the Thermals page says how to finish.
 - Updates aren't held back by a running profile: the fans go back to macOS for the few

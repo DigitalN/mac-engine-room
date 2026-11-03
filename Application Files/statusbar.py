@@ -4,10 +4,11 @@ A plain NSStatusItem with a native NSMenu. The Rust app used a Tauri tray icon
 plus an NSPopover, and on macOS 27 AppKit swallowed the clicks so the panel
 never opened; a standard status-item menu has no such dependency.
 
-The menu's top rows are custom views: Thermals as tiles with a small grey label above
-each value (fans in the last tile), then Power rows with an SF Symbol, a grey label and
-the value on the right, then the actions. They're only filled in while the menu is open,
-and only values that changed are passed to AppKit.
+The menu's top rows are custom views: Thermals' fan profile buttons (3 × 2), Manual's
+slider while Manual is chosen, then the temperatures as tiles with a small grey label above
+each value (fans in the last tile); then Power rows with an SF Symbol, a grey label and the
+value on the right, then the actions. They're only filled in while the menu is open, and
+only values that changed are passed to AppKit.
 
 Every method here must run on the main thread (main.py dispatches with
 AppHelper.callAfter).
@@ -18,10 +19,12 @@ import time
 
 import AppKit
 from AppKit import (
-    NSBox, NSColor, NSFont, NSImage, NSImageSymbolConfiguration, NSImageView, NSMenu,
-    NSMenuItem, NSStatusBar, NSTextField, NSVariableStatusItemLength, NSView,
+    NSBox, NSButton, NSColor, NSFont, NSImage, NSImageSymbolConfiguration, NSImageView, NSMenu,
+    NSMenuItem, NSSlider, NSStatusBar, NSTextField, NSVariableStatusItemLength, NSView,
 )
 from Foundation import NSObject
+
+import fans as fan_control
 
 FIGURE_SPACE = "\u2007"  # same width as a digit in a monospaced-digit font
 TEMPERATURE_METRICS = {"cpu_temp": "cpu", "hottest_temp": "hottest"}
@@ -39,6 +42,9 @@ MENU_WIDTH = 300
 INSET = 14
 TILE_COLUMNS, TILE_GAP, TILE_HEIGHT = 3, 6, 42
 ROW_HEIGHT = 22
+PROFILE_HEIGHT = 24
+# Fan control states with the profile buttons available to click.
+PROFILES_USABLE = ("off", "watching", "holding", "override", "other", "approval", "error")
 
 
 def format_watts(value, pad_to=4):
@@ -95,6 +101,12 @@ def battery_symbol(sample):
     return f"battery.{min(100, (level + 12) // 25 * 25)}percent"
 
 
+def rpm_text(rpms):
+    """'2,300 rpm', or '2,198 and 2,310 rpm' for fans with different speeds."""
+    each = list(dict.fromkeys(r for r in rpms if isinstance(r, int)))
+    return f"{' and '.join(f'{r:,}' for r in each)} rpm" if each else "—"
+
+
 def fans_text(fans):
     """The fastest fan's speed, or 'Off' when they've all stopped (Apple silicon stops them
     when cool). Two speeds don't fit in a tile; the dashboard shows each fan."""
@@ -146,6 +158,15 @@ class _MenuTarget(NSObject):
     def quitApp_(self, sender):
         self.on_quit()
 
+    def chooseProfile_(self, sender):
+        self.on_profile(fan_control.PROFILE_IDS[sender.tag()])
+
+    def moveManual_(self, sender):
+        self.on_manual(sender.doubleValue(), AppKit.NSApp.currentEvent().type() == AppKit.NSEventTypeLeftMouseUp)
+
+    def allowFans_(self, sender):
+        self.on_allow_fans()
+
     def menuNeedsUpdate_(self, menu):
         self.on_menu_needs_update()
 
@@ -193,7 +214,8 @@ def _section_header(title):
 
 
 class StatusBar:
-    def __init__(self, on_open, on_check_updates, on_quit, on_menu_open):
+    def __init__(self, on_open, on_check_updates, on_quit, on_menu_open, fan_status=lambda: {},
+                 on_profile=lambda pid: None, on_manual_level=lambda level: None, on_allow_fans=lambda: None):
         self._item = NSStatusBar.systemStatusBar().statusItemWithLength_(NSVariableStatusItemLength)
         self._button = self._item.button()
         size = NSFont.menuBarFontOfSize_(0).pointSize()
@@ -212,7 +234,14 @@ class StatusBar:
         self._target.on_quit = on_quit
         self._target.on_menu_needs_update = self._fill
         self._target.on_menu_open = self._set_menu_open
+        self._target.on_profile = self._choose_profile
+        self._target.on_manual = self._move_manual
+        self._target.on_allow_fans = on_allow_fans
         self._on_menu_open = on_menu_open
+        self._fan_status = fan_status
+        self._on_profile = on_profile
+        self._on_manual_level = on_manual_level
+        self._dragging_manual = False
         self._sample = None  # the latest, for filling in the rows when the menu opens
         self._thermals = None  # likewise
         self._settings = {}
@@ -225,6 +254,13 @@ class StatusBar:
         menu.setDelegate_(self._target)
         self._thermals_header = _section_header("Thermals")
         menu.addItem_(self._thermals_header)
+        self._build_profiles(menu)
+        self._allow_fans_item = self._action_item("Allow Fan Control in Login Items…", "allowFans:", "")
+        menu.addItem_(self._allow_fans_item)
+        self._fans_unavailable_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Fan control isn't available", None, "")
+        self._fans_unavailable_item.setEnabled_(False)
+        menu.addItem_(self._fans_unavailable_item)
         self._build_tiles(menu)
         menu.addItem_(_section_header("Power"))
         self._build_rows(menu)
@@ -297,6 +333,65 @@ class StatusBar:
         height = 2 + rows * TILE_HEIGHT + (rows - 1) * TILE_GAP + 6
         if abs(self._tiles_view.frame().size.height - height) > 0.5:
             self._tiles_view.setFrameSize_((width, height))
+
+    def _build_profiles(self, menu):
+        """The fan profiles as buttons, 3 × 2, and Manual's slider under them."""
+        self._profiles_item, self._profiles_view = _view_item(2 * PROFILE_HEIGHT + TILE_GAP + 4)
+        self._profile_buttons = []
+        for i, pid in enumerate(fan_control.PROFILE_IDS):
+            button = NSButton.buttonWithTitle_target_action_(fan_control.PROFILE_NAMES[pid], self._target, "chooseProfile:")
+            button.setButtonType_(AppKit.NSButtonTypePushOnPushOff)
+            button.setBezelStyle_(AppKit.NSBezelStyleRounded)
+            button.setControlSize_(AppKit.NSControlSizeSmall)
+            button.setFont_(NSFont.systemFontOfSize_(NSFont.smallSystemFontSize()))
+            button.setTag_(i)
+            self._profiles_view.addSubview_(button)
+            self._profile_buttons.append(button)
+        self._profiles_view.relayout = self._layout_profiles
+        self._layout_profiles()
+        menu.addItem_(self._profiles_item)
+
+        self._manual_item, view = _view_item(ROW_HEIGHT + 4)
+        self._manual_slider = NSSlider.sliderWithValue_minValue_maxValue_target_action_(
+            0, 0, 1, self._target, "moveManual:")
+        self._manual_slider.setControlSize_(AppKit.NSControlSizeSmall)
+        self._manual_slider.setContinuous_(True)
+        self._manual_label = _label(NSFont.monospacedDigitSystemFontOfSize_weight_(
+            NSFont.smallSystemFontSize(), AppKit.NSFontWeightRegular), NSColor.secondaryLabelColor())
+        self._manual_label.setAlignment_(AppKit.NSTextAlignmentRight)
+        for v in (self._manual_slider, self._manual_label):
+            view.addSubview_(v)
+        view.relayout = lambda: self._layout_manual(view)
+        self._layout_manual(view)
+        menu.addItem_(self._manual_item)
+
+    def _layout_profiles(self):
+        width = self._profiles_view.frame().size.width
+        button_width = (width - 2 * INSET - (TILE_COLUMNS - 1) * TILE_GAP) / TILE_COLUMNS
+        for i, button in enumerate(self._profile_buttons):
+            x = INSET + i % TILE_COLUMNS * (button_width + TILE_GAP)
+            y = 2 + i // TILE_COLUMNS * (PROFILE_HEIGHT + TILE_GAP)
+            button.setFrame_(((x, y), (button_width, PROFILE_HEIGHT)))
+
+    def _layout_manual(self, view):
+        width = view.frame().size.width
+        self._manual_label.setFrame_(((width - INSET - 110, 4), (110, 16)))
+        self._manual_slider.setFrame_(((INSET, 2), (width - 2 * INSET - 118, 20)))
+
+    def _choose_profile(self, pid):
+        self._fill_profiles(pid)  # at once, not at the next sample
+        self._on_profile(pid)
+
+    def _move_manual(self, level, done):
+        self._dragging_manual = not done
+        self._show_manual_rpm(level)
+        if done:
+            self._on_manual_level(level)
+
+    def _show_manual_rpm(self, level):
+        fans = [f for f in (self._thermals or {}).get("fans") or [] if f.get("min") and f.get("max")]
+        limits = [(f["min"], f["max"]) for f in fans]
+        self._put(self._manual_label, "setStringValue_", rpm_text(fan_control.manual_speeds(level, limits)) if limits else "")
 
     def _build_rows(self, menu):
         font = NSFont.menuFontOfSize_(0)
@@ -390,6 +485,7 @@ class StatusBar:
         self._on_menu_open()
 
     def _fill(self):
+        self._fill_profiles()
         self._fill_tiles()
         sample = self._sample
         if sample is None:
@@ -408,6 +504,26 @@ class StatusBar:
             self._set_row("adapter", "Not connected")
         self._put(self._rows["battery"], "setHidden_", not sample.get("has_battery"))
         self._put(self._rows["screen"], "setHidden_", not sample.get("has_screen_power"))
+
+    def _fill_profiles(self, chosen=None):
+        status = self._fan_status() or {}
+        state = status.get("state", "nofans")
+        has_fans = "fans" in self._available and state != "nofans"
+        chosen = chosen or self._settings.get("fan_profile") or status.get("profile") or fan_control.MACOS
+        usable = state in PROFILES_USABLE
+        self._put(self._profiles_item, "setHidden_", not has_fans)
+        for i, button in enumerate(self._profile_buttons):
+            self._put(button, "setState_", AppKit.NSControlStateValueOn if fan_control.PROFILE_IDS[i] == chosen
+                      else AppKit.NSControlStateValueOff)
+            self._put(button, "setEnabled_", usable)
+        self._put(self._allow_fans_item, "setHidden_", not (has_fans and state == "approval"))
+        self._put(self._fans_unavailable_item, "setHidden_", not (has_fans and state == "unavailable"))
+        manual = has_fans and usable and chosen == fan_control.MANUAL
+        self._put(self._manual_item, "setHidden_", not manual)
+        if manual:
+            if not self._dragging_manual:
+                self._put(self._manual_slider, "setDoubleValue_", self._settings.get("fan_manual_level", 0.0))
+            self._show_manual_rpm(self._manual_slider.doubleValue())
 
     def _fill_tiles(self):
         thermals = self._thermals

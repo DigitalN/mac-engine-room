@@ -42,8 +42,29 @@ if ! python3 -m PyInstaller "Application Files/MacEngineRoom.spec" --noconfirm -
     exit 1
 fi
 
+# The fan helper ("Fan Helper"), the only part that runs as root: Swift, so it needs Xcode
+# or its Command Line Tools. launchd runs it from the bundle once the app registers it.
+HELPER="$APP/Contents/MacOS/Mac Engine Room Fans"
+if xcrun --find swiftc >/dev/null 2>&1; then
+    echo "Building the fan helper…" >&2
+    if ! xcrun swiftc -O -target arm64-apple-macos13.0 -import-objc-header "Fan Helper/bridge.h" \
+        "Fan Helper/main.swift" "Fan Helper/SMC.swift" -lbsm -o "$HELPER" >>"$LOG" 2>&1; then
+        tail -20 "$LOG" >&2
+        echo "Building the fan helper failed; full log: $LOG" >&2
+        exit 1
+    fi
+    mkdir -p "$APP/Contents/Library/LaunchDaemons"
+    cp "Fan Helper/com.pythonflow.monitor.fans.plist" "$APP/Contents/Library/LaunchDaemons/"
+else
+    echo "No Swift compiler (xcode-select --install adds one), so this build has no fan control." >&2
+fi
+
 xattr -cr "$APP"
+# --deep signs everything PyInstaller bundled; the helper then gets its own identifier and
+# the hardened runtime, and the app is sealed again around it.
 if ! codesign --force --deep -s "$IDENTITY" "$APP" >>"$LOG" 2>&1 \
+    || { [[ -e "$HELPER" ]] && ! { codesign --force -s "$IDENTITY" -o runtime -i com.pythonflow.monitor.fans "$HELPER" \
+                                   && codesign --force -s "$IDENTITY" "$APP"; } >>"$LOG" 2>&1; } \
     || ! codesign --verify --deep --strict "$APP" >>"$LOG" 2>&1; then
     tail -5 "$LOG" >&2
     echo "Signing failed; full log: $LOG" >&2

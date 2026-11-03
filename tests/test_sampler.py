@@ -71,23 +71,23 @@ def test_thermals_read_only_the_parts_asked_for():
     assert thermals.parts == [("cpu",)] and seen == [None, {"t": 1.0}]
 
 
-def test_the_thermals_page_wakes_the_sampler_once(monkeypatch):
+def test_a_page_with_fans_wakes_the_sampler_once(monkeypatch):
     now = [1000.0]
     monkeypatch.setattr(main.time, "monotonic", lambda: now[0])
     sampler = Sampler(reader=None, on_sample=None)
     sampler.dashboard_polled()
     sampler._wake.clear()
     now[0] += DASHBOARD_INTERVAL
-    sampler.dashboard_polled(thermals=True)
-    assert sampler._wake.is_set() and sampler.thermals_watched()  # temperatures now, not in a second
+    sampler.dashboard_polled(fans=True)
+    assert sampler._wake.is_set() and sampler.fans_watched()  # fans now, not in a second
     sampler._wake.clear()
     now[0] += DASHBOARD_INTERVAL
-    sampler.dashboard_polled(thermals=True)
+    sampler.dashboard_polled(fans=True)
     assert not sampler._wake.is_set()
     now[0] += DASHBOARD_INTERVAL
-    sampler.dashboard_polled(thermals=False)  # switched to Power: stops once it's been a while
+    sampler.dashboard_polled(fans=False)  # switched to Power: stops once it's been a while
     now[0] += DASHBOARD_IDLE_AFTER
-    assert not sampler.thermals_watched()
+    assert not sampler.fans_watched()
 
 
 def test_temperatures_are_always_read_and_fans_only_while_shown():
@@ -98,10 +98,25 @@ def test_temperatures_are_always_read_and_fans_only_while_shown():
     from main import EngineRoomApp
 
     state = {"watched": False}
-    app = SimpleNamespace(_sampler=SimpleNamespace(thermals_watched=lambda: state["watched"]),
-                          _statusbar=SimpleNamespace(menu_open=False))
+    app = SimpleNamespace(_sampler=SimpleNamespace(fans_watched=lambda: state["watched"]),
+                          _statusbar=SimpleNamespace(menu_open=False), _fans=SimpleNamespace(holding=False))
     assert EngineRoomApp._thermal_parts(app) == thermals.TEMPERATURES
     app._statusbar.menu_open = True
     assert EngineRoomApp._thermal_parts(app) == thermals.ALL_PARTS
     app._statusbar.menu_open, state["watched"] = False, True
     assert EngineRoomApp._thermal_parts(app) == thermals.ALL_PARTS
+    state["watched"], app._fans.holding = False, True  # fan control holds them: the safety sensors too
+    assert EngineRoomApp._thermal_parts(app) == thermals.ALL_PARTS | {thermals.SAFETY}
+
+
+def test_a_fan_profile_samples_every_second_on_the_efficiency_cores_until_it_holds_the_fans(monkeypatch):
+    now = [1000.0]
+    monkeypatch.setattr(main.time, "monotonic", lambda: now[0])
+    fans = {"running": False, "held": False}
+    sampler = Sampler(reader=None, on_sample=None, fans_running=lambda: fans["running"],
+                      fans_held=lambda: fans["held"])
+    assert (sampler.interval(), sampler.qos()) == (BACKGROUND_INTERVAL, QOS_CLASS_BACKGROUND)
+    fans["running"] = True  # the curve runs once a second
+    assert (sampler.interval(), sampler.qos()) == (DASHBOARD_INTERVAL, QOS_CLASS_BACKGROUND)
+    fans["held"] = True
+    assert (sampler.interval(), sampler.qos()) == (DASHBOARD_INTERVAL, QOS_CLASS_UTILITY)

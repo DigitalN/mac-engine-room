@@ -7,9 +7,12 @@ never put the app into a bad state (the old app froze its chart on an unknown
 
 import json
 import logging
+import math
 import os
 import threading
 from pathlib import Path
+
+import fans
 
 log = logging.getLogger(__name__)
 
@@ -25,6 +28,9 @@ DEFAULTS = {
     "open_dashboard_at_launch": True,
     "record_history": True,
     "update_automatically": True,
+    "fan_profile": fans.MACOS,  # until a profile is chosen, the fans are macOS's
+    "fan_manual_level": 0.0,  # Manual's slider: 0 is each fan's minimum speed, 1 its maximum
+    "fan_tuning": {},  # {profile: {"start", "full", "top"}}, only what differs from its defaults
 }
 
 
@@ -42,6 +48,12 @@ def validate(raw):
     for key in ("menu_bar_show_charging", "open_dashboard_at_launch", "record_history", "update_automatically"):
         if isinstance(raw.get(key), bool):
             s[key] = raw[key]
+    if raw.get("fan_profile") in fans.PROFILE_IDS:
+        s["fan_profile"] = raw["fan_profile"]
+    level = raw.get("fan_manual_level")
+    if isinstance(level, (int, float)) and not isinstance(level, bool) and math.isfinite(level):
+        s["fan_manual_level"] = round(min(max(float(level), 0.0), 1.0), 3)
+    s["fan_tuning"] = fans.validate_tuning(raw.get("fan_tuning"))
     return s
 
 

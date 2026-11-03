@@ -37,18 +37,21 @@ def test_check_for_updates_button_does_what_the_menu_item_does(monkeypatch):
 
 def test_live_data_carries_the_update_status_for_settings():
     app = SimpleNamespace(_updater=SimpleNamespace(status="downloading", version="1.2.5"),
-                          _sampler=SimpleNamespace(dashboard_polled=lambda thermals: None), _live=LiveState())
-    assert Api(app=app).get_live(0)["update"] == ["downloading", "1.2.5"]
+                          _sampler=SimpleNamespace(dashboard_polled=lambda fans: None), _live=LiveState(),
+                          _fans=SimpleNamespace(status={"profile": "balanced", "state": "watching", "start": 55}))
+    live = Api(app=app).get_live(0)
+    assert live["update"] == ["downloading", "1.2.5"]
+    assert live["fan_control"] == {"profile": "balanced", "state": "watching", "start": 55}
 
 
-def test_fans_are_read_while_the_thermals_page_is_showing():
+def test_fans_are_read_while_the_dashboard_or_thermals_is_showing():
     polls = []
     app = SimpleNamespace(_updater=SimpleNamespace(status="idle", version=None),
-                          _sampler=SimpleNamespace(dashboard_polled=lambda thermals: polls.append(thermals)),
-                          _live=LiveState())
-    Api(app=app).get_live(0, "thermals")
-    Api(app=app).get_live(0, "now")
-    assert polls == [True, False]
+                          _sampler=SimpleNamespace(dashboard_polled=lambda fans: polls.append(fans)),
+                          _live=LiveState(), _fans=SimpleNamespace(status={}))
+    for page in ("dashboard", "thermals", "now", "settings"):
+        Api(app=app).get_live(0, page)
+    assert polls == [True, True, False, False]
 
 
 def test_thermal_points_only_exist_where_temperatures_were_read():
