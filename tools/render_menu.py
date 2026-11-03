@@ -3,7 +3,7 @@
     python3 tools/render_menu.py OUT [--state holding] [--profile balanced] [--fahrenheit] ...
 
 Writes OUT-light.png and OUT-dark.png, and prints the menu's items in order. The custom
-views (fan profiles, Manual's slider, the temperature tiles, the Power rows) are statusbar.py's
+views (fan profiles, the temperature tiles, the Power rows) are statusbar.py's
 own, filled in from made-up readings; the plain items (section headers, actions) are drawn
 as labels, so their fonts and spacing only approximate macOS's. The readings match
 tools/preview/stub.js. `--help` lists the options.
@@ -24,7 +24,7 @@ import fans  # noqa: E402
 import settings as app_settings  # noqa: E402
 import statusbar  # noqa: E402
 
-STATES = ("off", "watching", "holding", "override", "approval", "unavailable", "other", "error")
+STATES = ("off", "holding", "override", "approval", "unavailable", "other", "error")
 
 
 def options():
@@ -46,11 +46,11 @@ def readings(o):
     limits = [(1499, 4296), (1499, 4744)][: 0 if o.fanless else 1 if o.onefan else 2]
     profile = o.profile or ("macos" if o.state == "off" else "balanced")
     held = o.state in ("holding", "override", "other")
-    targets = ([hi for _, hi in limits] if o.state == "override" else
-               fans.manual_speeds(0.25, limits) if profile == fans.MANUAL else [2310, 2560][: len(limits)])
+    targets = ([hi for _, hi in limits] if o.state == "override" or profile == "max" else
+               [2310, 2560][: len(limits)])
     status = {"profile": profile, "state": "nofans" if o.fanless else o.state}
     status.update({
-        "watching": {"start": 55}, "holding": {"targets": targets},
+        "holding": {"targets": targets},
         "override": {"reason": "pressure", "pressure": 2, "targets": targets},
         "unavailable": {"reason": "until Mac Engine Room is in your Applications folder"},
         "error": {"reason": "it couldn't reach the fan helper"},
@@ -69,7 +69,7 @@ def readings(o):
         "has_screen_power": not o.noscreen, "chip_power": 1.8, "adapter_power": 52.3 if o.charging else 0,
         "adapter": {"name": "96W USB-C Power Adapter", "watts": 96} if o.charging else None,
     }
-    settings = {**app_settings.DEFAULTS, "fan_profile": profile, "fan_manual_level": 0.25,
+    settings = {**app_settings.DEFAULTS, "fan_profile": profile,
                 "temperature_unit": "fahrenheit" if o.fahrenheit else "celsius",
                 "menu_fan_profiles": o.menu_profiles.split(",")}
     return status, sample, thermals, settings
@@ -103,8 +103,7 @@ def label(item, width):
 
 def rows(bar, width):
     """(name, view) for each item showing, top to bottom."""
-    names = [(bar._profiles_item, "fan profiles"), (bar._manual_item, "Manual's slider"),
-             (bar._tiles_item, "temperature tiles")] + [(item, f"{key} row") for key, item in bar._rows.items()]
+    names = [(bar._profiles_item, "fan profiles"), (bar._tiles_item, "temperature tiles")] + [(item, f"{key} row") for key, item in bar._rows.items()]
     out = []
     for item in bar._menu.itemArray():
         if item.isHidden():

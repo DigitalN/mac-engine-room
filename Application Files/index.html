@@ -168,12 +168,13 @@ main { height: calc(100% - 53px); overflow-y: auto; padding: 18px 20px 28px; }
 .fan .gauge { max-width: none; margin-top: 8px; }
 .fan .gauge > div { background: var(--accent); }
 .fan-foot { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; margin-top: 6px; }
+/* The Dashboard's Fans tile: each fan's speed and gauge, stacked, in a tile's height. */
+.tile .fans { grid-template-columns: 1fr; gap: 6px; margin-top: 2px; }
+.tile .fan-head .val { font-size: 15px; }
+.tile .fan .gauge { height: 6px; margin-top: 3px; }
 .card h2 .seg { text-transform: none; letter-spacing: 0; }
 .fan-control { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
 .card.fan-control { padding: 12px 18px; border-top: 0; }  /* the Dashboard's, under its tiles */
-.fan-manual { display: flex; align-items: center; gap: 12px; }
-.fan-manual input { flex: 1; accent-color: var(--accent); }
-.fan-manual .num { min-width: 110px; text-align: right; }
 .fan-status { display: flex; align-items: center; gap: 12px; color: var(--muted); min-height: 24px; }
 .fan-status span { flex: 1; }
 .menu-profiles { display: flex; gap: 6px; }
@@ -182,7 +183,7 @@ main { height: calc(100% - 53px); overflow-y: auto; padding: 18px 20px 28px; }
   padding: 10px 0 12px;
 }
 .fan-table .th { color: var(--muted); font-size: 12px; text-align: center; }
-.fan-table label, .fan-table .fixed { display: flex; justify-content: center; align-items: center; gap: 4px; color: var(--muted); }
+.fan-table label { display: flex; justify-content: center; align-items: center; gap: 4px; color: var(--muted); }
 .btn.plain { background: none; color: var(--accent); padding: 0; justify-self: end; }
 .fan-table input {
   width: 58px; font: inherit; font-size: 13px; color: var(--text); background: var(--seg-bg); border: 0; border-radius: 6px;
@@ -329,11 +330,6 @@ dialog .actions { justify-content: flex-end; }
         </div>
         <div class="tiles" id="dash-thermals"></div>
         <div class="card fan-control" id="dash-fan-control">
-          <div class="fan-manual" id="dash-manual">
-            <span>Manual</span>
-            <input type="range" id="dash-manual-level" min="0" max="1000" step="1" aria-label="Manual fan speed">
-            <span class="num" id="dash-manual-rpm"></span>
-          </div>
           <div class="fan-status" id="dash-fan-status-row"><span id="dash-fan-status"></span><button class="btn" id="dash-fan-approve">Open Login Items</button></div>
         </div>
       </div>
@@ -355,11 +351,6 @@ dialog .actions { justify-content: flex-end; }
         </h2>
         <div class="fans" id="t-fans"></div>
         <div class="fan-control" id="t-fan-control">
-          <div class="fan-manual" id="t-manual">
-            <span>Manual</span>
-            <input type="range" id="t-manual-level" min="0" max="1000" step="1" aria-label="Manual fan speed">
-            <span class="num" id="t-manual-rpm"></span>
-          </div>
           <div class="fan-status" id="t-fan-status-row"><span id="t-fan-status"></span><button class="btn" id="t-fan-approve">Open Login Items</button></div>
         </div>
       </div>
@@ -503,10 +494,6 @@ dialog .actions { justify-content: flex-end; }
           <div class="srow">
             <div class="lbl">Open at login<div class="hint" id="s-login-hint"></div></div>
             <label class="switch"><input type="checkbox" id="s-open-at-login"><span></span></label>
-          </div>
-          <div class="srow">
-            <div class="lbl">Open this window at launch<div class="hint">Off keeps Mac Engine Room in the menu bar only. At login it always starts there.</div></div>
-            <label class="switch"><input type="checkbox" id="s-open-at-launch"><span></span></label>
           </div>
           <div class="srow">
             <div class="lbl">Update automatically<div class="hint" id="s-update-hint"></div></div>
@@ -980,14 +967,37 @@ function sensorsText(th, t) {
 // Tiles as on the Thermals page: a coloured dot for a chart's series, the value and a line
 // under it. Rebuilt only when the tiles shown change; then just the values are written.
 // `word`: the value is a word rather than a number ("Not connected"), shown smaller.
+// `fans`: each fan's speed and gauge in place of the value.
 function renderTiles(id, list) {
   put(id, 'html', list.map(t => `<div class="card tile"><h2>${t.color ? `<i style="background:var(${t.color})"></i>` : ''}${t.name}</h2>` +
-    '<div class="v num"></div><div class="s num"></div></div>').join(''));
+    (t.fans ? `<div class="fans">${fansHTML(t.fans.length, false)}</div>` : '<div class="v num"></div>') +
+    '<div class="s num"></div></div>').join(''));
   list.forEach((t, i) => {
     const [, v, s] = $(id).children[i].children;
-    put(v, 'text', t.value); put(v, 'class', t.word ? 'v num word' : 'v num'); put(s, 'text', t.sub || ' ');
+    if (t.fans) fillFans(v, t.fans);
+    else { put(v, 'text', t.value); put(v, 'class', t.word ? 'v num word' : 'v num'); }
+    put(s, 'text', t.sub || ' ');
   });
 }
+
+// Each fan's speed and a gauge from off to its maximum: off is a fan's slowest, so the gauge
+// has no minimum. `foot` (the Thermals page): who sets the speed, and the maximum.
+const fansHTML = (n, foot) => Array.from({ length: n }, (_, i) =>
+  `<div class="fan"><div class="fan-head"><span class="name">${n > 1 ? `Fan ${i + 1}` : 'Fan'}</span><span class="val num"></span></div>` +
+  '<div class="gauge"><div></div></div>' + (foot ? '<div class="fan-foot num"><span></span><span></span></div>' : '') + '</div>').join('');
+function fillFans(el, fans) {
+  [...el.children].forEach((fan, i) => {
+    const f = fans[i], [head, gauge, foot] = fan.children;
+    put(head.lastElementChild, 'text', !isNum(f?.rpm) ? '—' : f.rpm === 0 ? 'Off' : `${fmtRpm(f.rpm)} rpm`);
+    put(gauge.firstElementChild, 'width', f?.max ? `${Math.min(100, Math.round(f.rpm / f.max * 200) / 2)}%` : '0%');
+    if (!foot) return;
+    put(foot.children[0], 'text', fanWho(f));
+    put(foot.children[1], 'text', `Max ${fmtRpm(f?.max)}`);
+  });
+}
+// Who sets a fan's speed right now; the profile buttons show the profile chosen.
+const fanWho = f => f?.manual == null ? '' : !f.manual ? 'Controlled by macOS' : !fanHeld() ? 'Set by another app'
+  : fanControl.state === 'override' ? 'Full speed for safety' : `Set by ${profileName(fanControl.profile)}`;
 
 function renderThermals() {
   if (activeTab !== 'thermals') return;
@@ -1001,25 +1011,15 @@ function renderThermals() {
   if (!hasFans) return;
   if (th?.fans?.length) fanCount = th.fans.length;
   put('t-fans', '--n', String(fanCount));
-  put('t-fans', 'html', Array.from({ length: fanCount }, (_, i) =>
-    `<div class="fan"><div class="fan-head"><span class="name">${fanCount > 1 ? `Fan ${i + 1}` : 'Fan'}</span><span class="val num"></span></div>` +
-    '<div class="gauge"><div></div></div><div class="fan-foot num"><span></span><span></span><span></span></div></div>').join(''));
-  [...$('t-fans').children].forEach((el, i) => {
-    const f = th?.fans?.[i], [head, gauge, foot] = el.children;
-    put(head.lastElementChild, 'text', !isNum(f?.rpm) ? '—' : f.rpm === 0 ? 'Off' : `${fmtRpm(f.rpm)} rpm`);
-    put(gauge.firstElementChild, 'width', f?.max ? `${Math.min(100, Math.round(f.rpm / f.max * 200) / 2)}%` : '0%');
-    put(foot.children[0], 'text', `Min ${fmtRpm(f?.min)}`);
-    put(foot.children[1], 'text', f?.manual == null ? '' : !f.manual ? 'Controlled by macOS'
-      : fanHeld() ? `Set by ${profileName(fanControl.profile)}` : 'Set by another app');
-    put(foot.children[2], 'text', `Max ${fmtRpm(f?.max)}`);
-  });
-  renderFanControls('t', th, false);
+  put('t-fans', 'html', fansHTML(fanCount, true));
+  fillFans($('t-fans'), th?.fans || []);
+  renderFanControls('t', false);
 }
 
 // ── fan control ─────────────────────────────────────────
 // The profile is a setting; fans.py runs it and reports `fanControl` with every poll.
-const PROFILE_IDS = ['macos', 'balanced', 'performance', 'smart', 'max', 'manual'];
-const profileName = id => ({ macos: 'macOS default', manual: 'Manual' })[id] || fanProfiles.find(p => p.id === id)?.name || id;
+const PROFILE_IDS = ['macos', 'balanced', 'performance', 'max'];
+const profileName = id => ({ macos: 'macOS default' })[id] || fanProfiles.find(p => p.id === id)?.name || id;
 const fanHeld = () => fanControl.state === 'holding' || fanControl.state === 'override';
 const rpmList = rpms => {
   const each = [...new Set((rpms || []).filter(isNum))];
@@ -1031,9 +1031,6 @@ function fanStatusText(fc) {
   const name = profileName(fc.profile);
   switch (fc.state) {
     case 'off': return 'macOS controls the fans.';
-    case 'watching': return fc.profile === 'max'
-      ? `Full speed once the CPU or GPU stays above ${fmtT(fc.start)} for 5 seconds. Until then, macOS controls the fans.`
-      : `macOS controls the fans until the CPU or GPU reaches ${fmtT(fc.start)}.`;
     case 'holding': return `${name} is running the fans at ${rpmList(fc.targets)}.`;
     case 'override': return `Full speed, because ${({
       pressure: `macOS reports ${PRESSURE[Math.max(1, fc.pressure || 0)]} thermal pressure`,
@@ -1047,16 +1044,15 @@ function fanStatusText(fc) {
   }
 }
 
-// The profile buttons, Manual's slider and the status line, on the Thermals page ("t") and the
-// Dashboard ("dash"). `quiet` (the Dashboard): the status line only when it needs the user or
-// something unusual is going on; the Fans tile says who has the fans otherwise.
-function renderFanControls(prefix, th, quiet) {
+// The profile buttons and the status line, on the Thermals page ("t") and the Dashboard
+// ("dash"). `quiet` (the Dashboard): the status line only when it needs the user or something
+// unusual is going on; the Fans tile says who has the fans otherwise.
+function renderFanControls(prefix, quiet) {
   const el = name => $(`${prefix}-${name}`);
   const fc = fanControl, on = fc.state !== 'nofans' && fanProfiles.length > 0;
-  const manual = on && fc.profile === 'manual';
   const status = on && (!quiet || ['approval', 'unavailable', 'error', 'other', 'override'].includes(fc.state));
   put(el('profiles'), 'display', on ? '' : 'none');
-  put(el('fan-control'), 'display', manual || status ? '' : 'none');
+  put(el('fan-control'), 'display', status ? '' : 'none');
   if (!on) return;
   put(el('profiles'), 'html', PROFILE_IDS.map(id => `<button data-profile="${id}">${esc(profileName(id))}</button>`).join(''));
   for (const b of el('profiles').children) {
@@ -1066,19 +1062,11 @@ function renderFanControls(prefix, th, quiet) {
   put(el('fan-status-row'), 'display', status ? '' : 'none');
   put(el('fan-status'), 'text', status ? fanStatusText(fc) : '');
   put(el('fan-approve'), 'display', fc.state === 'approval' ? '' : 'none');
-  put(el('manual'), 'display', manual ? '' : 'none');
-  if (!manual) return;
-  const slider = el('manual-level');
-  if (document.activeElement !== slider && settings) slider.value = Math.round(settings.fan_manual_level * 1000);
-  const level = slider.value / 1000, fans = (th?.fans || []).filter(f => isNum(f.min) && isNum(f.max));
-  put(el('manual-rpm'), 'text', fans.length ? rpmList(fans.map(f => Math.round(f.min + (f.max - f.min) * level))) : ' ');
 }
 for (const prefix of ['t', 'dash']) {
   $(`${prefix}-profiles`).addEventListener('click', e => {
     const b = e.target.closest('button[data-profile]'); if (b) save({ fan_profile: b.dataset.profile });
   });
-  $(`${prefix}-manual-level`).addEventListener('input', () => renderFanControls(prefix, freshThermals(), prefix === 'dash'));
-  $(`${prefix}-manual-level`).addEventListener('change', e => save({ fan_manual_level: e.target.value / 1000 }));
   $(`${prefix}-fan-approve`).onclick = () => call('open_fan_approval');
 }
 
@@ -1118,27 +1106,20 @@ function renderThermalChart() {
 // ── Dashboard ───────────────────────────────────────────
 // A short page to land on: a row of tiles per tool, no charts (those are on the tools'
 // own tabs). Each row's heading opens its tool.
-function fanSpeeds(fans) {
-  const speeds = (fans || []).map(f => f.rpm).filter(isNum), top = Math.max(...speeds);
-  return !speeds.length ? '—' : top ? `${fmtRpm(top)} rpm` : 'Off';  // Apple silicon stops them when cool
-}
-
 function renderDashboard() {
   if (activeTab !== 'dashboard') return;
   const th = freshThermals(), s = latest;
   const temps = TEMPS.filter(t => t.cores && available().includes(t.key))
     .map(t => ({ ...t, value: fmtT(th?.[t.key]), sub: sensorsText(th, t) }));
   if (available().includes('fans')) {
-    // Who has the fans right now; the buttons above show the profile chosen.
-    const fans = th?.fans || [], fc = fanControl;
-    const who = fanHeld() ? (fc.state === 'override' ? 'Full speed for safety' : `Set by ${profileName(fc.profile)}`)
-      : fans.some(f => f.manual) ? 'Set by another app' : 'Controlled by macOS';
-    temps.push({ name: 'Fans', value: fanSpeeds(fans), sub: !th ? ' ' :
-      [who, fans.length > 1 && fans.some(f => f.rpm > 0) && `fastest of ${fans.length}`].filter(Boolean).join(' · ') });
+    if (th?.fans?.length) fanCount = th.fans.length;
+    const fans = th?.fans || [];
+    temps.push({ name: 'Fans', fans: Array.from({ length: fanCount }, (_, i) => fans[i]),
+      sub: th ? fanWho(fans.find(f => f.manual) || fans[0]) : ' ' });
   }
   put('dash-thermals-row', 'display', temps.length ? '' : 'none');
   renderTiles('dash-thermals', temps);
-  renderFanControls('dash', th, true);
+  renderFanControls('dash', true);
 
   if (!s) return;
   const a = s.adapter, power = [{ name: 'System', color: '--system', value: fmtW(s.system_load),
@@ -1340,7 +1321,6 @@ async function renderSettings() {
   login.checked = !!settings.launch_at_login;
   login.disabled = settings.launch_at_login === null;
   $('s-login-hint').textContent = login.disabled ? 'Available when Mac Engine Room runs from your Applications folder.' : '';
-  $('s-open-at-launch').checked = settings.open_dashboard_at_launch;
   $('s-update').checked = settings.update_automatically;
   $('s-record').checked = settings.record_history;
   $('s-charge-row').hidden = latest?.has_battery === false;  // a desktop Mac has no charge limit
@@ -1361,8 +1341,9 @@ async function renderSettings() {
   $('s-history-count').textContent = `${list.length} session${list.length === 1 ? '' : 's'} stored`;
 }
 
-// Settings > Thermals: each profile's Fans start, Full speed at and Top speed, in the unit
-// chosen. Only what differs from a profile's defaults is kept; Reset drops it.
+// Settings > Fan profiles: Balanced's and Performance's Speeds up at, Top speed and Top speed
+// at, in the unit chosen (Max has nothing to tune). Only what differs from a profile's
+// defaults is kept; Reset drops it.
 const fromUnit = v => unitF ? (v - 32) * 5 / 9 : v;
 // What each profile is for, under its name.
 function renderFanTuning() {
@@ -1375,15 +1356,15 @@ function renderFanTuning() {
     put(select, 'html', PROFILE_IDS.map(id => `<option value="${id}">${esc(profileName(id))}</option>`).join(''));
     if (document.activeElement !== select) select.value = menuProfiles[i];
   });
-  // A table: the headings once, then a row of numbers per profile. Max goes straight to full speed.
+  // A table: the headings once, then a row of numbers per profile.
   const input = (p, key, step) => `<input type="number" data-profile="${p.id}" data-key="${key}" step="${step}">`;
-  put('s-fan-profiles', 'html', '<div></div><div class="th">Starts at</div><div class="th">Top speed</div><div class="th">Top speed at</div><div></div>' +
-    fanProfiles.map(p => `<div class="name">${esc(p.name)}</div><label>${input(p, 'start', 1)}°</label>` +
-      (p.start_only ? '<div class="fixed">100%</div><div class="fixed">At once</div>'
-        : `<label>${input(p, 'top', 5)}%</label><label>${input(p, 'full', 1)}°</label>`) +
+  const tunable = fanProfiles.filter(p => p.tunable);
+  put('s-fan-profiles', 'html', '<div></div><div class="th">Speeds up at</div><div class="th">Top speed</div><div class="th">Top speed at</div><div></div>' +
+    tunable.map(p => `<div class="name">${esc(p.name)}</div><label>${input(p, 'start', 1)}°</label>` +
+      `<label>${input(p, 'top', 5)}%</label><label>${input(p, 'full', 1)}°</label>` +
       `<button class="btn plain" data-reset="${p.id}">Reset</button>`).join(''));
   const L = tuningLimits, deg = c => Math.round(toUnit(c));
-  for (const p of fanProfiles) {
+  for (const p of tunable) {
     const t = { ...p, ...(settings.fan_tuning[p.id] || {}) };
     const range = { start: [deg(L.start[0]), deg(L.start[1])], full: [deg(t.start + L.min_span), deg(L.full_max)], top: L.top };
     for (const el of $('s-fan-profiles').querySelectorAll(`input[data-profile="${p.id}"]`)) {
@@ -1422,7 +1403,6 @@ async function save(changes) {
 $('s-metric').onchange = e => save({ menu_bar_metric: e.target.value });
 $('s-show-charging').onchange = e => save({ menu_bar_show_charging: e.target.checked });
 $('s-open-at-login').onchange = e => save({ launch_at_login: e.target.checked });
-$('s-open-at-launch').onchange = e => save({ open_dashboard_at_launch: e.target.checked });
 $('s-update').onchange = e => save({ update_automatically: e.target.checked });
 $('s-record').onchange = e => save({ record_history: e.target.checked });
 $('s-theme').onclick = e => { const b = e.target.closest('button'); if (b) save({ theme: b.dataset.theme }); };

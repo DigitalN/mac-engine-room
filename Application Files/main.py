@@ -209,9 +209,9 @@ class Sampler(threading.Thread):
         self._on_sample(sample, self._thermals.read(parts) if parts else None)
 
     def qos(self):
-        """Background QoS, on the efficiency cores, even with a fan profile watching the
-        temperatures. While the dashboard is watched or the fans are held, utility, so a busy
-        Mac can't stall the chart or the fans for seconds."""
+        """Background QoS, on the efficiency cores. While the dashboard is watched or a fan
+        profile holds the fans, utility, so a busy Mac can't stall the chart or the fans for
+        seconds."""
         busy = self.dashboard_watched() or self._fans_held()
         return QOS_CLASS_UTILITY if busy else QOS_CLASS_BACKGROUND
 
@@ -416,7 +416,7 @@ class EngineRoomApp:
         from PyObjCTools import AppHelper
 
         self._recorder.enabled = values["record_history"]
-        self._fans.nudge()  # a profile chosen, or Manual's slider moved: act on it now
+        self._fans.nudge()  # a profile chosen or tuned: act on it now
         AppHelper.callAfter(self._apply_theme, values["theme"])
 
     # ── window lifecycle (main thread) ──
@@ -520,19 +520,14 @@ class EngineRoomApp:
         if view is not None and view.respondsToSelector_("evaluateJavaScript:completionHandler:"):
             view.evaluateJavaScript_completionHandler_(f"showTab({json.dumps(tab)})", None)
 
-    def _finish_launching(self, show):
+    def _finish_launching(self):
         """Runs as the app finishes launching, while macOS's "open application" event is
-        still current: the only moment a login launch can be told apart. At login the
-        dashboard stays hidden, whatever the setting says."""
+        still current: the only moment a login launch can be told apart. The app always
+        starts in the menu bar; opening it again while it runs shows the dashboard."""
         import launch
 
-        at_login = launch.launched_at_login()
-        if show and not at_login:
-            self.show_dashboard()
-        else:
-            self._update_main_qos()
-        log.info("Mac Engine Room %s started (dashboard %s%s)", VERSION,
-                 "shown" if show and not at_login else "hidden", ", opened at login" if at_login else "")
+        self._update_main_qos()
+        log.info("Mac Engine Room %s started%s", VERSION, ", opened at login" if launch.launched_at_login() else "")
 
     def _check_graphics_process(self):
         """WebKit draws the page in a helper process. When that hangs, WebKit gives up on
@@ -661,9 +656,8 @@ class EngineRoomApp:
         if rename.LOGIN_ITEM_ARGUMENT in sys.argv:
             self._login_item.set_enabled(True)
 
-        # The window starts hidden, and _finish_launching shows it unless this is a login
-        # launch. Relaunching into an update shouldn't pop the dashboard up either.
-        show = self._settings.get()["open_dashboard_at_launch"] and launch.BACKGROUND_ARGUMENT not in sys.argv
+        # The window starts hidden: the app starts in the menu bar, and the menu or opening the
+        # app again shows the dashboard.
         AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
         self._install_delegate_methods()
 
@@ -681,7 +675,6 @@ class EngineRoomApp:
             on_open=self.show_dashboard, on_check_updates=self._updater.check_now, on_quit=self.quit,
             on_menu_open=self._on_menu_open, fan_status=lambda: self._fans.status,
             on_profile=lambda pid: self._settings.update({"fan_profile": pid}),
-            on_manual_level=lambda level: self._settings.update({"fan_manual_level": level}),
             on_allow_fans=self._fans.open_login_items)
         self._sampler.start()
         self._fans.start()
@@ -692,11 +685,11 @@ class EngineRoomApp:
         self._updater.start()
 
         if AppKit.NSRunningApplication.currentApplication().isFinishedLaunching():  # e.g. after offer_to_move
-            AppHelper.callAfter(self._finish_launching, show)
+            AppHelper.callAfter(self._finish_launching)
         else:
             AppKit.NSNotificationCenter.defaultCenter().addObserverForName_object_queue_usingBlock_(
                 AppKit.NSApplicationDidFinishLaunchingNotification, None, None,
-                lambda notification: self._finish_launching(show))
+                lambda notification: self._finish_launching())
         webview.start(private_mode=True, debug=False)
         os._exit(0)
 

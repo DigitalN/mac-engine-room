@@ -2,16 +2,18 @@
 the root helper that writes the speeds.
 
 The curve runs here, once a second, on the hottest CPU or GPU *core*: not the chip hotspots
-or the battery sensors ThermalForge mixed in, so the same numbers start the fans later and
-quieter. Writing a fan speed needs root, which only the small Swift helper in "Fan Helper"
+or the battery sensors ThermalForge mixed in, so the same numbers speed the fans up later and
+quieter. A chosen profile has the fans from the moment it's chosen: Balanced and Performance
+hold them at their minimum speed until the cores reach the profile's start, Max at full speed
+the whole time. ThermalForge, and this app until 1.2.10, left them with macOS until then, so
+choosing a profile on a cool Mac seemed to do nothing. Writing a fan speed needs root, which only the small Swift helper in "Fan Helper"
 has. launchd starts it on demand, it only answers this app, and its safety nets (the fans go
 back to macOS if this app disconnects, stops checking in, or the Mac sleeps) work even if
 this app hangs.
 
 The profiles and their numbers come from ThermalForge (github.com/ProducerGuy/ThermalForge,
-MIT; see THIRD-PARTY-NOTICES), with fixes from its issues: hand back only after 5 seconds
-below Fans stop (#73), start at the fans' minimum (#37), smooth Smart's trend (#37), and a
-safety override that follows macOS's thermal pressure rather than a fixed 95° (#68).
+MIT; see THIRD-PARTY-NOTICES), with fixes from its issues: start at the fans' minimum (#37),
+and a safety override that follows macOS's thermal pressure rather than a fixed 95° (#68).
 
 Everything above FanControl is pure and unit-tested.
 """
@@ -30,54 +32,44 @@ log = logging.getLogger("pythonflow")
 
 class Profile:
     """A fan curve. Temperatures are °C; `top` and the ramps are fractions of each fan's
-    maximum speed; `ramp_up` and `ramp_down` are per second. `gap` is how far Fans stop sits
-    below Fans start."""
+    maximum speed; `ramp_up` and `ramp_down` are per second. Below `start` the fans hold their
+    minimum speed; from there they speed up along `shape` to `top` at `full`."""
 
-    def __init__(self, name, start, full, top, gap, shape, ramp_up, ramp_down, trigger, instant=False, trend=False):
-        self.name, self.start, self.full, self.top, self.gap = name, start, full, top, gap
-        self.shape, self.ramp_up, self.ramp_down, self.trigger = shape, ramp_up, ramp_down, trigger
-        self.instant = instant  # Max: straight to top speed, no curve
-        self.trend = trend  # Smart: a rising temperature speeds the fans up sooner
-
-    @property
-    def stop(self):
-        return self.start - self.gap
+    def __init__(self, name, start, full, top, shape, ramp_up, ramp_down, instant=False):
+        self.name, self.start, self.full, self.top = name, start, full, top
+        self.shape, self.ramp_up, self.ramp_down = shape, ramp_up, ramp_down
+        self.instant = instant  # Max: top speed the whole time, no curve
 
     def tuned(self, tuning):
-        """A copy with the user's Fans start, Full speed at and Top speed (already validated)."""
-        copy = Profile(self.name, self.start, self.full, self.top, self.gap, self.shape, self.ramp_up,
-                       self.ramp_down, self.trigger, self.instant, self.trend)
+        """A copy with the user's Speeds up at, Top speed at and Top speed (already validated)."""
+        copy = Profile(self.name, self.start, self.full, self.top, self.shape, self.ramp_up,
+                       self.ramp_down, self.instant)
         copy.start = tuning.get("start", copy.start)
         copy.full = tuning.get("full", copy.full)
         copy.top = tuning.get("top", round(copy.top * 100)) / 100
         return copy
 
 
-# ThermalForge's numbers: Fans start, Full speed at, Top speed, the gap to Fans stop, the
-# curve's shape, ramps up and down, and how long the cores stay at Fans start first.
+# ThermalForge's numbers: where the fans speed up from their minimum, where they reach top
+# speed, top speed, the curve's shape, and the ramps up and down.
 PROFILES = {
-    "balanced": Profile("Balanced", 55, 70, 0.60, 5, "ease_in", 0.05, 0.025, 8),
-    "performance": Profile("Performance", 55, 65, 0.85, 5, "linear", 0.10, 0.04, 4),
-    "smart": Profile("Smart", 53, 85, 1.00, 3, "s_curve", 0.05, 0.025, 6, trend=True),
-    "max": Profile("Max", 65, 65, 1.00, 15, "linear", 1.0, 0.025, 5, instant=True),
+    "balanced": Profile("Balanced", 55, 70, 0.60, "ease_in", 0.05, 0.025),
+    "performance": Profile("Performance", 55, 65, 0.85, "linear", 0.10, 0.04),
+    "max": Profile("Max", None, None, 1.00, "linear", 1.0, 0.025, instant=True),
 }
-MACOS, MANUAL = "macos", "manual"
-PROFILE_IDS = (MACOS, "balanced", "performance", "smart", "max", MANUAL)
-PROFILE_NAMES = {MACOS: "macOS default", MANUAL: "Manual", **{k: p.name for k, p in PROFILES.items()}}
+MACOS = "macos"
+PROFILE_IDS = (MACOS, "balanced", "performance", "max")
+PROFILE_NAMES = {MACOS: "macOS default", **{k: p.name for k, p in PROFILES.items()}}
 MENU_PROFILES = [MACOS, "balanced", "max"]  # the three the menu shows until others are chosen in Settings
+TUNABLE = ("balanced", "performance")  # Max has nothing to tune
 
-# Settings > Thermals limits: Fans start 50–85°, Full speed at least 5° above it and at most
-# 94°, Top speed 30–100%. Max only has Fans start.
+# Settings > Fan profiles limits: Speeds up at 50–85°, Top speed at at least 5° above it and at
+# most 94°, Top speed 30–100%.
 START_RANGE = (50.0, 85.0)
 FULL_MAX = 94.0
 MIN_SPAN = 5.0
 TOP_RANGE = (30, 100)
 TUNING_LIMITS = {"start": START_RANGE, "full_max": FULL_MAX, "min_span": MIN_SPAN, "top": TOP_RANGE}
-
-HAND_BACK_AFTER = 5.0  # seconds at or below Fans stop, holding minimum speed until then
-TREND_WINDOW = 10.0  # seconds of readings Smart's trend is fitted to
-TREND_BOOST = 0.2  # Smart: fraction of top speed added per °C/s of rise
-
 
 def validate_tuning(raw):
     """Clean {profile: {"start", "full", "top"}} from settings.json: unknown profiles and keys
@@ -87,7 +79,7 @@ def validate_tuning(raw):
     if not isinstance(raw, dict):
         return tuning
     for pid, values in raw.items():
-        if pid not in PROFILES or not isinstance(values, dict):
+        if pid not in TUNABLE or not isinstance(values, dict):
             continue
 
         def number(key):
@@ -95,120 +87,73 @@ def validate_tuning(raw):
             return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) else None
 
         clean = {}
-        start = number("start")
+        start, full, top = number("start"), number("full"), number("top")
         if start is not None:
             clean["start"] = round(min(max(start, START_RANGE[0]), START_RANGE[1]), 1)
-        if pid != "max":
-            full, top = number("full"), number("top")
-            lowest = clean.get("start", PROFILES[pid].start) + MIN_SPAN
-            if full is not None:
-                clean["full"] = round(min(max(full, lowest), FULL_MAX), 1)
-            elif "start" in clean and PROFILES[pid].full < lowest:
-                clean["full"] = lowest  # a later Fans start pushes the default Full speed at along
-            if top is not None:
-                clean["top"] = int(min(max(round(top), TOP_RANGE[0]), TOP_RANGE[1]))
+        lowest = clean.get("start", PROFILES[pid].start) + MIN_SPAN
+        if full is not None:
+            clean["full"] = round(min(max(full, lowest), FULL_MAX), 1)
+        elif "start" in clean and PROFILES[pid].full < lowest:
+            clean["full"] = lowest  # a later Speeds up at pushes the default Top speed at along
+        if top is not None:
+            clean["top"] = int(min(max(round(top), TOP_RANGE[0]), TOP_RANGE[1]))
         if clean:
             tuning[pid] = clean
     return tuning
 
 
 def page_profiles():
-    """The tunable profiles' defaults, for Settings on the page."""
-    return [{"id": pid, "name": p.name, "start": p.start, "full": p.full, "top": round(p.top * 100), "gap": p.gap,
-             "start_only": p.instant} for pid, p in PROFILES.items()]
+    """The profiles' names and defaults, for the page; Settings tunes the `tunable` ones."""
+    return [{"id": pid, "name": p.name, "start": p.start, "full": p.full, "top": round(p.top * 100),
+             "tunable": pid in TUNABLE} for pid, p in PROFILES.items()]
 
 
 def profile(pid, tuning=None):
-    """The profile with the user's tuning, or None for macOS default and Manual."""
+    """The profile with the user's tuning, or None for macOS default."""
     base = PROFILES.get(pid)
     return base.tuned((tuning or {}).get(pid, {})) if base else None
 
 
 def shaped(position, shape):
-    if shape == "ease_in":
-        return position * position
-    if shape == "s_curve":
-        return position * position * (3 - 2 * position)
-    return position
-
-
-def trend(history):
-    """°C per second: the least-squares slope of (time, temperature) readings. A line through
-    every reading rather than the newest minus the oldest, so one noisy reading can't swing it."""
-    if len(history) < 3:
-        return 0.0
-    n = len(history)
-    mean_t = sum(t for t, _ in history) / n
-    mean_c = sum(c for _, c in history) / n
-    spread = sum((t - mean_t) ** 2 for t, _ in history)
-    return sum((t - mean_t) * (c - mean_c) for t, c in history) / spread if spread else 0.0
+    return position * position if shape == "ease_in" else position
 
 
 class Curve:
     """A profile's curve, ticked about once a second with the hottest core. Returns the speed
-    to hold as a fraction of each fan's maximum, or None to leave the fans with macOS."""
+    to hold as a fraction of each fan's maximum, from the first tick: never below the fans'
+    minimum, so they're the profile's whatever the temperature."""
 
     def __init__(self, profile):
         self.profile = profile
-        self.fraction = None  # what the last tick asked for; None while the fans are with macOS
+        self.fraction = None  # what the last tick asked for; None before the first
         self._last = None
-        self._above_since = None
-        self._below_since = None
-        self._history = deque()
-
-    @property
-    def holding(self):
-        return self.fraction is not None
 
     def reset(self):
-        """Back to macOS, e.g. after sleep: the next speed comes from the temperatures then,
+        """Start over, e.g. after sleep: the next speed comes from the temperatures then,
         never an old one (ThermalForge #48)."""
-        self.fraction = self._last = self._above_since = self._below_since = None
-        self._history.clear()
+        self.fraction = self._last = None
 
     def tick(self, now, temp, min_fraction):
         p = self.profile
         dt = min(max(now - self._last, 0.0), 3.0) if self._last is not None else 1.0
         self._last = now
+        top = max(p.top, min_fraction)
+        if p.instant:
+            self.fraction = top
+            return top
+        if self.fraction is None:
+            self.fraction = min_fraction  # from the fans' minimum, then up the curve (ThermalForge #37)
         if temp is None:
             return self.fraction  # no reading: keep what's there
-        if p.trend:
-            self._history.append((now, temp))
-            while self._history and self._history[0][0] < now - TREND_WINDOW:
-                self._history.popleft()
         if temp < p.start:
-            self._above_since = None
-        elif self._above_since is None:
-            self._above_since = now
-
-        if self.fraction is None:
-            if self._above_since is None or now - self._above_since < p.trigger:
-                return None
-            # Straight to the fans' minimum, then up from there (Max: straight to full speed).
-            self.fraction = max(p.top, min_fraction) if p.instant else min_fraction
-            self._below_since = None
-            return self.fraction
-
-        if temp <= p.stop:
-            if self._below_since is None:
-                self._below_since = now
-            if now - self._below_since >= HAND_BACK_AFTER:
-                self.reset()
-                return None
             target = min_fraction
+        elif temp >= p.full:
+            target = p.top
         else:
-            self._below_since = None
-            if temp < p.start:
-                target = min_fraction  # between Fans stop and Fans start: hold minimum
-            elif p.instant or temp >= p.full:
-                target = p.top
-            else:
-                target = shaped((temp - p.start) / (p.full - p.start), p.shape) * p.top
-                if p.trend:
-                    target += max(trend(self._history), 0.0) * TREND_BOOST
-        target = min(max(target, min_fraction), max(p.top, min_fraction))
+            target = shaped((temp - p.start) / (p.full - p.start), p.shape) * p.top
+        target = min(max(target, min_fraction), top)
 
-        if target > self.fraction and not p.instant:
+        if target > self.fraction:
             target = min(target, self.fraction + p.ramp_up * dt)
         elif target < self.fraction:
             target = max(target, self.fraction - p.ramp_down * dt)
@@ -220,7 +165,7 @@ PRESSURE_NAMES = ("nominal", "fair", "serious", "critical")  # NSProcessInfoTher
 
 
 class Safety:
-    """Full speed while a profile or Manual holds the fans and the Mac is too hot. Not a fixed
+    """Full speed while a profile holds the fans and the Mac is too hot. Not a fixed
     95°: on M4 the hotspots read 96–113° while macOS is calm (ThermalForge #68). It follows
     macOS's thermal pressure (Serious or Critical at once, Fair after 30 seconds), backed up per
     kind of sensor. Hotspots are judged by their second-highest reading, so one bad sensor can't
@@ -279,11 +224,6 @@ class Safety:
 def speeds(fraction, limits):
     """Each fan's rpm for a fraction of its maximum, never below its minimum."""
     return [int(round(min(max(hi * fraction, lo), hi))) for lo, hi in limits]
-
-
-def manual_speeds(level, limits):
-    """Manual's slider: 0 is each fan's minimum, 1 its maximum."""
-    return [int(round(lo + (hi - lo) * level)) for lo, hi in limits]
 
 
 def min_fraction(limits):
@@ -435,9 +375,8 @@ class FanControl(threading.Thread):
 
     `status` is for the page and the menu: {"profile", "state", …} where state is "off"
     (macOS default), "nofans", "unavailable" (with a "reason"), "approval" (waiting for the
-    user to allow the helper), "watching" (fans with macOS until "start"), "holding" (at
-    "targets" rpm), "override" (full speed, "reason"), "other" (another app has the fans) or
-    "error" ("reason"). An "unavailable" reason finishes "Fan control isn't available …", an
+    user to allow the helper), "holding" (at "targets" rpm), "override" (full speed,
+    "reason"), "other" (another app has the fans) or "error" ("reason"). An "unavailable" reason finishes "Fan control isn't available …", an
     "error" one "Fan control stopped because …". An override's reason is Safety's ("pressure", "hotspot", "chassis" or
     "battery"), with "pressure" 0–3, so the page can put temperatures in the user's unit."""
 
@@ -477,7 +416,7 @@ class FanControl(threading.Thread):
     @property
     def running(self):
         """A profile is chosen and in charge, so the sampler runs once a second."""
-        return self.status["state"] in ("watching", "holding", "override", "other")
+        return self.status["state"] in ("holding", "override", "other")
 
     def feed(self, thermals, power):
         """The sampler's latest readings (thermals may be None if the SMC couldn't be read).
@@ -553,18 +492,8 @@ class FanControl(threading.Thread):
         thermals, power = self._latest
         temps = [thermals.get(k) for k in ("cpu", "gpu")] if thermals else []
         temp = max((t for t in temps if t is not None), default=None)
-        if pid == MANUAL:
-            targets = manual_speeds(settings["fan_manual_level"], limits)
-        else:
-            self._curve.profile = profile(pid, settings["fan_tuning"])
-            fraction = self._curve.tick(now, temp, min_fraction(limits))
-            targets = speeds(fraction, limits) if fraction is not None else None
-        if targets is None:
-            self._safety.reset()
-            if self._held:
-                p = self._curve.profile
-                self._release(f"cores at or below {p.stop:g}° for {HAND_BACK_AFTER:g} seconds")
-            return self._set_status("watching", start=self._curve.profile.start)
+        self._curve.profile = profile(pid, settings["fan_tuning"])
+        targets = speeds(self._curve.tick(now, temp, min_fraction(limits)), limits)
 
         pressure = thermal_pressure()
         reason = self._safety.tick(now, {"pressure": pressure, "hotspot": (thermals or {}).get("hotspot"),

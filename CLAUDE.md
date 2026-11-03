@@ -13,8 +13,8 @@ reports a bug, **read the log first** before asking questions. The updater logs
 `ready to install`, `Installed …; relaunching` or `Update check failed: …` after a
 check. `Installed …; relaunching` and `Quitting` with no `started` after them means the
 relaunch didn't start the new copy: `/usr/bin/log show` then has `open` logging `LAUNCH`,
-and no new `Mac Engine Room` process (see *How updates work* in DEVELOPMENT.md). Each launch logs `started (dashboard shown)` or `started (dashboard hidden)`,
-plus `, opened at login` for a login launch. A Mac missing any SMC key the app reads
+and no new `Mac Engine Room` process (see *How updates work* in DEVELOPMENT.md). Each launch logs `started`, plus `, opened at login` for a
+login launch. A Mac missing any SMC key the app reads
 logs `SMC keys missing on <model>, macOS <version>: …` once per launch, with the power
 keys it does have. Reopening the app at one bar of brightness and again at full shows
 which of them is the screen. The first temperature reading after launch (or after an SMC
@@ -88,8 +88,8 @@ To reproduce without touching the user's data, run with
   identifier by the helper's own team, and the safety nets: the fans go back to macOS when
   the app disconnects, after 10 s without a word, and before sleep.
 - **Menu bar**: `Application Files/statusbar.py`. Native `NSStatusItem` and `NSMenu`
-  (PyObjC). The title shows watts or a temperature; the menu's fan profile buttons, Manual
-  slider, Thermals tiles and Power rows are custom views (NSTextField labels, NSBox tiles,
+  (PyObjC). The title shows watts or a temperature; the menu's fan profile buttons,
+  Thermals tiles and Power rows are custom views (NSTextField labels, NSBox tiles,
   NSSlider, SF Symbols), then the actions. The profile buttons are the three chosen in
   Settings, drawn as tiles like the temperatures' (a borderless NSButton over an NSBox), the
   chosen one in the accent colour: stock push buttons looked out of place there. Main
@@ -106,7 +106,8 @@ To reproduce without touching the user's data, run with
   switcher and a shared Settings page. The window opens on the Dashboard, and **Open
   Dashboard** in the menu switches to it (`EngineRoomApp._show_tab`); Power always opens on
   Now, with History beside it. The Dashboard and the Thermals page share the fan controls
-  (`renderFanControls`): all six profiles, Manual's slider and the status line.
+  (`renderFanControls`): all four profiles and the status line; each fan's speed and gauge
+  (`fansHTML`) are in the Dashboard's Fans tile and on the Thermals page.
   Temperatures arrive in °C and are shown in the unit chosen in Settings.
 - **Build**: `scripts/build.sh` runs PyInstaller with `Application Files/MacEngineRoom.spec`
   in `~/Library/Caches/MacEngineRoom-build`, compiles the fan helper into
@@ -152,8 +153,8 @@ To reproduce without touching the user's data, run with
   dashboard or the menu raises the main thread to user-interactive: with every core
   busy, a background thread waited up to 1.6 s for a turn (measured). Samples are
   scheduled from when they were due, since background waits end ~90 ms late. A fan profile
-  watching the temperatures stays at background QoS; holding the fans raises the sampler
-  and the fan thread to utility, so check-ins reach the helper on a busy Mac.
+  holding the fans raises the sampler and the fan thread to utility, so check-ins reach the
+  helper on a busy Mac; that's whenever a profile other than macOS default is chosen.
 - **Only pass real changes to AppKit and WebKit.** A new menu bar title costs about
   0.9 ms of redraw, and setting the same one again still costs 0.2 ms (measured). The
   menu's rows and tiles are only filled in while it's open, through `_put()`, which
@@ -257,10 +258,18 @@ Don't undo these without asking:
   than cutting Power's Battery, Adapter and System cards to make Now shorter.
 - Fan control starts on macOS default, and the helper is only registered the first time
   another profile is chosen. The choice is remembered across relaunches and logins.
+- Four fan profiles: macOS default, Balanced, Performance and Max. Smart and Manual were
+  removed in 1.2.11; a saved choice of either becomes macOS default.
+- A profile has the fans from the moment it's chosen until another is: Balanced and
+  Performance hold them at their minimum below their start temperature, Max at full speed
+  the whole time. Leaving them with macOS until the cores warmed up made choosing a profile
+  seem to do nothing. The helper never writes 0, so only macOS default lets the fans stop.
 - The menu offers three fan profiles, chosen in Settings (macOS default, Balanced and Max by
-  default); all six are on the Dashboard and the Thermals page.
-- Settings shows the fan profiles as a compact table (Starts at, Top speed, Top speed at),
-  with no descriptions and no Fans stop: the maintainer found the wordier version text-heavy.
+  default), not all four; all four are on the Dashboard and the Thermals page.
+- Settings shows Balanced and Performance as a compact table (Speeds up at, Top speed, Top
+  speed at), with no descriptions: the maintainer found the wordier version text-heavy. Max
+  has nothing to tune.
+- Fan gauges run from off to the fan's maximum, with no Min label: off is a fan's slowest.
 - Fan text is plain English, checked as whole sentences: the fans go back to macOS (they
   don't "stop"), and a reason completes "Fan control isn't available …" or "Fan control
   stopped because …".
@@ -278,9 +287,8 @@ Don't undo these without asking:
   confirmation. Deleting one session keeps the plain confirmation.
 - Open at login is turned on once, the first time the app runs from Applications.
   Turning it off sticks.
-- At login the app starts in the menu bar only, whatever *Open this window at launch*
-  says; that setting covers opening the app by hand. Opening the app again while it
-  runs in the background shows the dashboard.
+- The app always starts in the menu bar only, at login or opened by hand; there's no
+  setting. Opening it again while it runs, or **Open Dashboard**, shows the dashboard.
 - A Mac with no screen reading doesn't show Screen anywhere, and the menu bar falls back
   to System if Screen was chosen. It happens automatically, and there's no estimate.
 - The dashboard window opens as tall as the page, up to the screen's height, and can't

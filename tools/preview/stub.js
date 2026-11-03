@@ -2,7 +2,7 @@
 // an M1 Pro's, drifting slowly so the charts have shape, with 10 minutes of history.
 //
 // Query options, combined with commas: ?s=holding,fahrenheit&tab=thermals
-//   fan control: off (default) watching holding manual override approval unavailable other error
+//   fan control: off (default) holding max override approval unavailable other error
 //   this Mac:    fanless onefan noscreen hot charging
 //   settings:    fahrenheit dark light
 //   tab:         dashboard (default) thermals power history settings
@@ -36,9 +36,8 @@
   };
 
   const scenarios = {
-    watching: () => { state.fanControl = { profile: 'balanced', state: 'watching', start: 55 }; },
     holding: () => { state.hot = 14; state.fanControl = { profile: 'balanced', state: 'holding', targets: [2310, 2560] }; },
-    manual: () => { state.settings.fan_manual_level = 0.25; state.fanControl = { profile: 'manual', state: 'holding', targets: [2198, 2310] }; },
+    max: () => { state.fanControl = { profile: 'max', state: 'holding', targets: state.fans.map(f => f.max) }; },
     override: () => { state.hot = 30; state.fanControl = { profile: 'balanced', state: 'override', reason: 'pressure', pressure: 2, targets: [4296, 4744] }; },
     approval: () => { state.fanControl = { profile: 'balanced', state: 'approval' }; },
     unavailable: () => { state.fanControl = { profile: 'balanced', state: 'unavailable', reason: 'until Mac Engine Room is in your Applications folder' }; },
@@ -57,16 +56,13 @@
     light: () => { state.settings.theme = 'light'; },
   };
 
-  // What fans.py would report once a profile is chosen on the page.
+  // What fans.py would report once a profile is chosen on the page: Max at full speed, the
+  // others at the fans' minimum (the preview doesn't run their curves).
   function choose(pid) {
-    const p = app.fan_profiles.find(x => x.id === pid);
-    const tuning = state.settings.fan_tuning?.[pid] || {};
     if (!state.fans.length) state.fanControl = { profile: pid, state: 'nofans' };
     else if (pid === 'macos') state.fanControl = { profile: pid, state: 'off' };
-    else if (pid === 'manual') state.fanControl = { profile: pid, state: 'holding', targets: manualTargets() };
-    else state.fanControl = { profile: pid, state: 'watching', start: tuning.start ?? p.start };
+    else state.fanControl = { profile: pid, state: 'holding', targets: state.fans.map(f => pid === 'max' ? f.max : f.min) };
   }
-  const manualTargets = () => state.fans.map(f => Math.round(f.min + (f.max - f.min) * state.settings.fan_manual_level));
 
   function reading(t) {
     const p = state.power, h = state.hot;
@@ -117,7 +113,6 @@
       const before = state.settings.fan_profile;
       Object.assign(state.settings, changes);
       if (changes.fan_profile && changes.fan_profile !== before) choose(changes.fan_profile);
-      if ('fan_manual_level' in changes && state.fanControl.profile === 'manual') state.fanControl.targets = manualTargets();
       return state.settings;
     },
     app_info: () => ({

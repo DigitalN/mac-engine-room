@@ -209,7 +209,7 @@ def test_the_menu_shows_the_three_profiles_chosen_in_settings(monkeypatch):
     import AppKit
 
     _fake_status_item(monkeypatch)
-    status = {"profile": "balanced", "state": "watching", "start": 55}
+    status = {"profile": "balanced", "state": "holding", "targets": [1499, 1499]}
     chosen = []
     bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None,
                     fan_status=lambda: status, on_profile=chosen.append)
@@ -221,27 +221,20 @@ def test_the_menu_shows_the_three_profiles_chosen_in_settings(monkeypatch):
     bar._target.menuNeedsUpdate_(bar._menu)
     assert not bar._profiles_item.isHidden()
     assert titles() == ["macOS default", "Balanced", "Max"] and on() == ["Balanced"]  # the defaults
-    assert bar._manual_item.isHidden() and bar._allow_fans_item.isHidden()
+    assert bar._allow_fans_item.isHidden()
 
-    settings = {"fan_profile": "balanced", "menu_fan_profiles": ["smart", "manual", "macos"]}
+    settings = {"fan_profile": "balanced", "menu_fan_profiles": ["performance", "max", "macos"]}
     bar.update({}, _thermals(), settings)
     bar._target.menuNeedsUpdate_(bar._menu)
-    assert titles() == ["Smart", "Manual", "macOS default"] and on() == []  # Balanced isn't one of them
+    assert titles() == ["Performance", "Max", "macOS default"] and on() == []  # Balanced isn't one of them
     bar._target.chooseProfile_(bar._profile_tiles[1][1])
-    assert chosen == ["manual"] and on() == ["Manual"] and not bar._manual_item.isHidden()
-    assert bar._manual_label.stringValue() == "1,499 rpm"  # the slider at its left: each fan's minimum
+    assert chosen == ["max"] and on() == ["Max"]
     assert [b.accessibilityValue() for _, b in bar._profile_tiles].count("selected") == 1
 
-    status.update(state="approval")  # Manual, chosen on the Thermals page and not in the menu
-    bar.update({}, _thermals(), {"fan_profile": "manual", "fan_manual_level": 1.0})
+    status.update(state="approval")
     bar._target.menuNeedsUpdate_(bar._menu)
-    assert on() == [] and not bar._manual_item.isHidden()  # its slider still shows
     assert not bar._allow_fans_item.isHidden()
-    assert bar._manual_label.stringValue() == "4,296 and 4,744 rpm"
-    label, slider = bar._manual_label.frame(), bar._manual_slider.frame()
-    assert label.size.width >= bar._manual_label.fittingSize().width  # never cut off
-    assert slider.origin.x + slider.size.width < label.origin.x
 
     status.update(state="nofans")
     bar._target.menuNeedsUpdate_(bar._menu)
-    assert bar._profiles_item.isHidden() and bar._manual_item.isHidden() and bar._allow_fans_item.isHidden()
+    assert bar._profiles_item.isHidden() and bar._allow_fans_item.isHidden()
