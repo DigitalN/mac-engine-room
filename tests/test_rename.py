@@ -149,7 +149,10 @@ def test_relaunch_passes_its_arguments(monkeypatch):
     launch.relaunch("/Applications/Mac Engine Room.app", background=True, arguments=[LOGIN_ITEM_ARGUMENT])
     launch.relaunch("/Applications/Mac Engine Room.app", arguments=[LOGIN_ITEM_ARGUMENT])
     launch.relaunch("/Applications/Mac Engine Room.app")
-    opened = [command[command.index("sh", 3) + 2:] for command in launched]
+    # After the script: "sh", this process's id, and the executable it checks for.
+    assert {command[command.index("sh", 3) + 2] for command in launched} == {
+        "/Applications/Mac Engine Room.app/Contents/MacOS/Mac Engine Room"}
+    opened = [command[command.index("sh", 3) + 3:] for command in launched]
     assert opened == [
         ["-g", "/Applications/Mac Engine Room.app", "--args", "--background", LOGIN_ITEM_ARGUMENT],
         ["/Applications/Mac Engine Room.app", "--args", LOGIN_ITEM_ARGUMENT],

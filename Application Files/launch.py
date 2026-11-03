@@ -11,6 +11,7 @@ Everything here is a no-op when running from source (`python3 main.py`), where t
 
 import logging
 import os
+import plistlib
 import subprocess
 import sys
 from pathlib import Path
@@ -21,6 +22,24 @@ REPOSITORY = "DigitalN/mac-engine-room"
 RELEASES_URL = f"https://github.com/{REPOSITORY}/releases"
 # Passed when relaunching into an update, so the dashboard doesn't pop up on its own.
 BACKGROUND_ARGUMENT = "--background"
+
+# Waits for the quitting copy to exit, opens the app, and checks that it's running, trying
+# once more if it isn't after 5 seconds. `open -n`: LaunchServices can still list an app as
+# running for a moment after it has quit, and a plain `open` then goes to the instance that's
+# gone, so nothing starts (the maintainer's update from 1.2.8 to 1.2.9). The check matches
+# the app's own executable exactly, not the fan helper in the same bundle.
+RELAUNCH_SCRIPT = (
+    'pid=$1; exe=$2; shift 2; tries=0\n'
+    'while kill -0 "$pid" 2>/dev/null && [ $tries -lt 100 ]; do sleep 0.1; tries=$((tries + 1)); done\n'
+    'for attempt in 1 2; do\n'
+    '  /usr/bin/open -n "$@"\n'
+    '  tries=0\n'
+    '  while [ $tries -lt 50 ]; do\n'
+    '    /bin/ps -axo comm= | /usr/bin/grep -qxF -- "$exe" && exit 0\n'
+    '    sleep 0.1; tries=$((tries + 1))\n'
+    '  done\n'
+    'done\n'
+)
 
 # SMAppServiceStatus
 _ENABLED = 1
@@ -114,7 +133,7 @@ def relaunch(app, background=False, arguments=()):
     quits right after.
 
     Waiting for the exit matters: until then this copy holds the single-instance
-    lock, and the new one would quit straight away.
+    lock, and the new one would quit straight away. See RELAUNCH_SCRIPT.
     """
     app_arguments = [BACKGROUND_ARGUMENT, *arguments] if background else list(arguments)
     arguments = ["-g"] if background else []
@@ -123,14 +142,19 @@ def relaunch(app, background=False, arguments=()):
     arguments.append(str(app))
     if app_arguments:
         arguments += ["--args", *app_arguments]
-    script = (
-        'pid=$1; shift; tries=0\n'
-        'while kill -0 "$pid" 2>/dev/null && [ $tries -lt 100 ]; do sleep 0.1; tries=$((tries + 1)); done\n'
-        'exec /usr/bin/open "$@"\n'
-    )
-    subprocess.Popen(["/bin/sh", "-c", script, "sh", str(os.getpid()), *arguments],
+    subprocess.Popen(["/bin/sh", "-c", RELAUNCH_SCRIPT, "sh", str(os.getpid()), executable(app), *arguments],
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                      start_new_session=True)
+
+
+def executable(app):
+    """The app's main executable, as `ps` shows it once it runs."""
+    try:
+        with open(Path(app) / "Contents" / "Info.plist", "rb") as f:
+            name = plistlib.load(f).get("CFBundleExecutable")
+    except (OSError, plistlib.InvalidFileException):
+        name = None
+    return str(Path(app) / "Contents" / "MacOS" / (name or Path(app).stem))
 
 
 class LoginItem:
