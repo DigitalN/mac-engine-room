@@ -38,6 +38,17 @@ it, a run from source moves `~/Library/Application Support/Pythonflow` to the ne
 (`rename.py`), or waits for a running Pythonflow and gives up. Run the tests with
 `python3 -m pytest`.
 
+To look at the page or the menu without running the app:
+
+```bash
+python3 tools/preview/serve.py
+```
+
+serves the page at `http://127.0.0.1:8765/` with made-up readings; add
+`?s=holding,fahrenheit&tab=thermals` for other states (listed at the top of
+`tools/preview/stub.js`). `python3 tools/render_menu.py /tmp/menu --state holding` draws the
+menu to `/tmp/menu-light.png` and `/tmp/menu-dark.png` without showing it.
+
 ## Release checklist
 
 Go through all of it for every release. Releases are public, and installed copies update
@@ -183,21 +194,10 @@ Test with a copy that has its own bundle identifier, and its own helper label an
 so it can't touch the installed app's helper. The app looks for
 `<bundle identifier>.fans.plist`, so a copy whose plist wasn't renamed has no fan control.
 
-1. Build, then make the test copy:
+1. Build, then make the test copy, `~/Applications/Mac Engine Room Test.app`, with its own
+   identifier, helper label and socket:
    ```bash
-   APP=$(scripts/build.sh)
-   T="$HOME/Applications/Mac Engine Room Test.app"
-   ID=$(security find-identity -v -p codesigning | awk '/"Apple Development/ {print $2; exit}')
-   ditto "$APP" "$T"
-   /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.pythonflow.monitor.test" "$T/Contents/Info.plist"
-   P="$T/Contents/Library/LaunchDaemons"
-   mv "$P/com.pythonflow.monitor.fans.plist" "$P/com.pythonflow.monitor.test.fans.plist"
-   /usr/libexec/PlistBuddy -c "Set :Label com.pythonflow.monitor.test.fans" \
-     -c "Set :AssociatedBundleIdentifiers:0 com.pythonflow.monitor.test" \
-     -c "Set :Sockets:Listener:SockPathName /var/run/com.pythonflow.monitor.test.fans.sock" \
-     "$P/com.pythonflow.monitor.test.fans.plist"
-   codesign --force -s "$ID" -o runtime -i com.pythonflow.monitor.test.fans "$T/Contents/MacOS/Mac Engine Room Fans"
-   codesign --force -s "$ID" "$T"
+   T=$(scripts/make-test-copy.sh)
    ```
 2. Give it its own data folder, starting on a profile, and keep it out of Login Items:
    ```bash

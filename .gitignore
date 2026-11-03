@@ -19,3 +19,7 @@ __pycache__/
 .vscode/
 .idea/
 .env
+
+# Claude Code: launch.json (the page preview) is shared; worktrees and local settings aren't
+.claude/worktrees/
+.claude/settings.local.json

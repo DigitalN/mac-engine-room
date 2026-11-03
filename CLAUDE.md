@@ -221,18 +221,25 @@ To reproduce without touching the user's data, run with
   may be in the middle of something.
 - After testing the updater, delete the test copy, its data folder and the test disk
   images, and make sure no test copy is left in Login Items.
-- **Fan control is tested with a test copy too** (see *Testing fan control* in
-  DEVELOPMENT.md): its own identifier, helper label and socket, so it can't touch the
-  maintainer's helper. Allowing each new helper in Login Items is the maintainer's click
-  and password, so ask first, and say the fans will be audible. Afterwards, unregister its
-  helper from inside its own bundle before deleting it, or launchd keeps a dead job.
+- **Look at every change to the page or the menu yourself**, in light and dark and in the
+  states it touches, before the maintainer sees it. `page-preview` in `.claude/launch.json`
+  (`tools/preview/serve.py`) runs `index.html` in the browser pane with made-up readings,
+  e.g. `?s=holding,fahrenheit&tab=thermals`; its states are listed in
+  `tools/preview/stub.js`. `tools/render_menu.py` draws the menu to PNGs (`--help`). When
+  the app gains a state or an API call, add it to both.
+- **Fan control is tested with a test copy too** (`scripts/make-test-copy.sh`; see
+  *Testing fan control* in DEVELOPMENT.md): its own identifier, helper label and socket, so
+  it can't touch the maintainer's helper. Allowing each new helper in Login Items is the
+  maintainer's click and password, so ask first, and say the fans will be audible.
+  Afterwards, unregister its helper from inside its own bundle before deleting it, or
+  launchd keeps a dead job.
 - The settings, the profile tuning and the curve can be tested without the helper: the
   pure parts of `fans.py` and `FanControl` with a stand-in helper (`tests/test_fans.py`).
 - To test a login launch without logging out, open the app with
   `NSWorkspace.openApplicationAtURL_configuration_completionHandler_` and a configuration
   whose `appleEvent` is `oapp` with `keyAEPropData` ('prdt') set to the enum 'lgit', which
   is what loginwindow sends. From source, open Python.app with `main.py` as its argument.
-- Claude's shell can't take screenshots or click menus. To see what the app decided,
+- Claude can't screenshot the running app or click its menu. To see what the app decided,
   read its log. To drive something only a menu or a wake can trigger, add a temporary
   hook to a scratch copy of the source (not the repository) and build from that.
 
