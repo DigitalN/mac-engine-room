@@ -157,8 +157,7 @@ certificate from the same Apple account before the old one expires.
   The version inside must also be newer than the installed one.
 - **Installing:** at a quiet moment (dashboard closed, no charge being recorded, no
   keyboard or mouse input for 10 seconds), it swaps the new app in with one
-  `replaceItemAtURL` call and relaunches it in the background (`--background`, so the
-  dashboard doesn't pop up). The relaunch waits for the old copy to exit, opens the new one
+  `replaceItemAtURL` call and relaunches it in the background (`open -g`). The relaunch waits for the old copy to exit, opens the new one
   with `open -n`, and opens it again if it isn't running 5 seconds later
   (`launch.RELAUNCH_SCRIPT`): LaunchServices can still list a copy that has just quit as
   running, and a plain `open` then goes to it and nothing starts. That happened updating the
@@ -202,11 +201,11 @@ so it can't touch the installed app's helper. The app looks for
 2. Give it its own data folder, starting on a profile, and keep it out of Login Items:
    ```bash
    mkdir -p /tmp/pf-data && touch /tmp/pf-data/.open-at-login-default-applied
-   echo '{"open_dashboard_at_launch": false, "record_history": false, "fan_profile": "manual", "fan_manual_level": 0.1}' > /tmp/pf-data/settings.json
+   echo '{"record_history": false, "fan_profile": "balanced"}' > /tmp/pf-data/settings.json
    open -n --env PYTHONFLOW_DATA_DIR=/tmp/pf-data "$T"
    ```
    It registers its helper and logs that it's waiting; allow "Mac Engine Room Test" in Login
-   Items. `/tmp/pf-data/Logs/app.log` then shows `Fans held by Manual at …`, and
+   Items. `/tmp/pf-data/Logs/app.log` then shows `Fans held by Balanced at …`, and
    `python3 -c 'import power; s = power.SMC(); print(s.read("F0Md"), s.read("F0Tg"))'` in
    `Application Files` shows mode 1 and the target.
 3. Quit it, `kill -9` it, and `kill -STOP` it: each time the fans go back to mode 0 (within
@@ -251,7 +250,7 @@ to `Mac Engine Room.app` in the same folder.
    and keep it out of Login Items:
    ```bash
    mkdir -p /tmp/pf-data && touch /tmp/pf-data/.open-at-login-default-applied
-   echo '{"open_dashboard_at_launch": false, "record_history": false}' > /tmp/pf-data/settings.json
+   echo '{"record_history": false}' > /tmp/pf-data/settings.json
    open -n --env PYTHONFLOW_DATA_DIR=/tmp/pf-data --env PYTHONFLOW_UPDATE_FEED=file:///tmp/pf-feed/latest.json \
      "$HOME/Applications/Mac Engine Room Test.app"
    ```

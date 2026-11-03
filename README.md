@@ -22,15 +22,16 @@ macOS 27 and is no longer maintained.
   screen or chip power, or the charger's input while charging. Click it for the fan
   profiles and a quick summary of temperatures, fans and power.
 - **Dashboard**: the window opens on a short page with a row of readings per tool:
-  CPU, GPU and fans, with the fan profiles, then system power, battery and charger.
+  CPU, GPU and each fan's speed, with the fan profiles, then system power, battery and
+  charger.
 - **Temperatures** of the CPU and GPU (their hottest core), memory, SSD and ambient
   air, with a live chart of the last 1, 5 or 15 minutes. In Celsius, or Fahrenheit if
   you choose it in Settings.
-- **Fans**: each fan's speed, its range, and who's in control. Macs without fans show
+- **Fans**: each fan's speed, its maximum, and who's in control. Macs without fans show
   temperatures only.
-- **Fan control**: leave the fans to macOS, or choose a profile that starts them sooner
-  and runs them faster (see [Fan profiles](#fan-profiles)), or set them by hand. You can
-  change each profile's numbers in Settings, and choose which three are in the menu.
+- **Fan control**: leave the fans to macOS, or choose a profile that keeps them running
+  and speeds them up sooner (see [Fan profiles](#fan-profiles)). You can change Balanced's
+  and Performance's numbers in Settings, and choose which three profiles are in the menu.
 - **Power flow** from charger to Mac to battery, with the charger's conversion loss and
   where the Mac's power goes.
 - **Live power chart** of the last 1, 5 or 15 minutes.
@@ -39,7 +40,8 @@ macOS 27 and is no longer maintained.
 - **Charging history**: each charge's levels, duration and power curve, exportable to CSV.
 - Works with macOS's charge limit: the time while charging counts to the limit, and
   Settings has a shortcut to where it's set.
-- Opens at login, straight to the menu bar, and keeps itself up to date. Both can be
+- Starts in the menu bar, at login and when you open it; open it again, or choose **Open
+  Dashboard**, for the window. Opens at login and keeps itself up to date; both can be
   turned off in Settings.
 
 ## Install
@@ -93,21 +95,20 @@ from source, see [DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 ## Fan profiles
 
-The profiles follow the hottest CPU or GPU core. Each waits a few seconds after the cores
-pass its start temperature before taking over the fans, so a short spike is ignored, and
-hands the fans back to macOS once the cores have cooled down again.
+A profile runs the fans from the moment you choose it until you choose another. Balanced
+and Performance keep them at their slowest speed until the hottest CPU or GPU core reaches
+the profile's start, then speed them up; Max runs them at full speed the whole time. macOS
+default leaves them to macOS, which stops them when the Mac is cool.
 
-| Profile | Starts at | Top speed | Top speed at |
+| Profile | Speeds up at | Top speed | Top speed at |
 |---|---|---|---|
 | **macOS default** | macOS decides | | |
 | **Balanced** | 55° | 60%, quiet while warm | 70° |
 | **Performance** | 55° | 85% | 65° |
-| **Smart** | 53° | 100%, sooner while it's heating up | 85° |
-| **Max** | 65°, after 5 seconds | 100% | At once |
-| **Manual** | One slider for every fan, from its slowest to its fastest | | |
+| **Max** | Always | 100% | Always |
 
 The menu offers three of them, macOS default, Balanced and Max unless you choose others
-in Settings. All six are on the Dashboard and the Thermals page.
+in Settings. All four are on the Dashboard and the Thermals page.
 
 Whatever the profile, the fans go to full speed if macOS reports serious thermal pressure,
 or the chip, case or battery gets too hot.

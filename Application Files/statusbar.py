@@ -5,8 +5,8 @@ plus an NSPopover, and on macOS 27 AppKit swallowed the clicks so the panel
 never opened; a standard status-item menu has no such dependency.
 
 The menu's top rows are custom views: Thermals' fan profile buttons (the three chosen in
-Settings), Manual's slider while Manual is chosen, then the temperatures as tiles with a small grey label above
-each value (fans in the last tile); then Power rows with an SF Symbol, a grey label and the
+Settings), then the temperatures as tiles with a small grey label above each value (fans in
+the last tile); then Power rows with an SF Symbol, a grey label and the
 value on the right, then the actions. They're only filled in while the menu is open, and
 only values that changed are passed to AppKit.
 
@@ -20,7 +20,7 @@ import time
 import AppKit
 from AppKit import (
     NSBox, NSButton, NSColor, NSFont, NSImage, NSImageSymbolConfiguration, NSImageView, NSMenu,
-    NSMenuItem, NSSlider, NSStatusBar, NSTextField, NSVariableStatusItemLength, NSView,
+    NSMenuItem, NSStatusBar, NSTextField, NSVariableStatusItemLength, NSView,
 )
 from Foundation import NSObject
 
@@ -44,7 +44,7 @@ TILE_COLUMNS, TILE_GAP, TILE_HEIGHT = 3, 6, 42
 ROW_HEIGHT = 22
 PROFILE_HEIGHT = 24
 # Fan control states with the profile buttons available to click.
-PROFILES_USABLE = ("off", "watching", "holding", "override", "other", "approval", "error")
+PROFILES_USABLE = ("off", "holding", "override", "other", "approval", "error")
 
 
 def format_watts(value, pad_to=4):
@@ -101,12 +101,6 @@ def battery_symbol(sample):
     return f"battery.{min(100, (level + 12) // 25 * 25)}percent"
 
 
-def rpm_text(rpms):
-    """'2,300 rpm', or '2,198 and 2,310 rpm' for fans with different speeds."""
-    each = list(dict.fromkeys(r for r in rpms if isinstance(r, int)))
-    return f"{' and '.join(f'{r:,}' for r in each)} rpm" if each else "—"
-
-
 def fans_text(fans):
     """The fastest fan's speed, or 'Off' when they've all stopped (Apple silicon stops them
     when cool). Two speeds don't fit in a tile; the dashboard shows each fan."""
@@ -160,9 +154,6 @@ class _MenuTarget(NSObject):
 
     def chooseProfile_(self, sender):
         self.on_profile(fan_control.PROFILE_IDS[sender.tag()])
-
-    def moveManual_(self, sender):
-        self.on_manual(sender.doubleValue(), AppKit.NSApp.currentEvent().type() == AppKit.NSEventTypeLeftMouseUp)
 
     def allowFans_(self, sender):
         self.on_allow_fans()
@@ -226,7 +217,7 @@ def _section_header(title):
 
 class StatusBar:
     def __init__(self, on_open, on_check_updates, on_quit, on_menu_open, fan_status=lambda: {},
-                 on_profile=lambda pid: None, on_manual_level=lambda level: None, on_allow_fans=lambda: None):
+                 on_profile=lambda pid: None, on_allow_fans=lambda: None):
         self._item = NSStatusBar.systemStatusBar().statusItemWithLength_(NSVariableStatusItemLength)
         self._button = self._item.button()
         size = NSFont.menuBarFontOfSize_(0).pointSize()
@@ -246,13 +237,10 @@ class StatusBar:
         self._target.on_menu_needs_update = self._fill
         self._target.on_menu_open = self._set_menu_open
         self._target.on_profile = self._choose_profile
-        self._target.on_manual = self._move_manual
         self._target.on_allow_fans = on_allow_fans
         self._on_menu_open = on_menu_open
         self._fan_status = fan_status
         self._on_profile = on_profile
-        self._on_manual_level = on_manual_level
-        self._dragging_manual = False
         self._tile_fill = (NSColor.quaternarySystemFillColor() if hasattr(NSColor, "quaternarySystemFillColor")
                            else NSColor.quaternaryLabelColor())
         self._sample = None  # the latest, for filling in the rows when the menu opens
@@ -343,7 +331,7 @@ class StatusBar:
     def _build_profiles(self, menu):
         """Three fan profiles in a row, the ones chosen in Settings, as tiles like the
         temperatures', the chosen one in the accent colour: a borderless button over a box,
-        so it still clicks and reads as a button. Manual's slider goes under them."""
+        so it still clicks and reads as a button."""
         self._profiles_item, self._profiles_view = _view_item(PROFILE_HEIGHT + TILE_GAP)
         font = NSFont.systemFontOfSize_weight_(NSFont.smallSystemFontSize(), AppKit.NSFontWeightMedium)
         self._profile_tiles = []
@@ -361,20 +349,6 @@ class StatusBar:
         self._layout_profiles()
         menu.addItem_(self._profiles_item)
 
-        self._manual_item, view = _view_item(ROW_HEIGHT + 4)
-        self._manual_slider = NSSlider.sliderWithValue_minValue_maxValue_target_action_(
-            0, 0, 1, self._target, "moveManual:")
-        self._manual_slider.setControlSize_(AppKit.NSControlSizeSmall)
-        self._manual_slider.setContinuous_(True)
-        self._manual_label = _label(NSFont.monospacedDigitSystemFontOfSize_weight_(
-            NSFont.smallSystemFontSize(), AppKit.NSFontWeightRegular), NSColor.secondaryLabelColor())
-        self._manual_label.setAlignment_(AppKit.NSTextAlignmentRight)
-        for v in (self._manual_slider, self._manual_label):
-            view.addSubview_(v)
-        view.relayout = self._layout_manual
-        self._layout_manual()
-        menu.addItem_(self._manual_item)
-
     def _layout_profiles(self):
         width = self._profiles_view.frame().size.width
         tile_width = (width - 2 * INSET - (TILE_COLUMNS - 1) * TILE_GAP) / TILE_COLUMNS
@@ -383,28 +357,9 @@ class StatusBar:
             box.setFrame_(((x, 2), (tile_width, PROFILE_HEIGHT)))
             button.setFrame_(((x, 2), (tile_width, PROFILE_HEIGHT)))
 
-    def _layout_manual(self):
-        """The speeds get the width they need ("2,198 and 2,310 rpm"); the slider the rest."""
-        width = self._manual_item.view().frame().size.width
-        label_width = min(math.ceil(self._manual_label.fittingSize().width), width / 2)
-        self._manual_label.setFrame_(((width - INSET - label_width, 4), (label_width, 16)))
-        self._manual_slider.setFrame_(((INSET, 2), (width - 2 * INSET - label_width - 8, 20)))
-
     def _choose_profile(self, pid):
         self._fill_profiles(pid)  # at once, not at the next sample
         self._on_profile(pid)
-
-    def _move_manual(self, level, done):
-        self._dragging_manual = not done
-        self._show_manual_rpm(level)
-        if done:
-            self._on_manual_level(level)
-
-    def _show_manual_rpm(self, level):
-        fans = [f for f in (self._thermals or {}).get("fans") or [] if f.get("min") and f.get("max")]
-        limits = [(f["min"], f["max"]) for f in fans]
-        if self._put(self._manual_label, "setStringValue_", rpm_text(fan_control.manual_speeds(level, limits)) if limits else ""):
-            self._layout_manual()
 
     def _build_rows(self, menu):
         font = NSFont.menuFontOfSize_(0)
@@ -537,12 +492,6 @@ class StatusBar:
             self._put(button, "setEnabled_", usable)
         self._put(self._allow_fans_item, "setHidden_", not (has_fans and state == "approval"))
         self._put(self._fans_unavailable_item, "setHidden_", not (has_fans and state == "unavailable"))
-        manual = has_fans and usable and chosen == fan_control.MANUAL
-        self._put(self._manual_item, "setHidden_", not manual)
-        if manual:
-            if not self._dragging_manual:
-                self._put(self._manual_slider, "setDoubleValue_", self._settings.get("fan_manual_level", 0.0))
-            self._show_manual_rpm(self._manual_slider.doubleValue())
 
     def _fill_tiles(self):
         thermals = self._thermals

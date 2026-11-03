@@ -145,6 +145,14 @@ This M1 Pro (MacBookPro18,1), lightly loaded on 2026-11-02, has 2,181 SMC keys:
   descriptions, and Fans stop isn't shown.
 - Defaults: Balanced 55° to 70° at 60%, Performance 55° to 65° at 85%, Smart 53° to 85° at
   100%, Max from 65°.
+- **Changed on 2026-11-03 after trying 1.2.10:** four profiles; Smart and Manual are gone. A
+  profile has the fans from the moment it's chosen: Balanced and Performance at their minimum
+  below their start, Max at full speed the whole time. Leaving them with macOS until the
+  cores warmed up made choosing a profile on a cool Mac seem to do nothing, and Max not
+  maxing the fans made no sense. Settings tunes Balanced and Performance only (Speeds up at,
+  Top speed, Top speed at). The Dashboard's Fans tile shows each fan's speed and gauge like
+  the Thermals page, the gauges lose their Min label (off is a fan's slowest), and the app
+  always starts in the menu bar: the *Open this window at launch* setting is gone.
 - Macs without fans show temperatures only. Desktops get everything. Where the helper can't
   be approved (for example a managed work Mac), fan control shows as unavailable.
 

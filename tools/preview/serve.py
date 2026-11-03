@@ -3,14 +3,16 @@
     python3 tools/preview/serve.py [port]
 
 Then open http://127.0.0.1:8765/ (the `page-preview` entry in .claude/launch.json does both
-in Claude's browser pane). The page is rebuilt from Application Files/index.html on every
-load, so a reload shows the latest edit. Query options are listed at the top of stub.js.
+in Claude's browser pane). The page is rebuilt from Application Files/index.html, stub.js,
+fans.py and settings.py on every load, so a reload shows the latest edit. Query options are
+listed at the top of stub.js.
 
 The profiles, their limits, the default settings and the version come from the app's own
 modules, so they can't drift from it. The readings are made up. This is a development tool
 on localhost only; nothing here ships in the app.
 """
 
+import importlib
 import json
 import re
 import sys
@@ -28,6 +30,8 @@ MARKER = "<script>\n'use strict';"
 
 
 def app_facts():
+    importlib.reload(fans)  # an edit to them shows on the next load, like one to the page
+    importlib.reload(settings)
     version = re.search(r'^VERSION = "([^"]+)"', (APP_DIR / "main.py").read_text(encoding="utf-8"), re.M)
     return {"version": version.group(1) if version else "0", "settings": settings.DEFAULTS,
             "fan_profiles": fans.page_profiles(), "fan_tuning_limits": fans.TUNING_LIMITS,

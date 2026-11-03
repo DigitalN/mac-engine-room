@@ -38,10 +38,10 @@ def test_check_for_updates_button_does_what_the_menu_item_does(monkeypatch):
 def test_live_data_carries_the_update_status_for_settings():
     app = SimpleNamespace(_updater=SimpleNamespace(status="downloading", version="1.2.5"),
                           _sampler=SimpleNamespace(dashboard_polled=lambda fans: None), _live=LiveState(),
-                          _fans=SimpleNamespace(status={"profile": "balanced", "state": "watching", "start": 55}))
+                          _fans=SimpleNamespace(status={"profile": "balanced", "state": "holding", "targets": [1499, 1499]}))
     live = Api(app=app).get_live(0)
     assert live["update"] == ["downloading", "1.2.5"]
-    assert live["fan_control"] == {"profile": "balanced", "state": "watching", "start": 55}
+    assert live["fan_control"] == {"profile": "balanced", "state": "holding", "targets": [1499, 1499]}
 
 
 def test_fans_are_read_while_the_dashboard_or_thermals_is_showing():
