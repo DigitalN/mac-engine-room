@@ -28,7 +28,10 @@ Each is the usual +0.0.1 with the whole release checklist in DEVELOPMENT.md.
    the Dashboard at 1060 × 439. **Not yet tried on hardware:** sleep and wake, the safety
    override, another app holding the fans, Fahrenheit tuning in the app's own WebKit, and
    an update replacing the helper (BTM keeps a checksum of the job, so check after the
-   first update that changes it that no new Allow is asked for).
+   first update that changes it that no new Allow is asked for). The changes after trying it
+   (profile tiles and three in the menu, the compact Fan profiles settings, the Dashboard's
+   fan controls) were merged as DigitalN/mac-engine-room#26 and released as 1.2.9 on
+   2026-11-02.
 
 ## Name and identity
 
