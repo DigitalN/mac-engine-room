@@ -42,8 +42,13 @@ _M4_GPU = "Tg0K Tg0L Tg0d Tg0e Tg0j Tg0k"
 # cores (Tp0L…Tp0X), and the second layout some M4 Pros use instead (Tp1j…Tp2E; never both).
 _M4_PRO_CPU = (_M4_CPU + " Te06 Te0T Tpx9 TpxC Tp0H Tp0L Tp0P Tp0T Tp0X"
                " Tp1j Tp1n Tp1t Tp1w Tp1z Tp22 Tp25 Tp28 Tp2B Tp2E")
+# The base M1 (MacBookAir10,1, from its sensor report, macOS 27.2) names its cores another way:
+# four keys each, a/b/x/z, where z is x plus a whole number of degrees (a hotspot estimate,
+# like an M1 Pro triplet's third key). TCMb equals the hottest b key, as on the M1 Pro it
+# equals the hottest middle key, so b is each core's key. Its GPU keys read 0 while idle.
+_M1_BASE = ("Te0b Te3b Tp2b Tp3b Tp4b Tp5b Tp7b Tp8b Tp9b", "Tg1b Tg4b")
 CORE_KEYS = {
-    "M1": _M1,
+    "M1": (f"{_M1[0]} {_M1_BASE[0]}", f"{_M1[1]} {_M1_BASE[1]}"),
     # The Ultra's second die: the same cores at Tp2… where the first has Tp0…, and four more GPU pairs.
     "M1 Ultra": (_M1[0] + " Tp29 Tp2T Tp21 Tp25 Tp2D Tp2H Tp2L Tp2P Tp2X Tp2b", _M1[1] + " Tg0b Tg0j Tg0r Tg0z"),
     # Te05: the efficiency cluster, which has no per-core keys on some M2s. Tp0n, Tp0r and

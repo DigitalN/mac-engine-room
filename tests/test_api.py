@@ -99,17 +99,16 @@ def test_settings_asks_for_a_report_only_when_the_app_guessed(monkeypatch):
     import main
     import power
 
-    monkeypatch.setattr(power, "mac_model", lambda: "MacBookAir10,1")
+    monkeypatch.setattr(power, "mac_model", lambda: "MacBookPro18,3")
     live = LiveState()
-    app = SimpleNamespace(_thermals=SimpleNamespace(guessing=()), _live=live)
+    app = SimpleNamespace(_thermals=SimpleNamespace(guessing=()), _live=live,
+                          _reader=SimpleNamespace(has_screen_key=False))
     hint = lambda: main.EngineRoomApp._sensor_hint(app)
     assert hint() is False  # nothing sampled yet
     live.push({"t": 1.0, "system_load": 7.0, "system_in": 0.0, "battery_power": -7.0, "screen_power": None,
                "chip_power": 1.0, "has_battery": True, "has_screen_power": False})
-    assert hint() is True  # a laptop with no screen key the app knows
-    app._thermals.guessing = ("gpu",)
-    live.push({"t": 2.0, "system_load": 7.0, "system_in": 0.0, "battery_power": -7.0, "screen_power": 2.0,
-               "chip_power": 1.0, "has_battery": True, "has_screen_power": True})
-    assert hint() is True
-    app._thermals.guessing = ()
+    assert hint() is True  # a laptop with none of the screen keys the app knows
+    app._reader.has_screen_key = True
     assert hint() is False
+    app._thermals.guessing = ("gpu",)
+    assert hint() is True

@@ -1,0 +1,44 @@
+Mac Engine Room sensor report
+
+App: 1.2.13
+Mac: MacBookAir10,1
+Chip: Apple M1
+Cores: 8
+Battery: yes
+macOS: 27.2
+
+Where each reading comes from
+  Screen power: PBLR
+  Power keys missing: none
+  CPU: Te0a Te0b Te0x Te0z Te3a Te3b Te3x Te3z Tp2a Tp2b Tp2x Tp2z Tp3a Tp3b Tp3x Tp3z Tp4a Tp4b Tp4x Tp4z Tp5a Tp5b Tp5x Tp5z Tp7a Tp7b Tp7x Tp7z Tp8a Tp8b Tp8x Tp8z Tp9a Tp9b Tp9x Tp9z (by prefix)
+  GPU: Tg1b Tg4b (by prefix)
+  Memory: none found
+  SSD: TH0T TH0x
+  Ambient: none found
+  Fans: 0
+
+Keys
+PBLR=0.00  PDTR=0.00  PGDP=0.00  PHPB=65.00  PHPC=0.53  PHPM=1.00  PHPS=0.10  PKBC=0.00
+PMVC=0.67  PO3R=0.00  PO5R=0.00  PP0b=0.05  PP0l=0.01  PP1b=0.00  PP2b=0.00  PP3b=0.00
+PP3l=0.00  PP7b=0.00  PP7l=0.01  PP8b=0.00  PP9b=0.00  PP9l=0.00  PPBR=6.39  PPbb=0.00
+PPeb=0.00  PR4b=0.00  PR4l=0.01  PR5b=0.00  PR6b=0.00  PR8l=0.01  PRab=0.00  PRbl=0.00
+PRcb=0.00  PRcl=0.03  PRdb=0.00  PRkl=0.00  PSTR=7.04  PW3C=0.00  PZl0=65.00  PZlF=0.00
+Pb0f=6.43  TB0T=21.40  TB1T=21.40  TB2T=20.90  TCHP=23.59  TCMb=31.38  TCMz=41.70  TG0B=21.40
+TG0C=20.00  TG0H=21.00  TG0V=21.40  TG1B=21.40  TG2B=20.90  TH0T=23.90  TH0x=23.90  TIOP=23.65
+TMVR=22.83  TPMP=23.29  TPSP=24.15  TR0Z=51.85  TR1d=-22.10  TR2d=23.74  TR3d=-22.23  TR4d=23.22
+TR5d=24.36  TSCD=23.06  TVA0=18.03  TVD0=31.38  TVS0=22.00  TVS1=22.29  TVSx=22.29  TW0P=25.49
+Ta1a=0.00  Ta1b=10.40  Ta1x=0.00  Ta1z=16.00  Tarc=0.00  Tc0a=21.57  Tc0b=21.57  Tc0x=22.83
+Tc0z=22.83  Tc1a=0.00  Tc1b=0.00  Tc1x=0.00  Tc1z=0.00  Tc2a=0.00  Tc2b=0.00  Tc2x=0.00
+Tc2z=0.00  Tc3a=0.00  Tc3b=0.00  Tc3x=0.00  Tc3z=0.00  Tc4a=0.00  Tc4b=0.00  Tc4x=0.00
+Tc4z=0.00  Tc5a=0.00  Tc5b=0.00  Tc5x=0.00  Tc5z=0.00  Tc6a=0.00  Tc6b=0.00  Tc6x=0.00
+Tc6z=0.00  Tc7a=18.19  Tc7b=18.19  Tc7x=21.25  Tc7z=21.25  Tc8a=20.59  Tc8b=20.59  Tc8x=26.23
+Tc8z=26.23  Tc9a=21.18  Tc9b=21.18  Tc9x=22.91  Tc9z=22.91  Tcaa=21.33  Tcab=21.33  Tcax=24.70
+Tcaz=24.70  Te0a=17.37  Te0b=17.37  Te0x=19.56  Te0z=19.56  Te3a=17.84  Te3b=26.54  Te3x=21.25
+Te3z=41.25  Tg1b=0.00  Tg4b=0.00  Th0a=22.12  Th0b=22.12  Th0x=22.39  Th0z=22.39  Th1a=21.65
+Th1b=30.65  Th1x=21.95  Th1z=30.95  Th2a=21.91  Th2b=30.91  Th2x=22.23  Th2z=31.23  Tp2a=19.85
+Tp2b=28.95  Tp2x=26.23  Tp2z=41.23  Tp3a=20.29  Tp3b=27.69  Tp3x=24.48  Tp3z=36.48  Tp4a=18.49
+Tp4b=28.59  Tp4x=22.59  Tp4z=39.59  Tp5a=21.18  Tp5b=31.38  Tp5x=22.91  Tp5z=38.91  Tp7a=19.45
+Tp7b=28.55  Tp7x=22.69  Tp7z=37.69  Tp8a=20.79  Tp8b=28.19  Tp8x=24.59  Tp8z=36.59  Tp9a=20.84
+Tp9b=30.94  Tp9x=24.70  Tp9z=41.70  Ts0a=21.57  Ts0b=21.57  Ts0x=22.83  Ts0z=22.83  Ts1a=19.46
+Ts1b=24.46  Ts1x=21.00  Ts1z=26.00  Ts2a=19.37  Ts2b=24.37  Ts2x=20.91  Ts2z=25.91  Ts5a=0.00
+Ts5b=8.00  Ts5x=0.00  Ts5z=10.00
