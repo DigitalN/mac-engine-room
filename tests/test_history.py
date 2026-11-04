@@ -145,3 +145,12 @@ def test_legacy_import_copies_local_sessions_once_and_reads_only(store, tmp_path
 def test_legacy_import_without_old_database(store, tmp_path):
     assert store.import_legacy(tmp_path / "missing.sqlite") == 0
     assert store.get_meta(LEGACY_IMPORT_KEY) == "no legacy database"
+
+
+def test_charges_saved_with_a_third_party_charger_read_back_by_its_wattage(store):
+    session = {"started_at": 1000.0, "ended_at": 1600.0, "from_level": 40, "to_level": 55,
+               "adapter_name": "pd charger", "adapter_watts": 100, "avg": {}, "peak": {}, "curve": []}
+    session_id = store.save_session(session)
+    assert store.list_sessions()[0]["adapter_name"] == "100W USB-C Power Adapter"
+    assert store.get_session(session_id)["adapter_name"] == "100W USB-C Power Adapter"
+

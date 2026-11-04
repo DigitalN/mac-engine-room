@@ -24,6 +24,7 @@ import logging
 import os
 import platform
 import plistlib
+import re
 import struct
 import time
 
@@ -454,6 +455,16 @@ def _is_charging(b, smc):
     return smc.get("CHCC", 0) > 0
 
 
+def adapter_name(name, watts):
+    """What to call a charger. Apple's name its wattage ("140W USB-C Power Adapter"); others
+    only say "pd charger", so they're named the same way from the wattage macOS reports for
+    them. None if there's neither a name nor a wattage."""
+    name = (name or "").strip()
+    if re.search(r"\d\s?W\b", name) or not _positive(watts):
+        return name or None
+    return f"{round(watts)}W USB-C Power Adapter"
+
+
 def screen_sensor_unknown(sample, model):
     """True on a laptop that has given no screen reading and isn't known to have no sensor:
     a screen key the app doesn't know yet, so a sensor report would help."""
@@ -552,10 +563,10 @@ def normalize(battery, smc, now=None, charge_limit=None):
     adapter = None
     ad = b.get("AdapterDetails") or {}
     if external and ad:
-        name = (ad.get("Name") or ad.get("Description") or "").strip() or None
+        watts = _positive(ad.get("Watts"))
         adapter = {
-            "name": name,
-            "watts": _positive(ad.get("Watts")),
+            "name": adapter_name(ad.get("Name") or ad.get("Description"), watts),
+            "watts": watts,
             "voltage": _round((_num(ad.get("AdapterVoltage")) or 0) / 1000) or None,
             "current": _round((_num(ad.get("Current")) or 0) / 1000) or None,
             "wireless": bool(ad.get("IsWireless")),

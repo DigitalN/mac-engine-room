@@ -13,6 +13,8 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
+from power import adapter_name  # sessions saved as "pd charger" read back by their wattage
+
 log = logging.getLogger(__name__)
 
 SCHEMA = """
@@ -91,7 +93,7 @@ class HistoryStore:
             sessions.append({
                 "id": r["id"], "started_at": r["started_at"], "ended_at": r["ended_at"],
                 "from_level": r["from_level"], "to_level": r["to_level"],
-                "adapter_name": r["adapter_name"], "adapter_watts": r["adapter_watts"],
+                "adapter_name": adapter_name(r["adapter_name"], r["adapter_watts"]), "adapter_watts": r["adapter_watts"],
                 "avg_input_w": avg.get("adapter_power") or avg.get("system_in"),
                 "source": r["source"],
             })
@@ -105,7 +107,7 @@ class HistoryStore:
         return {
             "id": r["id"], "started_at": r["started_at"], "ended_at": r["ended_at"],
             "from_level": r["from_level"], "to_level": r["to_level"],
-            "adapter_name": r["adapter_name"], "adapter_watts": r["adapter_watts"],
+            "adapter_name": adapter_name(r["adapter_name"], r["adapter_watts"]), "adapter_watts": r["adapter_watts"],
             "avg": json.loads(r["avg_json"] or "{}"), "peak": json.loads(r["peak_json"] or "{}"),
             "curve_fields": list(CURVE_FIELDS), "curve": json.loads(r["curve_json"] or "[]"),
             "source": r["source"],

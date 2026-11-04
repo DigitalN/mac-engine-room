@@ -361,3 +361,15 @@ def test_reads_this_mac():
     assert set(sample) >= {"system_load", "battery_level", "is_charging", "adapter"}
     if sample["has_battery"]:
         assert 0 <= sample["battery_level"] <= 100
+
+
+def test_every_charger_is_named_by_its_wattage():
+    assert power.adapter_name("140W USB-C Power Adapter", 140) == "140W USB-C Power Adapter"  # Apple's own
+    assert power.adapter_name("pd charger", 100) == "100W USB-C Power Adapter"  # any other brand
+    assert power.adapter_name(None, 65.0) == "65W USB-C Power Adapter"
+    assert power.adapter_name("35W Dual USB-C Port Power Adapter", 35) == "35W Dual USB-C Port Power Adapter"
+    assert power.adapter_name("pd charger", None) == "pd charger" and power.adapter_name("", 0) is None
+    third_party = {**MACOS_27, "AdapterDetails": {"Description": "pd charger", "Watts": 100, "IsWireless": False}}
+    assert normalize(third_party, {}, now=1.0)["adapter"]["name"] == "100W USB-C Power Adapter"
+    assert normalize(MACOS_27, {}, now=1.0)["adapter"]["name"] == "140W USB-C Power Adapter"
+
