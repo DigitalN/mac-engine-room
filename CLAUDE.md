@@ -19,7 +19,11 @@ logs `SMC keys missing on <model>, macOS <version>: …` once per launch, with t
 keys it does have. Reopening the app at one bar of brightness and again at full shows
 which of them is the screen. The first temperature reading after launch (or after an SMC
 reconnect) logs `Temperature sensors on <chip>: cpu N, gpu N, …; N fans`, plus the groups
-found by prefix when the chip isn't in the core key table.
+found by prefix when the chip isn't in the core key table (or its keys don't fit this Mac), and
+`no GPU sensor`. For a Mac you can't reach, ask for its sensor report (Settings › About ›
+Copy, or the "Wrong or missing reading" issue template): it lists every power, temperature and
+fan key with its value, and which keys each reading came from. The app logs `Copied the sensor
+report` or `Couldn't make the sensor report (…)`.
 
 Fan control logs `Fan profile: <name>` when one is chosen (and at launch), `Asked macOS to
 allow the fan helper`, `Fan control is waiting for the helper to be allowed in Login Items`,
@@ -72,11 +76,16 @@ To reproduce without touching the user's data, run with
   `normalize()` is pure and unit-tested with captured registry dicts. Its `SMC` class
   (read-only) is shared with the Thermals tool.
 - **Thermals sensors**: `Application Files/thermals.py`. CPU and GPU are the hottest
-  *core* sensor, from a per-chip table of core keys taken from Stats, with keys found by
-  prefix for chips it doesn't know; memory, SSD and ambient the hottest of their group;
-  fans' speed, limits and mode. Keys are found once per SMC connection, and only the
-  groups asked for are read. `sensor_keys()` and `normalize()` are pure and unit-tested
-  with a captured M1 Pro key map.
+  *core* sensor, from a per-chip table of core keys (Stats', checked against iSMC's dumps),
+  with keys found by prefix for chips it doesn't know or whose table doesn't fit; memory, SSD
+  and ambient the hottest of their group; fans' speed, limits and mode. Parked chip sensors are
+  ignored, and a parked GPU's last reading is kept in `gpu_held` for display. Keys are found
+  once per SMC connection, and only the groups asked for are read. `sensor_keys()` and
+  `normalize()` are pure and unit-tested with a captured M1 Pro key map.
+- **Sensor report**: `Application Files/report.py`. What Settings › About's Copy puts on the
+  clipboard: the kind of Mac, which keys each reading came from, and every P/T/F key's value.
+  `parse()` reads one back: each report that comes in is saved in `tests/sensor_reports/` as
+  `<model>.txt`, and `tests/test_report.py` checks every one still finds its sensors.
 - **Fan control**: `Application Files/fans.py`. The profiles (ThermalForge's numbers), the
   curve (`Curve`) and the safety override (`Safety`), both pure and unit-tested, and
   `FanControl`, a thread that runs the chosen profile on each sample and talks to the helper
@@ -148,7 +157,7 @@ To reproduce without touching the user's data, run with
   M1 Pro), 0.03% of a core at the 2.5 s rate. **Fans only while something shows them**:
   the Dashboard or Thermals page (its polls say which page is showing), the open menu
   (which wakes the sampler as it opens), or fan control holding them. The safety
-  override's hotspot and case sensors only while fan control holds the fans.
+  override's hotspot and `TS0P` sensors only while fan control holds the fans.
 - **Idle work stays on the efficiency cores.** With only the menu bar item showing,
   the sampler and the main thread run at background QoS, the only one Apple silicon
   keeps off the performance cores. The dashboard raises the sampler to utility, and the
@@ -163,9 +172,11 @@ To reproduce without touching the user's data, run with
   skips values already shown. On the page, the once-a-second writes go through `put()`,
   which does the same, and the Thermals and Now pages only render while they're the
   active tab. Charts draw at most one point per device pixel.
-- The SMC key for screen power depends on the Mac, and the first one found wins: `PDBR`
-  (M1 Pro, measured), `PBLR` (base M4 Mac16,1, which has no `PDBR`; measured at 0.3 W at
-  one bar and 7.2 W at full), `PBwo` (M5 and A18 per macpow's docs, not measured).
+- The SMC key for screen power follows the chip's tier, and the first one with a reading from
+  0 to 25 W wins: `PDBR` on Pro and Max chips, M1 to M5 (measured here and by others on the M1
+  Max, M3 Max, M4 Pro, M5 Pro and M5 Max), `PBLR` on base chips (measured on the base M4 at 0.3
+  W at one bar and 7.2 W at full; in dumps from a base M2 and M3), `PBwo` on the A18 Pro
+  MacBook Neo (measured by others; the M5 has none). No source has found one on the M1 Air.
 - SMC `PHPC` is chip (CPU + GPU package) power, **not** "heatpipe" or fan power,
   despite Apple's key name. Verified: it rises about 11 W under full CPU load while
   the fans stay at minimum.
@@ -191,6 +202,10 @@ To reproduce without touching the user's data, run with
   answered by it, and it took 8 s once while busy. Fan control asks while waiting for the
   user's approval, and after that only when the helper can't be reached. A daemon that
   was never registered reports *not found*, not *not registered*.
+- **A key from another project's table is used when its reading makes sense**: one established
+  project (Stats, iSMC, Asahi Linux, macmon…) listing it for that chip is enough, with the
+  source in a comment next to it. iSMC is GPL: use its dumps as evidence, never copy its table.
+  A Mac that's missing a reading for real hides it; a report proves which it is.
 - WebKit pauses rendering in a window that's covered or hidden, so `ResizeObserver` and
   `requestAnimationFrame` don't run there. A test that drives the page while other
   windows cover it sees no size reports; that's not a bug.
@@ -285,6 +300,20 @@ Don't undo these without asking:
   Reading them only while shown left a gap whenever the page was covered or another tab
   showed.
 - Choosing Power always opens Now, not the last Power page.
+- Apple silicon only (the build is arm64, so Intel Macs can't open it). Desktops get the same
+  sensor work as laptops: on a Mac with no battery, Power says "Desktop Mac" and shows System and
+  Chip power, with no Battery or Adapter card, row, tile or chart line; fan control is offered
+  wherever fans are found.
+- A reading a Mac doesn't have stays hidden. Settings › About has **Sensor report** (Copy, and
+  Report a Problem…, which opens the GitHub issue template in the browser) on the row under the
+  log file, not in a section of its own, with a hint under it only when the app guessed.
+- Readings below freezing count: only chip sensors are judged parked, against the Mac's coolest
+  other reading, not by a fixed floor.
+- A parked GPU shows its last real reading (display only), with "Last reported x min ago" under
+  it after a minute on the Dashboard and Thermals page, and dimmed in the menu; "—" until the
+  first real reading.
+- The safety override's `TS0P` trip says "a sensor inside the Mac passed 95°": iSMC places it
+  by the SSD, not on the case.
 
 - Updates are checked once a day, only when the Mac wakes from sleep (plus **Check for
   Updates…** in the menu and **Check Now** in Settings), and installed silently at a quiet

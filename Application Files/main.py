@@ -146,6 +146,10 @@ class LiveState:
                 self._thermal_points.append(
                     (self._seq, [round(thermals["t"], 2)] + [thermals[k] for k in THERMAL_FIELDS[1:]]))
 
+    def latest(self):
+        with self._lock:
+            return self._latest
+
     def since(self, seq):
         with self._lock:
             return {
@@ -326,10 +330,34 @@ class Api:
 
         AppHelper.callAfter(NSWorkspace.sharedWorkspace().openURL_, NSURL.URLWithString_(CHARGING_SETTINGS_URL))
 
+    def copy_sensor_report(self):
+        """Settings' Copy button: this Mac's sensor report on the clipboard. False if the SMC
+        can't be read."""
+        import report
+        from PyObjCTools import AppHelper
+
+        try:
+            text = report.collect(VERSION, self._app._live.latest())
+        except OSError as e:
+            log.warning("Couldn't make the sensor report (%s)", e)
+            return False
+        AppHelper.callAfter(_copy_to_clipboard, text)
+        log.info("Copied the sensor report")
+        return True
+
+    def report_problem(self):
+        """Settings' Report a Problem…: GitHub's new-issue page with the sensor report's
+        template, in the browser."""
+        from AppKit import NSURL, NSWorkspace
+        from launch import REPORT_ISSUE_URL
+        from PyObjCTools import AppHelper
+
+        AppHelper.callAfter(NSWorkspace.sharedWorkspace().openURL_, NSURL.URLWithString_(REPORT_ISSUE_URL))
+
     def app_info(self):
         import fans
 
-        return {"version": VERSION, "log_path": str(LOG_PATH),
+        return {"version": VERSION, "log_path": str(LOG_PATH), "sensor_hint": self._app._sensor_hint(),
                 "history_recording": self._app._settings.get()["record_history"],
                 "update_unavailable_reason": self._app._updater.unavailable_reason,
                 "fan_profiles": fans.page_profiles(), "fan_tuning_limits": fans.TUNING_LIMITS}
@@ -344,6 +372,14 @@ class Api:
     def log_error(self, message):
         """Page errors land in app.log next to the Python ones."""
         log.warning("Dashboard error: %s", str(message)[:1000])
+
+
+def _copy_to_clipboard(text):
+    from AppKit import NSPasteboard, NSPasteboardTypeString
+
+    board = NSPasteboard.generalPasteboard()
+    board.clearContents()
+    board.setString_forType_(text, NSPasteboardTypeString)
 
 
 class EngineRoomApp:
@@ -363,7 +399,7 @@ class EngineRoomApp:
         prefs = self._settings.get()
         self._recorder = ChargingRecorder(self._store, enabled=prefs["record_history"])
         self._app_path = launch.bundle_path()
-        thermals = ThermalsReader()
+        thermals = self._thermals = ThermalsReader()
         self._fans = FanControl(self._settings, Helper(self._app_path, _own_bundle_id() or "com.pythonflow.monitor"),
                                 thermals.fan_limits, set_qos=_fans_qos)
         self._sampler = Sampler(self._reader, self._on_sample, thermals, self._thermal_parts,
@@ -406,6 +442,13 @@ class EngineRoomApp:
         if self._sampler.fans_watched() or (self._statusbar is not None and self._statusbar.menu_open):
             return thermals.ALL_PARTS
         return thermals.TEMPERATURES
+
+    def _sensor_hint(self):
+        """Whether Settings asks for a sensor report: the app guessed CPU or GPU sensors on this
+        Mac, or it's a laptop with no screen reading that isn't known to have no sensor."""
+        import power
+
+        return bool(self._thermals.guessing) or power.screen_sensor_unknown(self._live.latest(), power.mac_model())
 
     def _page_settings(self):
         """Settings plus "open at login" (None where it isn't available, e.g. from source)."""

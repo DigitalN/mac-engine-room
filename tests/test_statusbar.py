@@ -4,6 +4,8 @@ the update test swaps in a stand-in for it."""
 import time
 from types import SimpleNamespace
 
+import AppKit
+
 import statusbar
 from statusbar import (FIGURE_SPACE, StatusBar, battery_status, fans_text, format_temperature, format_watts,
                        menu_bar_temperature, menu_bar_title, menu_bar_value)
@@ -238,3 +240,27 @@ def test_the_menu_shows_the_three_profiles_chosen_in_settings(monkeypatch):
     status.update(state="nofans")
     bar._target.menuNeedsUpdate_(bar._menu)
     assert bar._profiles_item.isHidden() and bar._allow_fans_item.isHidden()
+
+
+def test_a_parked_gpu_shows_its_last_reading_dimmed_after_a_minute(monkeypatch):
+    _fake_status_item(monkeypatch)
+    bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None)
+    sample = {"system_load": 7.0, "has_battery": True, "battery_level": 80}
+    gpu = bar._tiles["gpu"][2]
+    bar.update(sample, _thermals(gpu=None, gpu_held={"c": 47.9, "t": time.time() - 10, "sensors": 2}), {})
+    bar._target.menuNeedsUpdate_(bar._menu)
+    assert _tile(bar, "gpu") == "48°" and gpu.textColor() == AppKit.NSColor.labelColor()
+    bar.update(sample, _thermals(gpu=None, gpu_held={"c": 47.9, "t": time.time() - 180, "sensors": 2}), {})
+    bar._target.menuNeedsUpdate_(bar._menu)
+    assert _tile(bar, "gpu") == "48°" and gpu.textColor() == AppKit.NSColor.secondaryLabelColor()
+    bar.update(sample, _thermals(), {})  # it's back
+    bar._target.menuNeedsUpdate_(bar._menu)
+    assert _tile(bar, "gpu") == "59°" and gpu.textColor() == AppKit.NSColor.labelColor()
+
+
+def test_a_desktop_has_no_battery_or_adapter_row(monkeypatch):
+    _fake_status_item(monkeypatch)
+    bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None)
+    bar.update({"system_load": 12.0, "has_battery": False, "external_connected": True}, _thermals(), {})
+    bar._target.menuNeedsUpdate_(bar._menu)
+    assert bar._rows["battery"].isHidden() and bar._rows["adapter"].isHidden() and not bar._rows["system"].isHidden()

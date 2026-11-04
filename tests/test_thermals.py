@@ -47,12 +47,33 @@ def test_m1_pro_sample():
                          {"rpm": 0, "min": 1499, "max": 4744, "manual": False}]
 
 
-def test_readings_of_0_or_outside_1_to_130_are_ignored():
+def test_readings_of_exactly_0_or_outside_minus_40_to_130_are_ignored():
     keys = {"cpu": ("Tp01", "Tp05", "Tp09", "Tp0D", "Tp0H"), "ssd": ("TH0a",)}
-    s = normalize({"Tp01": 0.0, "Tp05": 131.0, "Tp09": math.nan, "Tp0D": -5.0, "Tp0H": 55.5, "TH0a": 0.0}, keys)
+    s = normalize({"Tp01": 0.0, "Tp05": 131.0, "Tp09": math.nan, "Tp0D": -45.0, "Tp0H": 55.5, "TH0a": 0.0}, keys)
     assert s["cpu"] == 55.5 and s["sensors"]["cpu"] == 1
     assert s["ssd"] is None and s["hottest"] == 55.5
     assert normalize({}, keys)["hottest"] is None
+
+
+def test_a_cold_day_outside_still_reads():
+    keys = {"cpu": ("Tp01",), "gpu": ("Tg05",), "ambient": ("TAOL",), "ssd": ("TH0a",)}
+    s = normalize({"Tp01": 12.0, "Tg05": 6.5, "TAOL": -5.25, "TH0a": 3.0}, keys)
+    assert (s["ambient"], s["ssd"], s["cpu"], s["gpu"]) == (-5.2, 3.0, 12.0, 6.5)  # nothing hidden for being cold
+
+
+def test_parked_chip_sensors_are_ignored():
+    keys = {"cpu": ("Tp01", "Tp05"), "gpu": ("Tg05", "Tg0D", "Tg0L"), "ambient": ("TAOL",), "memory": ("Tm00",)}
+    room = {"TAOL": 27.0, "Tm00": 45.0}
+    # A powered-down GPU's made-up 1.5–5° readings, well under the Mac's coolest other sensor.
+    s = normalize({**room, "Tp01": 48.0, "Tp05": 3.1, "Tg05": 2.4, "Tg0D": 5.2, "Tg0L": -4.0}, keys)
+    assert s["cpu"] == 48.0 and s["sensors"]["cpu"] == 1 and s["gpu"] is None and s["sensors"]["gpu"] == 0
+    # One value on every key (an M4 Pro's flat 40.0) is made up too.
+    assert normalize({**room, "Tp01": 48.0, "Tg05": 40.0, "Tg0D": 40.0, "Tg0L": 40.0}, keys)["gpu"] is None
+    # An idle GPU that's awake counts, however hot the CPU is.
+    s = normalize({**room, "Tp01": 98.0, "Tp05": 97.0, "Tg05": 44.0, "Tg0D": 45.5, "Tg0L": 43.0}, keys)
+    assert s["gpu"] == 45.5 and s["sensors"]["gpu"] == 3
+    # Without another sensor to compare with, nothing is called parked.
+    assert normalize({"Tg05": 3.0}, {"gpu": ("Tg05",)})["gpu"] == 3.0
 
 
 def test_core_table_picks_the_variant_then_the_generation():
@@ -77,6 +98,47 @@ def test_a_known_chip_without_its_table_keys_falls_back_too():
     names = {"Tp00": 50.0, "Tp02": 60.0, "Tg0Z": 40.0}  # an M2 with keys Stats doesn't list
     keys = sensor_keys(names, "Apple M2 Pro")
     assert keys["cpu"] == ("Tp00", "Tp02") and keys["gpu"] == ("Tg0Z",)
+    assert keys["by_prefix"] == ("cpu", "gpu")
+
+
+def test_a_table_with_too_few_keys_for_the_cores_falls_back():
+    assert sensor_keys(M1_PRO, "Apple M1 Pro", cores=10)["by_prefix"] == ()
+    keys = sensor_keys(M1_PRO, "Apple M1 Pro", cores=24)  # 10 core keys on a 24-core chip: not this table
+    assert keys["by_prefix"] == ("cpu",) and len(keys["cpu"]) > 10 and keys["gpu"] == ("Tg05", "Tg0D")
+
+
+def test_the_m3_reads_its_cores_not_the_gpu_fabric():
+    # A base M3's cores (iSMC's dumps): no Tf keys at all (Stats #1703).
+    names = "Te04 Te05 Te06 Te0G Te0H Te0I Te0P Te0Q Te0R Te0S Te0T Tp04 Tp05 Tp06 Tp0C Tp0D Tp0E Tp0K Tp0L Tp0M " \
+            "Tp0a Tp0b Tp0c Tg04 Tg05 Tg0C Tg0D Tf0D".split()
+    keys = sensor_keys(names, "Apple M3", cores=8)
+    assert keys["cpu"] == ("Te05", "Te0H", "Te0P", "Te0S", "Tp05", "Tp0D", "Tp0L", "Tp0b") and keys["by_prefix"] == ()
+    assert keys["gpu"] == ("Tg05", "Tg0D")
+
+
+def test_both_m4_pro_core_layouts():
+    a = "Te05 Te0S Te06 Te0T Tp01 Tp05 Tp09 Tp0D Tp0H Tp0L Tp0P Tp0T Tp0X Tp0b Tg1U Tg1k".split()
+    b = "Te05 Te0S Te06 Te0T Tp1j Tp1n Tp1t Tp1w Tp1z Tp22 Tp25 Tp28 Tp2B Tp2E Tg1U Tg1k".split()
+    for names in (a, b):
+        keys = sensor_keys(names, "Apple M4 Pro", cores=14)
+        assert set(keys["cpu"]) == set(names) - {"Tg1U", "Tg1k"} and keys["by_prefix"] == ()
+
+
+def test_the_ultras_second_die():
+    cpu, gpu = core_table("Apple M1 Ultra")
+    assert {"Tp09", "Tp29", "Tp2b"} <= set(cpu) and {"Tg05", "Tg0z"} <= set(gpu)
+    assert "Tp29" not in core_table("Apple M1 Max")[0]
+
+
+def test_m5_memory_leaves_out_the_keys_that_copy_a_core():
+    names = ["Tm00", "Tm04", "Tm0y", "Tm2T"]
+    assert sensor_keys(names, "Apple M5 Max")["memory"] == ("Tm00", "Tm04")
+    assert sensor_keys(names, "Apple M4")["memory"] == tuple(sorted(names))
+
+
+def test_fans_are_counted_where_fnum_is_missing():
+    assert thermals.count_fans({"F0Ac", "F1Ac", "F0Mn"}) == 2
+    assert thermals.count_fans({"FNum", "TAOL"}) == 0
 
 
 def test_fan_mode_and_the_lowercase_mode_key():
@@ -125,6 +187,7 @@ def reader(monkeypatch):
     smcs = []
     monkeypatch.setattr(power, "SMC", lambda: smcs.append(_FakeSMC(M1_PRO)) or smcs[-1])
     monkeypatch.setattr(thermals, "chip_name", lambda: "Apple M1 Pro")
+    monkeypatch.setattr(thermals, "core_count", lambda: 10)  # the M1 Pro's, whatever runs the tests
     r = thermals.ThermalsReader()
     r.smcs = smcs
     return r
@@ -155,10 +218,30 @@ def test_a_failed_read_reconnects_and_finds_the_keys_again(reader, monkeypatch):
     assert _FakeSMC.opened == 2 and reader.smcs[1].listed == 1
 
 
+def test_a_parked_gpu_shows_its_last_reading_but_only_for_display(reader):
+    first = reader.read({"gpu", "ambient", "memory"})
+    assert first["gpu"] == 61.8 and first["gpu_held"] is None
+    reader.smcs[0].values = {**M1_PRO, "Tg05": 2.4, "Tg0D": 3.0}  # the GPU powers down
+    held = reader.read({"gpu", "ambient", "memory"})
+    assert held["gpu"] is None and held["hottest"] != 61.8  # the fan curve and the title never see it
+    assert held["gpu_held"] == {"c": 61.8, "t": first["t"], "sensors": 2}
+
+
+def test_the_reader_says_what_it_guessed(reader, monkeypatch):
+    reader.read({"cpu"})
+    assert reader.guessing == ()
+    monkeypatch.setattr(power, "SMC", lambda: _FakeSMC({k: v for k, v in M1_PRO.items() if not k.startswith("Tg")}))
+    other = thermals.ThermalsReader()
+    other._chip = "Apple M9"
+    other.read({"cpu"})
+    assert other.guessing == ("cpu", "gpu")  # CPU by prefix, and no GPU key at all
+
+
 def test_ioft_is_decoded():
     # TG0B on the M1 Pro: 31.3 °C as 16.16 fixed point, then 4 bytes of padding.
     assert power.decode_smc_value("ioft", bytes.fromhex("cd4c1f0000000000"), little_endian=True) == pytest.approx(31.3, abs=0.001)
     assert power.decode_smc_value("ioft", bytes.fromhex("cd4c1f0000000000"), little_endian=False) == pytest.approx(31.3, abs=0.001)
+    assert power.decode_smc_value("ioft", bytes.fromhex("0000fcff00000000"), little_endian=True) == -4.0  # signed
 
 
 def test_reads_this_mac():

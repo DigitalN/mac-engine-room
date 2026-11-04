@@ -83,4 +83,14 @@ do {
     check("m1pro never writes Ftst", !smc.writes.contains { $0.key == "Ftst" })
 }
 
+// A Mac that doesn't report FNum: its fans are the ones with a speed key. A fanless Mac has none.
+do {
+    let smc = SMCConnection(model: "m1pro")
+    smc.keys["FNum"] = nil
+    let f = Fans(smc: smc, marker: marker, unlockPatience: 0.3)
+    check("no FNum: the fans are counted", (try? f?.hold([1499, 1499])) == [1499, 1499] && modes(smc) == [1, 1], "\(modes(smc))")
+    _ = f?.release("test")
+    check("fanless: no fans", Fans(smc: SMCConnection(model: "m1pro", fans: 0), marker: marker) == nil)
+}
+
 exit(failed ? 1 : 0)

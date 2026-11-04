@@ -384,21 +384,21 @@ dialog .actions { justify-content: flex-end; }
 
       <div class="card">
         <h2>Power flow</h2>
-        <div class="flow">
+        <div class="flow" id="flow">
           <div class="node" id="n-adapter">
             <div class="icon">🔌</div><div class="name">Adapter</div>
             <div class="val num" id="n-adapter-val">—</div><div class="extra num" id="n-adapter-extra"></div>
           </div>
-          <div class="link">
+          <div class="link" id="link-in">
             <div class="label num" id="l-in">&nbsp;</div>
             <div class="pipe" id="p-in" style="--pipe-color: var(--charge)"></div>
             <div class="note num" id="l-in-note"></div>
           </div>
           <div class="node" id="n-mac">
-            <div class="icon">💻</div><div class="name">Mac</div>
+            <div class="icon" id="n-mac-icon">💻</div><div class="name">Mac</div>
             <div class="val num" id="n-mac-val">—</div><div class="extra">system load</div>
           </div>
-          <div class="link">
+          <div class="link" id="link-batt">
             <div class="label num" id="l-batt">&nbsp;</div>
             <div class="pipe" id="p-batt" style="--pipe-color: var(--charge)"></div>
             <div class="note" id="l-batt-note"></div>
@@ -427,13 +427,13 @@ dialog .actions { justify-content: flex-end; }
         <div class="chart-wrap"><canvas id="live-chart"></canvas><div class="tip" id="live-tip"></div></div>
       </div>
 
-      <div class="grid cols-3">
-        <div class="card">
+      <div class="grid cols-3" id="cards-3">
+        <div class="card" id="c-battery">
           <h2>Battery</h2>
           <div class="health"><span class="big num" id="d-health">—</span><span class="muted">maximum capacity</span></div>
           <dl class="kv num" id="d-battery"></dl>
         </div>
-        <div class="card">
+        <div class="card" id="c-adapter">
           <h2>Adapter</h2>
           <dl class="kv num" id="d-adapter"></dl>
         </div>
@@ -553,6 +553,11 @@ dialog .actions { justify-content: flex-end; }
         <div class="card">
           <div class="srow"><div class="lbl">Version</div><div class="muted num" id="s-version"></div></div>
           <div class="srow"><div class="lbl muted">Log file: <code id="s-log-path"></code></div><button class="btn" id="s-reveal">Show in Finder</button></div>
+          <div class="srow">
+            <div class="lbl">Sensor report<div class="hint" id="s-report-hint"></div></div>
+            <button class="btn" id="s-copy-report">Copy</button>
+            <button class="btn" id="s-report-problem">Report a Problem…</button>
+          </div>
         </div>
       </div>
     </div>
@@ -758,7 +763,7 @@ function niceStep(raw) {
 
 // ── state ───────────────────────────────────────────────
 let settings = null, latest = null, seq = 0, points = [], pollTimer = null;
-let liveRange = 300, activeTab = 'dashboard', sessions = [], selectedId = null, screenOffered = true;
+let liveRange = 300, activeTab = 'dashboard', sessions = [], selectedId = null, screenOffered = true, batteryOffered = true;
 let thermals = null, tpoints = [], tRange = 300;
 const SERIES = [
   { key: 'system_load', name: 'System', color: '--system', on: true },
@@ -772,7 +777,7 @@ let pointFields = ['t', 'system_load', 'system_in', 'battery_power', 'screen_pow
 // ── Now page ────────────────────────────────────────────
 function statusOf(s) {
   if (!s) return { dot: '', text: 'Reading sensors…' };
-  if (!s.has_battery) return { dot: 'idle', text: s.external_connected ? 'On power adapter' : 'Desktop Mac' };
+  if (!s.has_battery) return { dot: 'idle', text: 'Desktop Mac' };
   const t = s.time_remaining_min;
   if (s.fully_charged) return { dot: 'idle', text: 'Fully charged' };
   const to = s.charge_limit ? `${s.charge_limit}%` : 'full';
@@ -790,13 +795,16 @@ function renderNow() {
 
   // hero
   const lvl = s.battery_level;
-  put('hero-level', 'html', isNum(lvl) ? `${lvl}<small>%</small>` : '—');
+  const desk = !s.has_battery;  // a desktop: what it draws in place of the battery's level
+  put('hero-level', 'html', desk ? (isNum(s.system_load) ? `${s.system_load.toFixed(1)}<small>W</small>` : '—')
+    : isNum(lvl) ? `${lvl}<small>%</small>` : '—');
   put('hero-state', 'text', st.text.split(' · ')[0]);
-  put('hero-sub', 'text', st.text.includes(' · ') ? st.text.split(' · ')[1] : (s.has_battery ? '' : 'No internal battery'));
+  put('hero-sub', 'text', st.text.includes(' · ') ? st.text.split(' · ')[1] : (desk ? 'Power used by the whole Mac' : ''));
   put('hero-gauge', 'class', `gauge ${st.dot}`);
   put($('hero-gauge').firstElementChild, 'width', `${isNum(lvl) ? lvl : 0}%`);
   put('hero-gauge', 'display', s.has_battery ? '' : 'none');
   const a = s.adapter;
+  put('hero-chip', 'display', desk ? 'none' : '');
   put('hero-chip', 'html', s.external_connected
     ? `<span class="muted">Power source</span><b>${esc(a?.name || 'Power adapter')}</b><span class="muted num">${[a?.voltage && `${a.voltage} V`, a?.current && `${a.current} A`].filter(Boolean).join(' · ') || '&nbsp;'}</span>`
     : `<span class="muted">Power source</span><b>Battery</b><span class="muted num">${isNum(s.temperature) ? `${s.temperature.toFixed(1)} °C` : '&nbsp;'}</span>`);
@@ -804,6 +812,10 @@ function renderNow() {
   // flow
   const inW = s.external_connected ? s.adapter_power : null;
   const bp = s.battery_power;
+  for (const id of ['n-adapter', 'link-in', 'link-batt', 'n-battery', 'c-battery', 'c-adapter']) put(id, 'display', desk ? 'none' : '');
+  put('flow', 'grid-template-columns', desk ? '1fr' : '');
+  put('cards-3', 'grid-template-columns', desk ? '1fr' : '');
+  put('n-mac-icon', 'text', desk ? '🖥️' : '💻');
   $('n-adapter').classList.toggle('off', !s.external_connected);
   put('n-adapter-val', 'text', s.external_connected ? fmtW(inW) : 'Unplugged');
   put('n-adapter-extra', 'text', a?.watts ? `${a.watts} W rated` : '');
@@ -863,10 +875,12 @@ function renderNow() {
   kv('d-system', [
     ['Total', fmtW(s.system_load)],
     ...(s.has_screen_power ? [['Screen', fmtW(s.screen_power)]] : []),
-    ['Chip (CPU + GPU)', fmtW(s.chip_power)],
-    ['Into Mac from adapter', s.external_connected ? fmtW(s.system_in) : '—'],
-    ['Battery', isNum(bp) ? `${bp > 0 ? '+' : ''}${bp.toFixed(1)} W` : '—'],
-    ['Sensors', s.has_smc ? 'SMC + battery registry' : 'Battery registry only'],
+    ...(isNum(s.chip_power) || s.has_battery ? [['Chip (CPU + GPU)', fmtW(s.chip_power)]] : []),
+    ...(s.has_battery ? [
+      ['Into Mac from adapter', s.external_connected ? fmtW(s.system_in) : '—'],
+      ['Battery', isNum(bp) ? `${bp > 0 ? '+' : ''}${bp.toFixed(1)} W` : '—'],
+    ] : []),
+    ['Sensors', !s.has_battery ? 'SMC' : s.has_smc ? 'SMC + battery registry' : 'Battery registry only'],
   ]);
 }
 
@@ -885,8 +899,12 @@ function kv(id, rows) {
   rows.forEach(([, v], i) => put(el.children[i * 2 + 1], 'text', v));
 }
 
+// A series this Mac can't have isn't offered: Screen without a screen sensor, and on a desktop
+// (no battery) the battery and the adapter, since a desktop's mains isn't one.
+const offeredSeries = s => s.key === 'screen_power' ? screenOffered
+  : s.key === 'system_in' || s.key === 'battery_power' ? batteryOffered : true;
 function renderToggles() {
-  $('live-toggles').innerHTML = SERIES.map((s, i) => s.key === 'screen_power' && !screenOffered ? '' :
+  $('live-toggles').innerHTML = SERIES.map((s, i) => !offeredSeries(s) ? '' :
     `<button class="toggle ${s.on ? 'on' : ''}" data-i="${i}"><i style="background:var(${s.color})"></i>${esc(s.name)}</button>`).join('');
 }
 
@@ -900,6 +918,11 @@ function offerScreen(offered) {
   if (offered) $('s-metric-power').insertBefore(screenOption, $('s-metric-power').lastElementChild);
   else screenOption.remove();
   showMetric();
+}
+function offerBattery(offered) {
+  if (offered === batteryOffered) return;
+  batteryOffered = offered;
+  renderToggles();
 }
 function showMetric() {
   if (!settings) return;
@@ -933,7 +956,7 @@ function renderLiveChart() {
     xTicks: liveRange === 60 ? 4 : 5,
     xLabel: agoLabel(xMax),
     tipTitle: t => new Date(t * 1000).toLocaleTimeString(),
-    series: SERIES.map(s => ({
+    series: SERIES.filter(offeredSeries).map(s => ({
       name: s.name, color: css(s.color), visible: s.on, format: v => fmtW(v),
       values: view.map(p => p[pointFields.indexOf(s.key)]),
     })),
@@ -959,6 +982,18 @@ const fmtT = c => isNum(c) ? `${Math.floor(toUnit(c) + 0.5)}°` : '—';  // hal
 const fmtRpm = v => isNum(v) ? v.toLocaleString() : '—';
 const available = () => thermals ? thermals.available : TEMPS.map(t => t.key).concat('fans');
 const freshThermals = () => thermals && latest && latest.t - thermals.t < STALE_AFTER ? thermals : null;
+const HELD_NOTE_AFTER = 60;  // seconds, as in the menu, which dims the reading instead
+const fmtAgo = s => s < 3600 ? `${Math.floor(s / 60)} min ago` : `${Math.floor(s / 3600)} hr ago`;
+// A temperature tile's value and the line under it. While every GPU sensor is parked (powered
+// down, giving made-up readings), the GPU shows its last real reading; after a minute the
+// line says how old it is.
+function tempTile(th, t) {
+  const held = t.key === 'gpu' && th && !isNum(th.gpu) ? th.gpu_held : null;
+  if (!held) return { ...t, value: fmtT(th?.[t.key]), sub: sensorsText(th, t) };
+  const age = th.t - held.t;
+  return { ...t, value: fmtT(held.c), sub: age >= HELD_NOTE_AFTER ? `Last reported ${fmtAgo(age)}`
+    : sensorsText({ sensors: { gpu: held.sensors } }, t) };
+}
 function sensorsText(th, t) {
   const n = th?.sensors?.[t.key] || 0;
   return !th ? ' ' : n === 0 ? 'No reading' : n === 1 ? '1 sensor' : `Hottest of ${n} ${t.cores ? 'cores' : 'sensors'}`;
@@ -1004,7 +1039,7 @@ function renderThermals() {
   const th = freshThermals();
   const temps = TEMPS.filter(t => available().includes(t.key));
   put('t-tiles', '--n', String(temps.length));
-  renderTiles('t-tiles', temps.map(t => ({ ...t, value: fmtT(th?.[t.key]), sub: sensorsText(th, t) })));
+  renderTiles('t-tiles', temps.map(t => tempTile(th, t)));
 
   const hasFans = available().includes('fans');
   put('t-fans-card', 'display', hasFans ? '' : 'none');
@@ -1034,7 +1069,7 @@ function fanStatusText(fc) {
     case 'holding': return `${name} is running the fans at ${rpmList(fc.targets)}.`;
     case 'override': return `Full speed, because ${({
       pressure: `macOS reports ${PRESSURE[Math.max(1, fc.pressure || 0)]} thermal pressure`,
-      hotspot: `part of the chip passed ${fmtT(118)}`, chassis: `the case passed ${fmtT(95)}`,
+      hotspot: `part of the chip passed ${fmtT(118)}`, chassis: `a sensor inside the Mac passed ${fmtT(95)}`,
       battery: `the battery passed ${fmtT(50)}` })[fc.reason] || fc.reason}.`;
     case 'approval': return 'To finish setting up fan control, allow Mac Engine Room in Login Items.';
     case 'unavailable': return `Fan control isn't available ${fc.reason}.`;
@@ -1110,7 +1145,7 @@ function renderDashboard() {
   if (activeTab !== 'dashboard') return;
   const th = freshThermals(), s = latest;
   const temps = TEMPS.filter(t => t.cores && available().includes(t.key))
-    .map(t => ({ ...t, value: fmtT(th?.[t.key]), sub: sensorsText(th, t) }));
+    .map(t => tempTile(th, t));
   if (available().includes('fans')) {
     if (th?.fans?.length) fanCount = th.fans.length;
     const fans = th?.fans || [];
@@ -1129,7 +1164,7 @@ function renderDashboard() {
     power.push({ name: 'Battery', color: '--drain', value: isNum(s.battery_level) ? `${s.battery_level}%` : '—',
       sub: st[0].toUpperCase() + st.slice(1) });
   }
-  power.push(s.external_connected
+  if (s.has_battery) power.push(s.external_connected
     ? { name: 'Adapter', color: '--charge', value: fmtW(s.adapter_power), sub: a?.name || (a?.watts ? `${a.watts} W adapter` : 'Power adapter') }
     : { name: 'Adapter', color: '--charge', value: 'Not connected', word: true });
   renderTiles('dash-power', power);
@@ -1169,7 +1204,7 @@ async function poll() {
         if (changed) renderThermalToggles();
       }
       if (r.latest) {
-        latest = r.latest; offerScreen(latest.has_screen_power);
+        latest = r.latest; offerScreen(latest.has_screen_power); offerBattery(latest.has_battery !== false);
         renderNow(); renderLiveChart(); renderThermals(); renderThermalChart(); renderDashboard();
       }
       if (r.update) { updateState = r.update; if (activeTab === 'settings') renderUpdateButton(); }
@@ -1335,6 +1370,8 @@ async function renderSettings() {
   renderUpdateButton();
   $('s-version').textContent = info.version;
   $('s-log-path').textContent = info.log_path.replace(/^\/Users\/[^/]+/, '~');
+  // Only when the app knows it guessed one of this Mac's sensors, or a laptop gave no screen reading.
+  $('s-report-hint').textContent = info.sensor_hint ? "Some of this Mac's sensors aren't known yet. A sensor report would help." : '';
   fanProfiles = info.fan_profiles; tuningLimits = info.fan_tuning_limits;
   renderFanTuning();
   const list = await call('list_sessions');
@@ -1407,6 +1444,13 @@ $('s-update').onchange = e => save({ update_automatically: e.target.checked });
 $('s-record').onchange = e => save({ record_history: e.target.checked });
 $('s-theme').onclick = e => { const b = e.target.closest('button'); if (b) save({ theme: b.dataset.theme }); };
 $('s-reveal').onclick = () => call('reveal_log_file');
+$('s-copy-report').onclick = async () => {
+  const b = $('s-copy-report');
+  b.disabled = true;  // the report takes a moment: it reads every sensor
+  b.textContent = await call('copy_sensor_report') ? 'Copied' : "Couldn't Read Sensors";
+  setTimeout(() => { b.textContent = 'Copy'; b.disabled = false; }, 2000);
+};
+$('s-report-problem').onclick = () => call('report_problem');
 $('s-charge-limit').onclick = () => call('open_charging_settings');
 $('s-unit').onclick = e => { const b = e.target.closest('button'); if (b) save({ temperature_unit: b.dataset.unit }); };
 $('s-check-updates').onclick = () => call('check_for_updates');

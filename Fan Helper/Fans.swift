@@ -38,11 +38,15 @@ final class Fans {
     private let unlockPatience: TimeInterval
 
     init?(smc: SMCConnection, marker: String, unlockPatience: TimeInterval = 30) {
-        guard let n = smc.read("FNum")?.first, n > 0 else { return nil }
+        // A Mac that doesn't say in FNum: the fans with a speed key, F0Ac, F1Ac… in a row
+        // (ThermalForge #2), as the app counts them.
+        let listed = Int(smc.read("FNum")?.first ?? 0)
+        let n = listed > 0 ? listed : (0..<10).prefix { smc.read("F\($0)Ac") != nil }.count
+        guard n > 0 else { return nil }
         self.smc = smc
         self.marker = marker
         self.unlockPatience = unlockPatience
-        count = Int(n)
+        count = n
         modeKeys = (0..<count).map { smc.read("F\($0)md") != nil ? "F\($0)md" : "F\($0)Md" }  // lowercase from M5
         limits = (0..<count).map { (smc.readFloat("F\($0)Mn") ?? 0, smc.readFloat("F\($0)Mx") ?? 0) }
         hasForceTest = smc.read("Ftst") != nil

@@ -48,12 +48,26 @@ NOT_CHARGING_AT_LIMIT = 1 << 24  # NotChargingReason bit powerd sets while the c
 # Where macOS keeps the charge limit set in System Settings → Battery → Charging.
 CHARGING_PREFS = "/Library/Preferences/com.apple.powerd.charging.plist"
 
-# Display backlight power (W). The key depends on the Mac; the first one it has wins.
+# Display backlight power (W). The key follows the chip's tier, not the panel; the first one
+# this Mac has with a believable reading wins.
 SCREEN_POWER_KEYS = (
-    "PDBR",  # M1 Pro (measured)
-    "PBLR",  # base M4, Mac16,1, which has no PDBR (measured: 0.3 W at one bar, 7.2 W at full)
-    "PBwo",  # M5 and A18, according to macpow's docs (not measured)
+    # Pro and Max chips, M1 to M5: measured on this M1 Pro, and by others on the M1 Max
+    # (Stats #1718), M3 Max (Stats #1703), M4 Pro (Stats #2552), M5 Pro (Anode) and M5 Max
+    # (macpow #12).
+    "PDBR",
+    # Base chips: measured on the base M4 (Mac16,1: 0.3 W at one bar, 7.2 W at full); in
+    # dumps from a base M2 and a base M3 (SMCKit #48, a key list for Mac15,3).
+    "PBLR",
+    # The A18 Pro MacBook Neo (Mac17,5), measured (macpow #12, Stats #3519). Not the M5:
+    # the M5 Max has no PBwo.
+    "PBwo",
 )
+# Above this it isn't a screen. The most anyone has measured is 11 W, an M3 Max at full
+# brightness; HDR content goes brighter still.
+SCREEN_MAX_W = 25.0
+# Macs a sensor report showed have no screen power key at all, by model, so Settings
+# doesn't ask them for a report. None yet: the M1 Air (MacBookAir10,1) may be the first.
+NO_SCREEN_SENSOR = frozenset()
 SMC_KEYS = (
     "PDTR",  # power delivered from the adapter into the system (W)
     "PSTR",  # total system power (W)
@@ -242,7 +256,7 @@ def _is_apple_silicon():
     return rc == 0 and value.value == 1
 
 
-def _mac_model():
+def mac_model():
     """The model identifier, like Mac16,1. It names the kind of Mac, not this one."""
     size = ctypes.c_size_t(64)
     value = ctypes.create_string_buffer(size.value)
@@ -277,7 +291,7 @@ def decode_smc_value(data_type, raw, little_endian):
         if t == "ioft":
             # 8 bytes, of which the first 4 are 16.16 fixed point, little-endian. M5 and later
             # use it for temperatures, and so do a few keys on earlier chips (the M1 Pro's TG0B).
-            return struct.unpack("<I", raw[:4])[0] / 65536
+            return struct.unpack("<i", raw[:4])[0] / 65536  # signed: a sentinel or a cold day reads below 0
     except struct.error:
         return None
     return None
@@ -440,6 +454,13 @@ def _is_charging(b, smc):
     return smc.get("CHCC", 0) > 0
 
 
+def screen_sensor_unknown(sample, model):
+    """True on a laptop that has given no screen reading and isn't known to have no sensor:
+    a screen key the app doesn't know yet, so a sensor report would help."""
+    return bool(sample and sample.get("has_battery") and not sample.get("has_screen_power")
+                and model not in NO_SCREEN_SENSOR)
+
+
 def missing_smc_keys(smc):
     """The keys in SMC_KEYS that gave no value. Any one screen key is enough."""
     has_screen = any(k in smc for k in SCREEN_POWER_KEYS)
@@ -542,7 +563,7 @@ def normalize(battery, smc, now=None, charge_limit=None):
 
     amps = _num(b.get("InstantAmperage"))
     volts = _num(b.get("Voltage"))
-    screen_power = next((smc[k] for k in SCREEN_POWER_KEYS if k in smc), None)
+    screen_power = next((smc[k] for k in SCREEN_POWER_KEYS if 0 <= smc.get(k, -1) <= SCREEN_MAX_W), None)
     return {
         "t": now,
         "has_battery": has_battery,
@@ -624,7 +645,7 @@ class PowerReader:
         except OSError as e:
             keys = f"unavailable ({e})"
         log.info("SMC keys missing on %s, macOS %s: %s. Power keys here: %s",
-                 _mac_model(), platform.mac_ver()[0], ", ".join(missing), keys)
+                 mac_model(), platform.mac_ver()[0], ", ".join(missing), keys)
 
     def _read_charge_limit(self):
         """Re-read powerd's charging prefs only when the file has changed."""

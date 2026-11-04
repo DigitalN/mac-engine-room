@@ -20,6 +20,7 @@ log = logging.getLogger("pythonflow")
 
 REPOSITORY = "DigitalN/mac-engine-room"
 RELEASES_URL = f"https://github.com/{REPOSITORY}/releases"
+REPORT_ISSUE_URL = f"https://github.com/{REPOSITORY}/issues/new?template=sensor-report.yml"
 # Passed, with `open -g`, when relaunching into an update. The app always starts in the menu bar
 # now; up to 1.2.10 this kept the dashboard from popping up. rename.py passes it on.
 BACKGROUND_ARGUMENT = "--background"

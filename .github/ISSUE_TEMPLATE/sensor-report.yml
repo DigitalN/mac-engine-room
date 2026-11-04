@@ -1,0 +1,24 @@
+name: Wrong or missing reading
+description: A temperature, a power reading or the fans are wrong, missing or stuck on your Mac.
+title: "Wrong or missing reading on "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping Mac Engine Room support your Mac. Every Mac model names its sensors a little differently, and this report shows which ones yours has.
+  - type: textarea
+    id: what
+    attributes:
+      label: What's wrong
+      description: Which reading, and what you expected. For example "Screen doesn't show" or "GPU says 3° under load".
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: Sensor report
+      description: In Mac Engine Room, open Settings, click Copy next to Sensor report in About, and paste it here. It lists your Mac's model, chip, macOS version and its power, temperature and fan sensors, and nothing that identifies you or your Mac.
+      render: text
+    validations:
+      required: true

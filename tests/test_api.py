@@ -67,3 +67,49 @@ def test_thermal_points_only_exist_where_temperatures_were_read():
     assert len(r["points"]) == 3 and r["thermal_points"] == [[2.0, 61.4, None, None, None, None]]
     assert r["thermals"] is thermals and r["thermal_fields"][1] == "cpu"
     assert live.since(2)["thermal_points"] == []
+
+
+def test_report_a_problem_opens_the_sensor_report_issue(monkeypatch):
+    calls = []
+    monkeypatch.setattr(AppHelper, "callAfter", lambda func, *args: calls.append((func, args)))
+    Api(app=None).report_problem()
+    [(func, (url,))] = calls
+    assert func.__name__ == "openURL_"
+    assert url.absoluteString() == "https://github.com/DigitalN/mac-engine-room/issues/new?template=sensor-report.yml"
+
+
+def test_copy_sensor_report_puts_it_on_the_clipboard_or_says_it_couldnt(monkeypatch):
+    import main
+    import report
+
+    calls = []
+    monkeypatch.setattr(AppHelper, "callAfter", lambda func, *args: calls.append((func, args)))
+    monkeypatch.setattr(report, "collect", lambda version, sample: f"report {version} {sample}")
+    live = LiveState()
+    assert Api(app=SimpleNamespace(_live=live)).copy_sensor_report() is True
+    assert calls == [(main._copy_to_clipboard, (f"report {main.VERSION} None",))]
+
+    def no_smc(version, sample):
+        raise OSError("AppleSMC service not found")
+    monkeypatch.setattr(report, "collect", no_smc)
+    assert Api(app=SimpleNamespace(_live=live)).copy_sensor_report() is False
+
+
+def test_settings_asks_for_a_report_only_when_the_app_guessed(monkeypatch):
+    import main
+    import power
+
+    monkeypatch.setattr(power, "mac_model", lambda: "MacBookAir10,1")
+    live = LiveState()
+    app = SimpleNamespace(_thermals=SimpleNamespace(guessing=()), _live=live)
+    hint = lambda: main.EngineRoomApp._sensor_hint(app)
+    assert hint() is False  # nothing sampled yet
+    live.push({"t": 1.0, "system_load": 7.0, "system_in": 0.0, "battery_power": -7.0, "screen_power": None,
+               "chip_power": 1.0, "has_battery": True, "has_screen_power": False})
+    assert hint() is True  # a laptop with no screen key the app knows
+    app._thermals.guessing = ("gpu",)
+    live.push({"t": 2.0, "system_load": 7.0, "system_in": 0.0, "battery_power": -7.0, "screen_power": 2.0,
+               "chip_power": 1.0, "has_battery": True, "has_screen_power": True})
+    assert hint() is True
+    app._thermals.guessing = ()
+    assert hint() is False

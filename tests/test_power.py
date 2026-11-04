@@ -216,6 +216,19 @@ def test_screen_power_comes_from_whichever_key_this_mac_has():
     assert s["screen_power"] == 0.0 and s["has_screen_power"]
     s = normalize(None, {"PHPC": 2.5}, now=1.0)  # a Mac with no screen sensor
     assert s["screen_power"] is None and not s["has_screen_power"]
+    # A reading no screen could give doesn't count; the next key gets its turn.
+    assert normalize(None, {"PDBR": 60.0, "PBLR": 7.2}, now=1.0)["screen_power"] == 7.2
+    assert not normalize(None, {"PDBR": -1.0}, now=1.0)["has_screen_power"]
+
+
+def test_a_laptop_with_no_screen_reading_asks_for_a_report_unless_known(monkeypatch):
+    laptop = {"has_battery": True, "has_screen_power": False}
+    assert power.screen_sensor_unknown(laptop, "MacBookAir10,1")
+    assert not power.screen_sensor_unknown({**laptop, "has_screen_power": True}, "MacBookAir10,1")
+    assert not power.screen_sensor_unknown({**laptop, "has_battery": False}, "Mac16,10")  # a Mac mini: no screen
+    assert not power.screen_sensor_unknown(None, "MacBookAir10,1")
+    monkeypatch.setattr(power, "NO_SCREEN_SENSOR", frozenset({"MacBookAir10,1"}))
+    assert not power.screen_sensor_unknown(laptop, "MacBookAir10,1")
 
 
 def _every_key_but_screen():
