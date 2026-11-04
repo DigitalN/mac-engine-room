@@ -1165,7 +1165,7 @@ function renderDashboard() {
       sub: st[0].toUpperCase() + st.slice(1) });
   }
   if (s.has_battery) power.push(s.external_connected
-    ? { name: 'Adapter', color: '--charge', value: fmtW(s.adapter_power), sub: a?.name || (a?.watts ? `${a.watts} W adapter` : 'Power adapter') }
+    ? { name: 'Adapter', color: '--charge', value: fmtW(s.adapter_power), sub: a?.name || 'Power adapter' }
     : { name: 'Adapter', color: '--charge', value: 'Not connected', word: true });
   renderTiles('dash-power', power);
 }

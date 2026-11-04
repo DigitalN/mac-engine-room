@@ -467,7 +467,7 @@ class StatusBar:
         self._set_row("chip", format_watts(sample.get("chip_power"), pad_to=0))
         adapter = sample.get("adapter")
         if sample.get("external_connected") and adapter:
-            name = adapter.get("name") or (f"{adapter['watts']}W adapter" if adapter.get("watts") else "Adapter")
+            name = adapter.get("name") or "Adapter"  # power.adapter_name: "140W USB-C Power Adapter", any brand
             self._set_row("adapter", format_watts(sample.get("adapter_power"), pad_to=0), label=name)
         else:
             self._set_row("adapter", "Not connected")
