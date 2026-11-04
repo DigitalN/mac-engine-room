@@ -217,7 +217,7 @@ class Safety:
     def describe(reason, pressure=0):
         if reason == "pressure":
             return f"macOS reports {PRESSURE_NAMES[max(pressure, 1)]} thermal pressure"
-        return {"hotspot": "part of the chip passed 118°", "chassis": "the case passed 95°",
+        return {"hotspot": "part of the chip passed 118°", "chassis": "a sensor inside the Mac passed 95°",
                 "battery": "the battery passed 50°"}.get(reason, reason)
 
 

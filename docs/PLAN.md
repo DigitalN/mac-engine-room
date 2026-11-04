@@ -85,6 +85,18 @@ made its fan curves too loud. Do it right from the start:
   SMC's own key list as the fallback for chips the table doesn't know (Stats' table covers M1
   to M6 and the A18 Pro as of 2026-11-02). Check the result here against a CPU load and a GPU
   load: the reading has to rise with the load.
+- **The table is checked against real dumps, not just Stats** (1.2.13). Stats took between 3
+  weeks and 18 months to support each chip, still has the M4 Pro partly wrong (Stats #3270),
+  and counted the M3's GPU fabric (`Tf…`) as CPU cores. [iSMC](https://github.com/dkorunic/iSMC)'s
+  table is built from dumps users sent in, but it's GPL, so its dumps are evidence for which
+  keys exist, never a file to copy. One key per core: the middle of each `Tp`/`Te` triplet, the
+  second of each `Tg` pair. The table also falls back to the prefixes when it finds fewer CPU
+  keys than half the chip's cores (`hw.ncpu`): a variant whose cores live elsewhere.
+- **Sensor reports** (Settings › About) list a Mac's P/T/F keys with their values. Each one that
+  comes in is kept in `tests/sensor_reports/`, and `tests/test_report.py` fails until that Mac
+  finds its CPU and GPU in the table and, on a laptop, its screen key. Settings asks for one
+  only when the app guessed: CPU or GPU by prefix, no GPU key, or a laptop with no screen key
+  that isn't in `power.NO_SCREEN_SENSOR`.
 - **Not counted as CPU:** the chip hotspot keys (`TCDX`, `TCMz` and the like), which run up to
   ~10° above any core, and the helper `Tp` keys next to each core key (on M4 one key in four is
   the core; others read 0 while the core sleeps and 10–13° hot under load). Hotspots are used
@@ -92,10 +104,20 @@ made its fan curves too loud. Do it right from the start:
   core exactly, idle and under either load.
 - **Not counted as GPU:** `TG0B`, `TG0C`, `TG0H`, `TG0V`, `TG1B`, `TG2B`. They're the battery's
   gas-gauge sensors (on this M1 Pro `TG0B` reads exactly `TB0T`, the battery). GPU is `Tg…`.
-- Readings of 0, or outside 1–130°, are ignored (`TH1a`/`TH1b` read 0 here).
+- Readings of exactly 0, or outside -40–130°, are ignored (`TH1a`/`TH1b` read 0 here). Below
+  freezing is real, outside on a cold day.
+- **Parked chip sensors are ignored.** A powered-down core cluster or GPU reads -4°, 0°, 1.5–5°,
+  or one value on every key (a flat 40.0° on an M4 Pro). A CPU or GPU reading more than 10°
+  under the Mac's coolest other reading (ambient, memory or SSD) is parked: nothing on the chip
+  is cooler than the air and parts around it. Not the hottest CPU core: an idle GPU that's
+  awake reads far below a loaded CPU. Nor does a group whose keys (three or more) all read one
+  exact value.
+- **A parked GPU shows its last real reading**, for display only (the fan curve and the
+  "hottest" title use live readings), with "Last reported x min ago" under it after a minute,
+  and dimmed in the menu.
 - Apple silicon SMC values are little-endian `flt`; M5 and later also use 8-byte `ioft`
-  (16.16 fixed point in the first 4 bytes, little-endian), which `power.decode_smc_value`
-  decodes. This M1 Pro has a few `ioft` keys too: the `TG…` battery keys and `TR0Z`/`TR1d`/`TR2d`.
+  (16.16 fixed point in the first 4 bytes, little-endian, signed), which
+  `power.decode_smc_value` decodes. This M1 Pro has a few `ioft` keys too: the `TG…` battery keys and `TR0Z`/`TR1d`/`TR2d`.
 - The `SMC` class caches each key's type, so a reading is one IOKit call. Find the keys once
   per connection and read only those, never the whole list (ThermalForge #79, #70).
 

@@ -62,7 +62,8 @@ helper: in **System Settings → General → Login Items & Extensions**, turn on
 Room under **Allow in the Background** and enter your password. Mac Engine Room shows how,
 and the fans stay with macOS until then.
 
-Tested on macOS 27.0 with Apple silicon. Fan control needs macOS 13 or later. To build
+Tested on macOS 27.0 with Apple silicon. Fan control needs macOS 13 or later. On a desktop
+Mac, Power shows the whole Mac's power and the chip's, since there's no battery or charger. To build
 from source, see [DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 ## Privacy
@@ -71,7 +72,8 @@ from source, see [DEVELOPMENT.md](docs/DEVELOPMENT.md).
   GitHub for the latest release. It only installs updates signed by the same developer.
   No analytics, crash reports or web server.
 - **It reads power and temperature sensors only**, never serial numbers or your
-  computer's name.
+  computer's name. The sensor report in Settings is only made when you click Copy, and
+  only goes where you paste it.
 - **Fan control uses a small helper that runs as an administrator**, because only an
   administrator can set fan speeds. It's only installed when you choose a fan profile and
   allow it. All it can do is set fan speeds within each fan's range, give the fans back to
@@ -111,7 +113,13 @@ The menu offers three of them, macOS default, Balanced and Max unless you choose
 in Settings. All four are on the Dashboard and the Thermals page.
 
 Whatever the profile, the fans go to full speed if macOS reports serious thermal pressure,
-or the chip, case or battery gets too hot.
+or the chip, a sensor inside the Mac or the battery gets too hot.
+
+## A reading wrong or missing?
+
+Every Mac model names its sensors a little differently. In Settings, under About, click
+**Copy** next to Sensor report, then **Report a Problem…** and paste it into the issue. It
+lists your Mac's model, chip and sensors, and nothing that identifies you or your Mac.
 
 ## Coming from Pythonflow
 
@@ -138,7 +146,8 @@ requests [#19](https://github.com/lzt1008/powerflow/pull/19),
 [#22](https://github.com/lzt1008/powerflow/pull/22).
 
 The per-chip list of CPU and GPU core sensors comes from
-[Stats](https://github.com/exelban/stats) by Serhiy Mytrovtsiy (MIT).
+[Stats](https://github.com/exelban/stats) by Serhiy Mytrovtsiy (MIT), checked against the
+sensor dumps collected by [iSMC](https://github.com/dkorunic/iSMC) by Dinko Korunić.
 
 Fan control is based on [ThermalForge](https://github.com/ProducerGuy/ThermalForge) by
 ProducerGuy (MIT): its fan profiles, and the fan and SMC code, which it adapted from

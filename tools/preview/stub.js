@@ -3,7 +3,7 @@
 //
 // Query options, combined with commas: ?s=holding,fahrenheit&tab=thermals
 //   fan control: off (default) holding max override approval unavailable other error
-//   this Mac:    fanless onefan noscreen hot charging
+//   this Mac:    fanless onefan noscreen hot charging desktop gpuheld (GPU parked 3 min) hint
 //   settings:    fahrenheit dark light
 //   tab:         dashboard (default) thermals power history settings
 // Change window.__state while it runs to try anything else; the next poll picks it up.
@@ -26,6 +26,8 @@
     },
     available: ['cpu', 'gpu', 'memory', 'ssd', 'ambient', 'fans'],
     sensors: { cpu: 10, gpu: 2, memory: 6, ssd: 3, ambient: 1 },
+    gpuHeldFor: null,  // seconds the GPU has been parked, showing its last reading; null: it isn't
+    sensorHint: false,  // Settings asks for a sensor report
     fans: [{ min: 1499, max: 4296 }, { min: 1499, max: 4744 }],
     fanRpm: null,  // [rpm, …] to show; null follows fan control (0 while macOS has them cool)
     sessions: [],
@@ -46,6 +48,14 @@
     fanless: () => { state.available = state.available.filter(k => k !== 'fans'); state.fans = []; state.fanControl = { profile: 'macos', state: 'nofans' }; },
     onefan: () => { state.fans = state.fans.slice(0, 1); },
     noscreen: () => { state.power.has_screen_power = false; },
+    // A Mac mini: no battery, no screen; its PDTR makes it look plugged in.
+    desktop: () => Object.assign(state.power, {
+      has_battery: false, external_connected: true, battery_level: null, charge_limit: null, time_remaining_min: null,
+      has_screen_power: false, temperature: null, cycle_count: null, design_capacity: null, max_capacity: null,
+      current_capacity: null, health_pct: null, voltage: null, amperage: null,
+    }),
+    gpuheld: () => { state.gpuHeldFor = 180; },
+    hint: () => { state.sensorHint = true; },
     hot: () => { state.hot = 35; },
     charging: () => Object.assign(state.power, {
       is_charging: true, external_connected: true, time_remaining_min: 64, adapter_power: 52.3,
@@ -72,14 +82,15 @@
     return {
       power: {
         ...p, t, system_load: system, screen_power: screen, chip_power: wave(t, 1.8, 1.2, 25),
-        system_in: p.external_connected ? wave(t, 52.3, 2, 30) : 0,
-        battery_power: p.is_charging ? wave(t, 40, 2, 30) : -system,
+        system_in: p.external_connected ? wave(t, p.has_battery ? 52.3 : system * 1.1, 2, 30) : 0,
+        battery_power: !p.has_battery ? null : p.is_charging ? wave(t, 40, 2, 30) : -system,
       },
       thermals: {
         t, cpu: wave(t, 52.4 + h, 6, 90), gpu: wave(t, 48.1 + h, 4, 120), memory: wave(t, 47 + h * 0.8, 2, 200),
         ssd: wave(t, 35.5 + h * 0.4, 1, 300), ambient: wave(t, 26.3 + h * 0.2, 0.5, 400),
         available: state.available, sensors: state.sensors,
         fans: state.fans.map((f, i) => ({ ...f, rpm: rpm[i] ?? 0, manual: held })),
+        ...(state.gpuHeldFor !== null && { gpu: null, gpu_held: { c: 47.9 + h, t: t - state.gpuHeldFor, sensors: state.sensors.gpu } }),
         get hottest() { return Math.max(this.cpu, this.gpu, this.memory, this.ssd); },
       },
     };
@@ -118,8 +129,10 @@
     app_info: () => ({
       version: app.version, log_path: '/Users/you/Library/Logs/Mac Engine Room/app.log',
       history_recording: state.settings.record_history, update_unavailable_reason: state.updateUnavailable,
-      fan_profiles: app.fan_profiles, fan_tuning_limits: app.fan_tuning_limits,
+      fan_profiles: app.fan_profiles, fan_tuning_limits: app.fan_tuning_limits, sensor_hint: state.sensorHint,
     }),
+    copy_sensor_report: () => new Promise(done => setTimeout(() => done(true), 300)),
+    report_problem: () => null,
     check_for_updates: () => { state.update = ['checking', null]; setTimeout(() => { state.update = ['idle', null]; }, 2000); },
     list_sessions: () => state.sessions,
     get_session: () => null,

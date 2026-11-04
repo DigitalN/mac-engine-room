@@ -37,6 +37,7 @@ ROW_LABELS = {"battery": "Battery", "system": "System", "screen": "Screen",
 ROW_SYMBOLS = {"system": "laptopcomputer", "screen": "sun.max", "chip": "cpu", "adapter": "powerplug"}
 # A reading older than this isn't shown: it was read before the menu last opened.
 THERMALS_FRESH_FOR = 6.0
+HELD_NOTE_AFTER = 60.0  # seconds: a parked GPU's last reading, shown dimmed after this (as the page says its age)
 
 MENU_WIDTH = 300
 INSET = 14
@@ -471,6 +472,7 @@ class StatusBar:
         else:
             self._set_row("adapter", "Not connected")
         self._put(self._rows["battery"], "setHidden_", not sample.get("has_battery"))
+        self._put(self._rows["adapter"], "setHidden_", not sample.get("has_battery"))  # a desktop's is its mains
         self._put(self._rows["screen"], "setHidden_", not sample.get("has_screen_power"))
 
     def _fill_profiles(self, chosen=None):
@@ -510,5 +512,11 @@ class StatusBar:
                 self._put(self._tiles[key][1], "setStringValue_", "Fan · rpm" if len(fans) == 1 else TILE_LABELS[key])
                 text = fans_text(fans or [{"rpm": None}])
             else:
-                text = format_temperature(thermals.get(key), uses_fahrenheit(self._settings))
+                # A parked GPU shows its last real reading, dimmed once it's a minute old.
+                held = thermals.get("gpu_held") if key == "gpu" and thermals.get("gpu") is None else None
+                old = bool(held) and time.time() - held["t"] >= HELD_NOTE_AFTER
+                text = format_temperature(held["c"] if held else thermals.get(key), uses_fahrenheit(self._settings))
+                if key == "gpu":
+                    self._put(self._tiles[key][2], "setTextColor_",
+                              NSColor.secondaryLabelColor() if old else NSColor.labelColor())
             self._put(self._tiles[key][2], "setStringValue_", text)

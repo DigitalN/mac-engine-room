@@ -37,6 +37,8 @@ def options():
     a.add_argument("--fanless", action="store_true", help="a Mac with no fans")
     a.add_argument("--onefan", action="store_true")
     a.add_argument("--noscreen", action="store_true", help="a Mac with no screen power reading")
+    a.add_argument("--desktop", action="store_true", help="a Mac mini: no battery, no screen")
+    a.add_argument("--gpuheld", action="store_true", help="the GPU parked for 3 minutes, showing its last reading")
     a.add_argument("--charging", action="store_true")
     a.add_argument("--hot", type=float, default=0, help="degrees added to every temperature")
     return a.parse_args()
@@ -62,6 +64,8 @@ def readings(o):
         "available": [k for k in statusbar.TILES if not (o.fanless and k == "fans")],
         "fans": [{"rpm": targets[i] if held else 0, "min": lo, "max": hi, "manual": held} for i, (lo, hi) in enumerate(limits)],
     }
+    if o.gpuheld:
+        thermals.update(gpu=None, gpu_held={"c": 47.9 + h, "t": thermals["t"] - 180, "sensors": 2})
     sample = {
         "has_battery": True, "battery_level": 63, "charge_limit": 80, "is_charging": o.charging,
         "external_connected": o.charging, "time_remaining_min": 64 if o.charging else 254,
@@ -69,6 +73,9 @@ def readings(o):
         "has_screen_power": not o.noscreen, "chip_power": 1.8, "adapter_power": 52.3 if o.charging else 0,
         "adapter": {"name": "96W USB-C Power Adapter", "watts": 96} if o.charging else None,
     }
+    if o.desktop:
+        sample.update(has_battery=False, external_connected=True, screen_power=None, has_screen_power=False,
+                      system_in=10.3, adapter=None, battery_level=None, time_remaining_min=None)
     settings = {**app_settings.DEFAULTS, "fan_profile": profile,
                 "temperature_unit": "fahrenheit" if o.fahrenheit else "celsius",
                 "menu_fan_profiles": o.menu_profiles.split(",")}
