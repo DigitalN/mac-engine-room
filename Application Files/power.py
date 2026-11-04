@@ -66,9 +66,12 @@ SCREEN_POWER_KEYS = (
 # Above this it isn't a screen. The most anyone has measured is 11 W, an M3 Max at full
 # brightness; HDR content goes brighter still.
 SCREEN_MAX_W = 25.0
-# Macs a sensor report showed have no screen power key at all, by model, so Settings
-# doesn't ask them for a report. None yet: the M1 Air (MacBookAir10,1) may be the first.
-NO_SCREEN_SENSOR = frozenset()
+# Macs whose sensor reports show no working screen sensor, by model: Screen never shows, and
+# Settings doesn't ask them for a report. A key that's listed but never reads above 0 isn't
+# shown on any Mac (see PowerReader.read); these are the ones confirmed.
+NO_SCREEN_SENSOR = frozenset({
+    "MacBookAir10,1",  # the M1 Air: PBLR is listed but read 0.00 at full brightness and at one bar
+})
 SMC_KEYS = (
     "PDTR",  # power delivered from the adapter into the system (W)
     "PSTR",  # total system power (W)
@@ -465,11 +468,11 @@ def adapter_name(name, watts):
     return f"{round(watts)}W USB-C Power Adapter"
 
 
-def screen_sensor_unknown(sample, model):
-    """True on a laptop that has given no screen reading and isn't known to have no sensor:
-    a screen key the app doesn't know yet, so a sensor report would help."""
-    return bool(sample and sample.get("has_battery") and not sample.get("has_screen_power")
-                and model not in NO_SCREEN_SENSOR)
+def screen_sensor_unknown(sample, has_screen_key, model):
+    """True on a laptop with none of the screen keys that isn't known to have no sensor: one
+    the app doesn't know yet, so a sensor report would help. A key that's there but reads 0
+    doesn't count: that's also a closed lid or a dark screen, which shouldn't ask for one."""
+    return bool(sample and sample.get("has_battery") and not has_screen_key and model not in NO_SCREEN_SENSOR)
 
 
 def missing_smc_keys(smc):
@@ -592,7 +595,7 @@ def normalize(battery, smc, now=None, charge_limit=None):
         "adapter_power": _round((system_in or 0) + efficiency_loss) if external else 0.0,
         "efficiency_loss": _round(efficiency_loss),
         "screen_power": _round(screen_power),
-        "has_screen_power": screen_power is not None,
+        "has_screen_power": bool(screen_power),  # this reading shows the sensor works
         "chip_power": _round(smc.get("PHPC")),
         "temperature": _round(temperature, 1),
         "cycle_count": _num(b.get("CycleCount")),
@@ -619,6 +622,8 @@ class PowerReader:
         self._charging_prefs_mtime = None
         self._checked_smc_keys = False
         self._has_screen_power = False
+        self.has_screen_key = False  # one of SCREEN_POWER_KEYS was read, whatever its value
+        self._model = mac_model()
         self._open_smc()
 
     def _open_smc(self):
@@ -696,7 +701,13 @@ class PowerReader:
                 self._battery_read_at = time.monotonic()
                 self._last_external = external_hint
             sample = normalize(self._battery, smc, charge_limit=self._charge_limit)
-            # Once seen, it stays: a failed read or an SMC reconnect shouldn't hide Screen.
-            self._has_screen_power = self._has_screen_power or sample["has_screen_power"]
+            # Screen shows once its key has read above 0: one that's listed but never moves isn't
+            # the screen (the M1 Air's PBLR reads 0 at any brightness). Once seen, it stays: a
+            # failed read, an SMC reconnect or the backlight going off shouldn't hide it.
+            self.has_screen_key = self.has_screen_key or any(k in smc for k in SCREEN_POWER_KEYS)
+            self._has_screen_power = ((self._has_screen_power or sample["has_screen_power"])
+                                      and self._model not in NO_SCREEN_SENSOR)
             sample["has_screen_power"] = self._has_screen_power
+            if not self._has_screen_power:
+                sample["screen_power"] = None
             return sample

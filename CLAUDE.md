@@ -176,7 +176,9 @@ To reproduce without touching the user's data, run with
   0 to 25 W wins: `PDBR` on Pro and Max chips, M1 to M5 (measured here and by others on the M1
   Max, M3 Max, M4 Pro, M5 Pro and M5 Max), `PBLR` on base chips (measured on the base M4 at 0.3
   W at one bar and 7.2 W at full; in dumps from a base M2 and M3), `PBwo` on the A18 Pro
-  MacBook Neo (measured by others; the M5 has none). No source has found one on the M1 Air.
+  MacBook Neo (measured by others; the M5 has none). A key only counts once it has read above 0:
+  the M1 Air lists `PBLR` but it reads 0 at any brightness (its sensor reports), so it has no
+  screen reading, and it's in `power.NO_SCREEN_SENSOR`.
 - SMC `PHPC` is chip (CPU + GPU package) power, **not** "heatpipe" or fan power,
   despite Apple's key name. Verified: it rises about 11 W under full CPU load while
   the fans stay at minimum.

@@ -212,8 +212,8 @@ def test_screen_power_comes_from_whichever_key_this_mac_has():
     s = normalize(None, {"PBLR": 7.204}, now=1.0)  # base M4
     assert s["screen_power"] == 7.2 and s["has_screen_power"]
     assert normalize(None, {"PDBR": 5.0, "PBLR": 7.2}, now=1.0)["screen_power"] == 5.0
-    s = normalize(None, {"PBLR": 0.0}, now=1.0)  # backlight off is still a reading
-    assert s["screen_power"] == 0.0 and s["has_screen_power"]
+    s = normalize(None, {"PBLR": 0.0}, now=1.0)  # a reading, but it doesn't show the sensor works
+    assert s["screen_power"] == 0.0 and not s["has_screen_power"]
     s = normalize(None, {"PHPC": 2.5}, now=1.0)  # a Mac with no screen sensor
     assert s["screen_power"] is None and not s["has_screen_power"]
     # A reading no screen could give doesn't count; the next key gets its turn.
@@ -221,15 +221,15 @@ def test_screen_power_comes_from_whichever_key_this_mac_has():
     assert not normalize(None, {"PDBR": -1.0}, now=1.0)["has_screen_power"]
 
 
-def test_a_laptop_with_no_screen_reading_asks_for_a_report_unless_known(monkeypatch):
+def test_a_laptop_without_a_screen_key_asks_for_a_report_unless_known(monkeypatch):
     laptop = {"has_battery": True, "has_screen_power": False}
-    assert power.screen_sensor_unknown(laptop, "MacBookAir10,1")
-    assert not power.screen_sensor_unknown({**laptop, "has_screen_power": True}, "MacBookAir10,1")
-    assert not power.screen_sensor_unknown({**laptop, "has_battery": False}, "Mac16,10")  # a Mac mini: no screen
-    assert not power.screen_sensor_unknown(None, "MacBookAir10,1")
-    monkeypatch.setattr(power, "NO_SCREEN_SENSOR", frozenset({"MacBookAir10,1"}))
-    assert not power.screen_sensor_unknown(laptop, "MacBookAir10,1")
-
+    assert power.screen_sensor_unknown(laptop, False, "MacBookPro18,3")
+    # A key that reads 0 (a closed lid, a dark screen, or a dead key) doesn't ask.
+    assert not power.screen_sensor_unknown(laptop, True, "MacBookPro18,3")
+    assert not power.screen_sensor_unknown({**laptop, "has_battery": False}, False, "Mac16,10")  # a Mac mini
+    assert not power.screen_sensor_unknown(None, False, "MacBookPro18,3")
+    monkeypatch.setattr(power, "NO_SCREEN_SENSOR", frozenset({"MacBookPro18,3"}))
+    assert not power.screen_sensor_unknown(laptop, False, "MacBookPro18,3")
 
 def _every_key_but_screen():
     return {k: 1.0 for k in power.SMC_KEYS if k not in power.SCREEN_POWER_KEYS}
@@ -345,6 +345,24 @@ def test_screen_stays_offered_through_a_missed_reading(monkeypatch):
     for _ in range(2):
         s = reader.read()
         assert s["screen_power"] is None and s["has_screen_power"]
+
+
+def test_a_screen_key_shows_once_it_reads_above_0(monkeypatch):
+    # The M1 Air's PBLR: listed, but 0 at any brightness. Not shown, and not asked about.
+    reader = _reader(monkeypatch, _StubSMC({"PBLR": 0.0}, {"PBLR": 0.0}, {"PBLR": 2.1}, {"PBLR": 0.0}))
+    for _ in range(2):
+        s = reader.read()
+        assert not s["has_screen_power"] and s["screen_power"] is None and reader.has_screen_key
+    assert reader.read()["screen_power"] == 2.1  # it works after all
+    s = reader.read()  # and once it has, a dark screen reads 0 W
+    assert s["has_screen_power"] and s["screen_power"] == 0.0
+
+
+def test_a_model_known_to_have_no_screen_sensor_never_shows_one(monkeypatch):
+    monkeypatch.setattr(power, "mac_model", lambda: "MacBookAir10,1")
+    reader = _reader(monkeypatch, _StubSMC({"PBLR": 3.0}))
+    s = reader.read()
+    assert not s["has_screen_power"] and s["screen_power"] is None
 
 
 def test_a_mac_with_no_screen_sensor_never_offers_it(monkeypatch):

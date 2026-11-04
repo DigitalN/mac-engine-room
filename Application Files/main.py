@@ -445,10 +445,11 @@ class EngineRoomApp:
 
     def _sensor_hint(self):
         """Whether Settings asks for a sensor report: the app guessed CPU or GPU sensors on this
-        Mac, or it's a laptop with no screen reading that isn't known to have no sensor."""
+        Mac, or it's a laptop with no screen key that isn't known to have no sensor."""
         import power
 
-        return bool(self._thermals.guessing) or power.screen_sensor_unknown(self._live.latest(), power.mac_model())
+        return bool(self._thermals.guessing) or power.screen_sensor_unknown(
+            self._live.latest(), self._reader.has_screen_key, power.mac_model())
 
     def _page_settings(self):
         """Settings plus "open at login" (None where it isn't available, e.g. from source)."""
