@@ -2,10 +2,12 @@
 real Mac, plus what the reader reads and when."""
 
 import math
+from pathlib import Path
 
 import pytest
 
 import power
+import report
 import thermals
 from thermals import ALL_PARTS, TEMPERATURES, core_table, normalize, sensor_keys
 
@@ -114,6 +116,16 @@ def test_the_m3_reads_its_cores_not_the_gpu_fabric():
     keys = sensor_keys(names, "Apple M3", cores=8)
     assert keys["cpu"] == ("Te05", "Te0H", "Te0P", "Te0S", "Tp05", "Tp0D", "Tp0L", "Tp0b") and keys["by_prefix"] == ()
     assert keys["gpu"] == ("Tg05", "Tg0D")
+
+
+def test_the_base_m1_reads_its_b_keys():
+    _, values = report.parse((Path(__file__).parent / "sensor_reports" / "MacBookAir10,1.txt").read_text())
+    keys = sensor_keys({k for k, v in values.items() if v is not None}, "Apple M1", cores=8)
+    assert keys["cpu"] == ("Te0b", "Te3b", "Tp2b", "Tp3b", "Tp4b", "Tp5b", "Tp7b", "Tp8b", "Tp9b")
+    assert keys["gpu"] == ("Tg1b", "Tg4b") and keys["by_prefix"] == ()
+    s = normalize(values, keys)
+    assert s["cpu"] == round(values["TCMb"], 1)  # the chip's own "hottest core", not TCMz's 41.7
+    assert s["gpu"] is None and s["memory"] is None and s["ambient"] is None  # idle GPU reads 0; no Tm or TA keys
 
 
 def test_both_m4_pro_core_layouts():

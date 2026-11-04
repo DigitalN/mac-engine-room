@@ -92,6 +92,10 @@ made its fan curves too loud. Do it right from the start:
   keys exist, never a file to copy. One key per core: the middle of each `Tp`/`Te` triplet, the
   second of each `Tg` pair. The table also falls back to the prefixes when it finds fewer CPU
   keys than half the chip's cores (`hw.ncpu`): a variant whose cores live elsewhere.
+- **The base M1 names its cores differently** from the M1 Pro (its sensor report, 1.2.14): four
+  keys per core, `a`/`b`/`x`/`z`, where `z` is `x` plus a whole number of degrees. `TCMb`
+  equals the hottest `b` key there, as it equals the hottest middle key on the M1 Pro, so `b`
+  is the core. Its two GPU keys read 0 while idle, and it has no `Tm` or `TA` keys.
 - **Sensor reports** (Settings › About) list a Mac's P/T/F keys with their values. Each one that
   comes in is kept in `tests/sensor_reports/`, and `tests/test_report.py` fails until that Mac
   finds its CPU and GPU in the table and, on a laptop, its screen key. Settings asks for one
