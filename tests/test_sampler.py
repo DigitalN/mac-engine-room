@@ -55,6 +55,14 @@ def test_the_first_reading_is_only_logged_when_it_was_slow():
     assert first_reading_note(62.44) == "First reading 62.4 s after launch"
 
 
+def test_the_log_says_when_the_wait_was_before_the_app_began_to_run():
+    """A copy that has never run is held at exec by macOS's security scan: 224 s on the M1 Pro, after a compile."""
+    assert first_reading_note(224.0, began=223.5) == "First reading 224.0 s after launch (223.5 s of it before the app's code began to run)"
+    assert first_reading_note(3.1, began=0.6) == "First reading 3.1 s after launch"  # an ordinary start: the app's own wait
+    assert first_reading_note(1.2, began=0.6) is None
+    assert first_reading_note(5.0, began=None) == "First reading 5.0 s after launch"
+
+
 def test_late_wakeups_dont_stretch_the_interval(monkeypatch):
     now = [1000.0]
     monkeypatch.setattr(main.time, "monotonic", lambda: now[0])
