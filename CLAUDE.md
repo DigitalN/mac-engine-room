@@ -201,9 +201,10 @@ To reproduce without touching the user's data, run with
   at 09:36:19. After a later compile there the efficiency cores stayed saturated for 15 minutes (by
   background daemons) while the rest of the Mac was 57–89% idle. A thread at background QoS doing
   10 ms of CPU every 2.5 s (a passive probe) took over 100 ms in 14% of 269 tries then (up to 27 s),
-  against 1 of 361 (0.44 s at most) once a quarter of the efficiency cores was idle. Timed waits
-  ended on time the whole while, so late waits can't see it: only the efficiency cores' idle share
-  can. The efficiency cores are the IORegistry `cpu` nodes with `cluster-type` "E" (their
+  against 1 of 361 (0.44 s at most) once a quarter of the efficiency cores was idle. A timed wait
+  ended over 0.25 s late in 64 of 301 windows of 2.5 s in that stretch, and in none of 349 after:
+  late waits only show it once the threads have been dropped, the efficiency cores' idle share
+  before. The efficiency cores are the IORegistry `cpu` nodes with `cluster-type` "E" (their
   `logical-cpu-id` is the row `host_processor_info` gives them), not the first CPU numbers. A Mac
   with none, or whose nodes don't say clearly, counts every core. On macOS default a quiet Mac that
   turns busy is exposed until the sampler gets a turn to notice, so the first click after a build
