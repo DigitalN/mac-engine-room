@@ -217,6 +217,42 @@ so it can't touch the installed app's helper. The app looks for
    copy and `/tmp/pf-data`. `launchctl print system/com.pythonflow.monitor.test.fans` should
    no longer find the job.
 
+## Testing on a busy Mac
+
+The menu, the dashboard and fan control have to stay responsive when every core is busy
+(`Application Files/priority.py`; *Idle work stays on the efficiency cores* in CLAUDE.md). This
+takes over the Mac for a few minutes (it gets hot, its fans speed up, a second menu bar item
+appears), so ask the maintainer first and agree a time when they aren't using it. Test with a
+copy that has its own identifier (`scripts/make-test-copy.sh`), as for fan control.
+
+1. Give it its own data folder, off Login Items, with history and updates off:
+   ```bash
+   mkdir -p /tmp/pf-data && touch /tmp/pf-data/.open-at-login-default-applied
+   echo '{"record_history": false, "update_automatically": false}' > /tmp/pf-data/settings.json
+   ```
+2. Fill every core with more processes than there are cores, at the default QoS like a build's
+   (20 on a 10-core M1 Pro), for the length of the test (they stop by themselves):
+   ```bash
+   for i in $(seq 20); do perl -e 'alarm 300; 1 while 1' & done
+   ```
+3. Launch the test copy during the load (`open -n --env PYTHONFLOW_DATA_DIR=/tmp/pf-data "$T"`),
+   then open its menu by hand a few times. In `/tmp/pf-data/Logs/app.log`: `First reading … s after
+   launch` is only there above 2 s, `Menu took … s to open` above 0.3 s, and `Mac busy: running at
+   full priority` should follow the load starting (a wait of the sampler ending late is what it
+   listens for; the sampler is itself starved by a sudden heavy load, so it can take a while),
+   `Mac quiet again` about 30 s after the load ends.
+4. `ps -M -p <pid>` shows each thread's priority: the main thread, the sampler and fan control
+   at 4 (background) when the Mac is quiet and nothing is open, and all at 47 during the load.
+
+With a profile chosen and the real helper allowed, `Fans held by …` should follow the first
+reading within seconds. A busy Mac can't be told from a slow helper by the app's log alone: the
+helper's side is in the unified log (see *Testing fan control*).
+
+The idle cost is measured with `proc_pid_rusage(pid, RUSAGE_INFO_V6)` twice, 10 minutes apart on
+a quiet Mac with only the menu bar item showing: `ri_energy_nj` is the energy,
+`ri_user_ptime + ri_system_ptime` the time on the performance cores, `ri_runnable_time` the time
+spent waiting for a CPU. All of them are in Mach ticks (`mach_timebase_info`).
+
 ## Testing the updater
 
 Test with a separate copy that has its own bundle identifier, so it can't touch the

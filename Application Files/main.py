@@ -99,27 +99,31 @@ def _is_webkit_gpu_process(pid):
     return found and path.value.endswith(b"/com.apple.WebKit.GPU")
 
 
-# <sys/qos.h>. On Apple silicon only background QoS keeps a thread on the efficiency
-# cores; utility and above use the performance cores when they're free. The cost is
-# waiting: timed waits end ~90 ms late at background QoS (~50 ms at utility), so they
-# coalesce with other wakeups, and with every core busy a background thread waited up
-# to 1.6 s for a turn, against 0.1 s at utility (measured on an M1 Pro).
-QOS_CLASS_USER_INTERACTIVE = 0x21
-QOS_CLASS_UTILITY = 0x11
-QOS_CLASS_BACKGROUND = 0x09
+SLOW_FIRST_READING = 2.0  # seconds from launch to the first reading in the menu bar above which app.log says so
 
 
-def _set_thread_qos(qos_class):
-    """Set the calling thread's QoS. Only a thread can change its own."""
-    err = ctypes.CDLL("/usr/lib/libSystem.B.dylib").pthread_set_qos_class_self_np(qos_class, 0)
-    if err:
-        log.warning("Couldn't set thread QoS %#x (error %d)", qos_class, err)
+def first_reading_note(age):
+    """The line for app.log when the first reading took `age` seconds after launch, or None."""
+    return f"First reading {age:.1f} s after launch" if age > SLOW_FIRST_READING else None
 
 
-def _fans_qos(holding):
-    """Fan control's thread: on the efficiency cores while the fans are with macOS, utility
-    while it holds them, so its check-ins reach the helper even on a busy Mac."""
-    _set_thread_qos(QOS_CLASS_UTILITY if holding else QOS_CLASS_BACKGROUND)
+def _seconds_since_launch():
+    """Seconds since this process started, from macOS's own record of it (in mach absolute
+    time, the clock time.monotonic() reads), or None."""
+    class Info(ctypes.Structure):  # rusage_info_v0
+        _fields_ = [("uuid", ctypes.c_uint8 * 16)] + [
+            (name, ctypes.c_uint64) for name in (
+                "user_time", "system_time", "pkg_idle_wkups", "interrupt_wkups", "pageins", "wired_size",
+                "resident_size", "phys_footprint", "proc_start_abstime", "proc_exit_abstime")]
+
+    class Timebase(ctypes.Structure):
+        _fields_ = [("numer", ctypes.c_uint32), ("denom", ctypes.c_uint32)]
+
+    lib = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+    info, timebase = Info(), Timebase()
+    if lib.proc_pid_rusage(os.getpid(), 0, ctypes.byref(info)) != 0 or lib.mach_timebase_info(ctypes.byref(timebase)) != 0:
+        return None
+    return time.monotonic() - info.proc_start_abstime * timebase.numer / timebase.denom / 1e9
 
 
 class LiveState:
@@ -166,17 +170,17 @@ class LiveState:
 class Sampler(threading.Thread):
     """Reads power every tick, and in the same tick the thermals parts `thermal_parts()`
     names (see EngineRoomApp._thermal_parts). `fans_running`: a fan profile is in charge, so
-    the curve needs a reading every second; `fans_held`: it holds the fans."""
+    the curve needs a reading every second. Its waits are what tell `priority` the Mac is busy."""
 
     def __init__(self, reader, on_sample, thermals=None, thermal_parts=lambda: (),
-                 fans_running=lambda: False, fans_held=lambda: False):
+                 fans_running=lambda: False, priority=None):
         super().__init__(name="pythonflow-sampler", daemon=True)
         self._reader = reader
         self._on_sample = on_sample
         self._thermals = thermals
         self._thermal_parts = thermal_parts
         self._fans_running = fans_running
-        self._fans_held = fans_held
+        self._priority = priority  # priority.Priority: this thread runs at the app's one priority
         self._last_poll = float("-inf")
         self._last_fans_poll = float("-inf")
         self._wake = threading.Event()
@@ -197,9 +201,12 @@ class Sampler(threading.Thread):
         fans on it (the Dashboard or Thermals)."""
         was_background = self.interval() == BACKGROUND_INTERVAL
         newly_fans = fans and not self.fans_watched()
+        newly_watched = not self.dashboard_watched()
         self._last_poll = time.monotonic()
         if fans:
             self._last_fans_poll = self._last_poll
+        if newly_watched and self._priority:
+            self._priority.refresh()  # before the sampler wakes: it has to wake at full priority
         if was_background or newly_fans:
             self._wake.set()  # sample now rather than at the end of a wait
 
@@ -212,13 +219,6 @@ class Sampler(threading.Thread):
         parts = self._thermal_parts() if self._thermals else ()
         self._on_sample(sample, self._thermals.read(parts) if parts else None)
 
-    def qos(self):
-        """Background QoS, on the efficiency cores. While the dashboard is watched or a fan
-        profile holds the fans, utility, so a busy Mac can't stall the chart or the fans for
-        seconds."""
-        busy = self.dashboard_watched() or self._fans_held()
-        return QOS_CLASS_UTILITY if busy else QOS_CLASS_BACKGROUND
-
     def next_due(self, due):
         """One interval after the last sample was due, not after it ran: waits end up to
         ~90 ms late at background QoS, and that mustn't stretch the interval."""
@@ -227,20 +227,24 @@ class Sampler(threading.Thread):
     def run(self):
         import objc
 
-        qos = None
+        if self._priority:
+            self._priority.register()
         due = time.monotonic()
         while True:
-            if self.qos() != qos:
-                qos = self.qos()
-                _set_thread_qos(qos)
             with objc.autorelease_pool():
                 try:
                     self.sample()
                 except Exception:
                     log.exception("Sampling failed")
+            if self._priority:
+                self._priority.sampled()
+            scheduled = due + self.interval()
             due = self.next_due(due)
             if self._wake.wait(due - time.monotonic()):
                 due = time.monotonic()
+            elif self._priority:
+                # Against the schedule, not `due`: a sample that ran long makes the next wait short.
+                self._priority.waited(time.monotonic() - scheduled)
             self._wake.clear()
 
 
@@ -388,6 +392,7 @@ class EngineRoomApp:
         from fans import FanControl, Helper
         from history import ChargingRecorder, HistoryStore
         from power import PowerReader
+        from priority import Priority
         from settings import Settings
         from thermals import ThermalsReader
         from updater import Updater
@@ -400,10 +405,11 @@ class EngineRoomApp:
         self._recorder = ChargingRecorder(self._store, enabled=prefs["record_history"])
         self._app_path = launch.bundle_path()
         thermals = self._thermals = ThermalsReader()
+        self._priority = Priority(in_use=self._in_use)
         self._fans = FanControl(self._settings, Helper(self._app_path, _own_bundle_id() or "com.pythonflow.monitor"),
-                                thermals.fan_limits, set_qos=_fans_qos)
+                                thermals.fan_limits, priority=self._priority)
         self._sampler = Sampler(self._reader, self._on_sample, thermals, self._thermal_parts,
-                                fans_running=lambda: self._fans.running, fans_held=lambda: self._fans.holding)
+                                fans_running=lambda: self._fans.running, priority=self._priority)
         self._login_item = launch.LoginItem(self._app_path, DATA_DIR)
         self._updater = Updater(
             self._app_path, VERSION, settings=self._settings, data_dir=DATA_DIR,
@@ -413,8 +419,7 @@ class EngineRoomApp:
         self._gpu_pid = 0  # WebKit's graphics process for the page, as last seen
         self._page_size = None  # (width, height) the dashboard page last asked for
         self._statusbar = None
-        self._dashboard_shown = False
-        self._main_qos = None
+        self._first_reading_seen = False
         self._quitting = False
         self._wake_observer = None
         self._settings.on_change(self._on_settings_changed)
@@ -467,22 +472,22 @@ class EngineRoomApp:
 
     def _show_sample(self, sample, thermals, settings):
         self._statusbar.update(sample, thermals, settings)
+        if not self._first_reading_seen:
+            self._first_reading_seen = True
+            age = _seconds_since_launch()
+            note = first_reading_note(age) if age is not None else None
+            if note:
+                log.info(note)
         self._check_graphics_process()
 
+    def _in_use(self):
+        """Someone is looking: the menu is open or the dashboard is being watched."""
+        return (self._statusbar is not None and self._statusbar.menu_open) or self._sampler.dashboard_watched()
+
     def _on_menu_open(self):
-        self._update_main_qos()
+        self._priority.refresh()  # before the sampler wakes: it has to wake at full priority
         if self._statusbar.menu_open:
             self._sampler.wake()  # the fans, which are only read while shown
-
-    def _update_main_qos(self):
-        """With only the menu bar item showing, the main thread (which redraws it) runs
-        at background QoS, on the efficiency cores. With the dashboard or the menu open,
-        it's back at user-interactive."""
-        in_use = self._dashboard_shown or (self._statusbar is not None and self._statusbar.menu_open)
-        qos = QOS_CLASS_USER_INTERACTIVE if in_use else QOS_CLASS_BACKGROUND
-        if qos != self._main_qos:
-            _set_thread_qos(qos)
-            self._main_qos = qos
 
     def _apply_theme(self, theme):
         import AppKit
@@ -549,8 +554,7 @@ class EngineRoomApp:
     def show_dashboard(self):
         import AppKit
 
-        self._dashboard_shown = True
-        self._update_main_qos()
+        self._sampler.dashboard_polled(fans=True)  # being watched from now, not from the page's first poll
         AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyRegular)
         self._apply_theme(self._settings.get()["theme"])
         self._show_tab("dashboard")
@@ -570,7 +574,6 @@ class EngineRoomApp:
         starts in the menu bar; opening it again while it runs shows the dashboard."""
         import launch
 
-        self._update_main_qos()
         log.info("Mac Engine Room %s started%s", VERSION, ", opened at login" if launch.launched_at_login() else "")
 
     def _check_graphics_process(self):
@@ -610,8 +613,6 @@ class EngineRoomApp:
             return True
         self._window.hide()
         AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
-        self._dashboard_shown = False
-        self._update_main_qos()
         return False
 
     def quit(self):
@@ -727,6 +728,7 @@ class EngineRoomApp:
         threading.Thread(target=self._import_legacy_history, name="legacy-import", daemon=True).start()
         self._login_item.turn_on_by_default()
         self._updater.start()
+        self._priority.register()  # the main thread: background QoS, and full priority while the Mac needs it
 
         if AppKit.NSRunningApplication.currentApplication().isFinishedLaunching():  # e.g. after offer_to_move
             AppHelper.callAfter(self._finish_launching)

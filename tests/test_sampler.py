@@ -1,9 +1,8 @@
-"""Sampling rate and QoS: fast while the dashboard page is polling, slow and on the
-efficiency cores otherwise (no thread is started)."""
+"""Sampling rate: fast while the dashboard page is polling, slow otherwise; what the sampler's
+waits tell the app's priority (no thread is started)."""
 
 import main
-from main import (BACKGROUND_INTERVAL, DASHBOARD_IDLE_AFTER, DASHBOARD_INTERVAL, QOS_CLASS_BACKGROUND,
-                  QOS_CLASS_UTILITY, Sampler)
+from main import BACKGROUND_INTERVAL, DASHBOARD_IDLE_AFTER, DASHBOARD_INTERVAL, Sampler, first_reading_note
 
 
 def test_rate_follows_dashboard_polls(monkeypatch):
@@ -25,15 +24,35 @@ def test_rate_follows_dashboard_polls(monkeypatch):
     assert sampler.interval() == BACKGROUND_INTERVAL
 
 
-def test_qos_follows_dashboard_polls(monkeypatch):
+class _Priority:
+    def __init__(self):
+        self.refreshed = 0
+
+    def refresh(self):
+        self.refreshed += 1
+
+
+def test_the_first_poll_of_a_watched_dashboard_raises_the_priority_before_it_wakes_the_sampler(monkeypatch):
     now = [1000.0]
     monkeypatch.setattr(main.time, "monotonic", lambda: now[0])
-    sampler = Sampler(reader=None, on_sample=None)
-    assert sampler.qos() == QOS_CLASS_BACKGROUND
+    priority = _Priority()
+    sampler = Sampler(reader=None, on_sample=None, priority=priority)
+    sampler._wake = type("Wake", (), {"set": lambda self: seen.append(priority.refreshed)})()
+    seen = []
     sampler.dashboard_polled()
-    assert sampler.qos() == QOS_CLASS_UTILITY
+    assert priority.refreshed == 1 and seen == [1]  # refreshed first, then woken
+    now[0] += DASHBOARD_INTERVAL
+    sampler.dashboard_polled()  # already watched: nothing changes
+    assert priority.refreshed == 1
     now[0] += DASHBOARD_IDLE_AFTER
-    assert sampler.qos() == QOS_CLASS_BACKGROUND
+    sampler.dashboard_polled()  # watched again after a gap
+    assert priority.refreshed == 2
+
+
+def test_the_first_reading_is_only_logged_when_it_was_slow():
+    assert first_reading_note(0.8) is None
+    assert first_reading_note(2.0) is None
+    assert first_reading_note(62.44) == "First reading 62.4 s after launch"
 
 
 def test_late_wakeups_dont_stretch_the_interval(monkeypatch):
@@ -109,14 +128,11 @@ def test_temperatures_are_always_read_and_fans_only_while_shown():
     assert EngineRoomApp._thermal_parts(app) == thermals.ALL_PARTS | {thermals.SAFETY}
 
 
-def test_a_fan_profile_samples_every_second_on_the_efficiency_cores_until_it_holds_the_fans(monkeypatch):
+def test_a_fan_profile_samples_every_second(monkeypatch):
     now = [1000.0]
     monkeypatch.setattr(main.time, "monotonic", lambda: now[0])
-    fans = {"running": False, "held": False}
-    sampler = Sampler(reader=None, on_sample=None, fans_running=lambda: fans["running"],
-                      fans_held=lambda: fans["held"])
-    assert (sampler.interval(), sampler.qos()) == (BACKGROUND_INTERVAL, QOS_CLASS_BACKGROUND)
+    fans = {"running": False}
+    sampler = Sampler(reader=None, on_sample=None, fans_running=lambda: fans["running"])
+    assert sampler.interval() == BACKGROUND_INTERVAL
     fans["running"] = True  # the curve runs once a second
-    assert (sampler.interval(), sampler.qos()) == (DASHBOARD_INTERVAL, QOS_CLASS_BACKGROUND)
-    fans["held"] = True
-    assert (sampler.interval(), sampler.qos()) == (DASHBOARD_INTERVAL, QOS_CLASS_UTILITY)
+    assert sampler.interval() == DASHBOARD_INTERVAL

@@ -387,12 +387,12 @@ class FanControl(threading.Thread):
     RETRY_AFTER = 30.0  # after the helper failed
     OTHER_APP_RETRY = 10.0
 
-    def __init__(self, settings, helper, fan_limits, set_qos=lambda busy: None):
+    def __init__(self, settings, helper, fan_limits, priority=None):
         super().__init__(name="pythonflow-fans", daemon=True)
         self._settings = settings
         self._helper = helper
         self._fan_limits = fan_limits
-        self._set_qos = set_qos
+        self._priority = priority  # priority.Priority: this thread runs at the app's one priority
         self._wake = threading.Event()
         self._latest = (None, None)
         self._woke_from_sleep = False
@@ -452,21 +452,23 @@ class FanControl(threading.Thread):
     def run(self):
         import objc
 
-        busy = None
-        self._wake.set()  # the profile chosen last time
-        while not self._stopping:
-            self._wake.wait()
-            self._wake.clear()
-            if self._stopping:
-                break
-            if self._held != busy:
-                busy = self._held
-                self._set_qos(busy)
-            with objc.autorelease_pool():
-                try:
-                    self._tick(time.monotonic())
-                except Exception:
-                    log.exception("Fan control failed")
+        if self._priority:
+            self._priority.register()
+        try:
+            self._wake.set()  # the profile chosen last time
+            while not self._stopping:
+                self._wake.wait()
+                self._wake.clear()
+                if self._stopping:
+                    break
+                with objc.autorelease_pool():
+                    try:
+                        self._tick(time.monotonic())
+                    except Exception:
+                        log.exception("Fan control failed")
+        finally:
+            if self._priority:
+                self._priority.unregister()
 
     # ── one tick ──
 
