@@ -36,6 +36,17 @@ control stopped because …`. The helper logs to the unified log, not app.log:
 macOS (<why>)`, where why is the app asking, it disconnecting, no word for 10 seconds, or
 sleep. `/var/run/<bundle id>.fans.holding` exists while the helper holds the fans.
 
+`Another app set a fan speed; letting it have the fans (fan 0 read 2300 rpm, had written 2150,
+2177 rpm; fan 1 …)` is the helper giving the fans up, and says for each fan what its target
+read and what the helper had written to it (newest last). A target counts as another app's only
+if the helper didn't write it in the last 2 s and it isn't the last one it wrote, so a read
+that is merely late doesn't trip it. After giving up, fans still in manual mode at the speeds
+the helper wrote are still its: the next `set` logs `Holding the fans again at … rpm; they
+were still at the speeds the helper set`, and a hand-back (the app asking, disconnecting,
+sleep) logs `The fans are still at the speeds the helper set` before `Fans back with macOS`.
+Fans at any other speed are left alone, and a helper that has restarted knows no speeds of its
+own, so it leaves manual fans alone too.
+
 `Menu took 1.8 s to open` is timed from the click to the open, filled menu (only logged above
 0.3 s). `Mac busy: running at full priority` and `Mac quiet again` are each switch of the app's
 threads between user-interactive and background (a quiet launch logs neither: it just stays at
@@ -222,7 +233,12 @@ To reproduce without touching the user's data, run with
   nothing while another app has a fan in manual mode. Its sockets set `SO_NOSIGPIPE`.
 - **Mode keys read back late.** `F%dMd` written as root reads as the old mode for up to a
   second (measured on the M1 Pro), so the helper only rewrites a mode after 2 s, and
-  macOS turns a handed-back 0 into 3 within about 20 s by itself.
+  macOS turns a handed-back 0 into 3 within about 20 s by itself. **Targets probably do too**
+  (not measured; #48 was most likely the helper reading back its own earlier speed and taking
+  it for another app's, which left the fans stuck in manual mode). So the helper keeps what it
+  wrote to each fan's target in the last 2 s, and the last one however long ago, and only a
+  read matching none of them is another app's. It forgets them once the fans are back with
+  macOS, and starts with none: a fan in manual mode isn't the helper's until it has set it.
 - **Macs with `Ftst` refuse a manual mode until it's 1.** It keeps macOS's thermalmonitord
   off the fans, so it must go back to 0 with them: left at 1, nothing runs the fans. The M4
   has it (every mode write failed for 30 s without it, "error unlock" in 1.2.11); the M1 Pro

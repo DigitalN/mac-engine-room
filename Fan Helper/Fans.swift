@@ -32,7 +32,13 @@ final class Fans {
     private let hasForceTest: Bool
     private var held = false
     private var heldSince = Date.distantPast
-    private var written: [Float]
+    /// The speeds the helper set each fan's target to, oldest first: the last, however long ago,
+    /// and any from the `modeSettle` before it. A written target can read back late, as the old
+    /// value for a moment, as the modes do (not measured for targets, but #48 looks like it), so
+    /// a read of one of these is the helper's own speed, not another app's. Empty for a fan the
+    /// helper hasn't written since the fans were last with macOS: a fan in manual mode isn't the
+    /// helper's until it has set it.
+    private var written: [[(rpm: Float, at: Date)]]
     private var asleep = false
     /// The first unlock on M1–M4 can take several seconds (ThermalForge #69): keep trying this long.
     private let unlockPatience: TimeInterval
@@ -50,12 +56,34 @@ final class Fans {
         modeKeys = (0..<count).map { smc.read("F\($0)md") != nil ? "F\($0)md" : "F\($0)Md" }  // lowercase from M5
         limits = (0..<count).map { (smc.readFloat("F\($0)Mn") ?? 0, smc.readFloat("F\($0)Mx") ?? 0) }
         hasForceTest = smc.read("Ftst") != nil
-        written = limits.map { $0.min }
+        written = Array(repeating: [], count: n)
     }
 
     var holding: Bool { lock.withLock { held } }
 
     private func mode(_ fan: Int) -> UInt8? { smc.read(modeKeys[fan])?.first }
+
+    /// A fan's target as the SMC reports it now; nil if it can't be read.
+    private func target(_ fan: Int) -> Float? { smc.readFloat("F\(fan)Tg").flatMap { $0.isFinite ? $0 : nil } }
+
+    /// Whether a target read back is a speed the helper set: the last, or one from the last
+    /// `modeSettle` (a write can read back late). Within 1 rpm.
+    private func isOwn(_ fan: Int, _ rpm: Float) -> Bool {
+        let now = Date(), sets = written[fan]
+        return sets.indices.contains { abs(sets[$0].rpm - rpm) <= 1 && ($0 == sets.count - 1 || now.timeIntervalSince(sets[$0].at) <= modeSettle) }
+    }
+
+    /// Whether a fan is in manual mode at a speed the helper didn't set, so it's another app's. A
+    /// fan in manual mode whose target can't be read isn't known to be the helper's.
+    private func foreign() -> Bool {
+        (0..<count).contains { fan in mode(fan) == 1 && !(target(fan).map { isOwn(fan, $0) } ?? false) }
+    }
+
+    /// Whether the helper doesn't hold the fans but some are still in manual mode, all at speeds it
+    /// set: it gave them up when it shouldn't have, or couldn't hand them back. Still its to hand back.
+    private func leftOver() -> Bool {
+        !held && (0..<count).contains { mode($0) == 1 } && !foreign()
+    }
 
     /// Whether `Ftst` is set, keeping macOS off the fans even with every mode back on auto.
     private var forced: Bool { hasForceTest && smc.read("Ftst")?.first != 0 }
@@ -66,13 +94,21 @@ final class Fans {
         try lock.withLock {
             guard !asleep else { throw Failure.asleep }
             guard limits.allSatisfy({ $0.min > 0 && $0.max > $0.min }) else { throw Failure.limits }
-            if held, (0..<count).contains(where: { abs((smc.readFloat("F\($0)Tg") ?? written[$0]) - written[$0]) > 1 }) {
+            let read = (0..<count).map { target($0) }
+            if held, (0..<count).contains(where: { fan in read[fan].map { !isOwn(fan, $0) } ?? false }) {
                 held = false  // another app wrote a speed: the fans are its now
                 unlink(marker)
-                log.notice("Another app set a fan speed; letting it have the fans")
+                let detail = Self.describe(read: read, wrote: written.map { sets in sets.map { $0.rpm } })
+                log.notice("Another app set a fan speed; letting it have the fans (\(detail, privacy: .public))")
                 throw Failure.otherApp
             }
-            if !held, (0..<count).contains(where: { mode($0) == 1 }) { throw Failure.otherApp }
+            if !held, foreign() { throw Failure.otherApp }
+            let again = !held && (0..<count).contains { mode($0) == 1 }  // in manual mode, at speeds it set
+            if !held {
+                // A fan with macOS reads the target macOS left (often 0), and it can still read so for
+                // a moment after the helper's first write.
+                for fan in 0..<count { if let before = read[fan], !isOwn(fan, before) { remember(fan, before) } }
+            }
             let targets = (0..<count).map { fan in
                 min(max(requested[min(fan, requested.count - 1)], limits[fan].min), limits[fan].max)
             }
@@ -93,7 +129,11 @@ final class Fans {
                 held = true
                 heldSince = Date()
                 FileManager.default.createFile(atPath: marker, contents: nil)
-                log.notice("Holding the fans at \(targets.map { Int($0) }, privacy: .public) rpm")
+                if again {
+                    log.notice("Holding the fans again at \(targets.map { Int($0) }, privacy: .public) rpm; they were still at the speeds the helper set")
+                } else {
+                    log.notice("Holding the fans at \(targets.map { Int($0) }, privacy: .public) rpm")
+                }
             }
             return targets
         }
@@ -105,8 +145,24 @@ final class Fans {
                 log.error("Couldn't set fan \(fan) to \(Int(targets[fan])) rpm")
                 throw Failure.write
             }
-            written[fan] = targets[fan]
+            remember(fan, targets[fan])
         }
+    }
+
+    /// Notes a speed on a fan's target now, and forgets the ones too old to read back late.
+    private func remember(_ fan: Int, _ rpm: Float) {
+        let now = Date()
+        written[fan].removeAll { now.timeIntervalSince($0.at) > modeSettle }
+        written[fan].append((rpm, now))
+    }
+
+    /// For the log: what each fan's target read and what the helper had set it to (newest last).
+    static func describe(read: [Float?], wrote: [[Float]]) -> String {
+        func rpm(_ speed: Float) -> String { String(format: "%.0f", speed) }
+        return read.indices.map { fan in
+            let sets = wrote[fan].isEmpty ? "nothing" : wrote[fan].map(rpm).joined(separator: ", ") + " rpm"
+            return "fan \(fan) read \(read[fan].map { rpm($0) + " rpm" } ?? "nothing"), had written \(sets)"
+        }.joined(separator: "; ")
     }
 
     /// Ftst = 1 before any mode write, where the Mac has it. The marker goes first, so a helper
@@ -133,10 +189,20 @@ final class Fans {
         }
     }
 
-    /// Hands the fans back to macOS. Returns whether every fan left manual mode and Ftst is clear.
+    /// Hands the fans back to macOS if they're the helper's: held, or left in manual mode at speeds
+    /// it set. Returns whether every fan left manual mode and Ftst is clear (true if there was
+    /// nothing to hand back; another app's fans are left alone).
     @discardableResult
     func release(_ why: String) -> Bool {
-        lock.withLock { held ? releaseLocked(why) : true }
+        lock.withLock { releaseIfOurs(why) }
+    }
+
+    private func releaseIfOurs(_ why: String) -> Bool {
+        if !held {
+            guard leftOver() else { return true }
+            log.notice("The fans are still at the speeds the helper set")
+        }
+        return releaseLocked(why)
     }
 
     /// Every fan is tried, and every write checked. A fan whose mode write fails keeps its
@@ -164,6 +230,7 @@ final class Fans {
         }
         if manual.isEmpty && !stillForced {
             log.notice("Fans back with macOS (\(why, privacy: .public))")
+            written = Array(repeating: [], count: count)  // nothing of the helper's is on them now
         } else if !manual.isEmpty {
             log.error("Fans \(manual, privacy: .public) still in manual after handing back (\(why, privacy: .public))")
         } else {
@@ -184,7 +251,7 @@ final class Fans {
     func willSleep() {
         lock.withLock {
             asleep = true
-            if held { _ = releaseLocked("the Mac is going to sleep") }
+            _ = releaseIfOurs("the Mac is going to sleep")
         }
     }
 
@@ -199,7 +266,7 @@ final class Fans {
                 return "{\"rpm\": \(rpm), \"target\": \(target), \"min\": \(Int(limits[fan].min)), "
                     + "\"max\": \(Int(limits[fan].max)), \"mode\": \(mode(fan).map(String.init) ?? "null")}"
             }
-            let other = !held && (0..<count).contains { mode($0) == 1 }
+            let other = !held && foreign()
             return "{\"fans\": [\(fans.joined(separator: ", "))], \"holding\": \(held), \"other\": \(other)}"
         }
     }
