@@ -1,6 +1,8 @@
 """Fan control: the curves, the safety override, the tuning limits, and the controller
 against a stand-in for the helper (nothing here talks to the real one)."""
 
+from types import SimpleNamespace
+
 import pytest
 
 import fans
@@ -225,6 +227,27 @@ def test_switching_profiles_carries_on_from_the_current_speed(control):
     c._settings.values["fan_profile"] = MACOS
     feed(c, [60], start=2)
     assert helper.sent[-1] == "auto" and c.status["state"] == "off"
+
+
+def test_the_priority_is_refreshed_when_the_fans_are_taken_and_when_they_are_given_back(control):
+    """Holding the fans keeps the app's threads at full priority (priority.py), switched as it
+    happens, not at the next sample."""
+    c, helper = control("balanced")
+    refreshed = []
+    c._priority = SimpleNamespace(refresh=lambda: refreshed.append(c.holding))
+    feed(c, [40] * 3)
+    assert refreshed == [True]  # when they were taken, not on every check-in
+    helper.replies["checkin"] = "released"  # the helper handed them back by itself
+    feed(c, [40], start=3)
+    assert refreshed == [True, False]
+    helper.replies.pop("checkin")
+    feed(c, [40], start=4)
+    c.did_wake()  # the Mac slept: the helper handed them back
+    feed(c, [40], start=5)
+    assert refreshed == [True, False, True, False, True]
+    c._settings.values["fan_profile"] = MACOS
+    feed(c, [40], start=6)
+    assert helper.sent[-1] == "auto" and refreshed[-1] is False and len(refreshed) == 6
 
 
 def test_the_safety_override_forces_full_speed(control, monkeypatch):

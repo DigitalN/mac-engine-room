@@ -141,11 +141,12 @@ class Stand_ins:
 
 @pytest.fixture
 def world():
-    state = {"in_use": False, "now": 0.0, "share": 0.9}
+    state = {"in_use": False, "holding": False, "now": 0.0, "share": 0.9}
     calls = Stand_ins()
     idle = CpuIdle(read=lambda: (0, 0, 0, 0))
     idle.share = lambda: state["share"]
-    p = Priority(in_use=lambda: state["in_use"], now=lambda: state["now"], idle=idle,
+    p = Priority(in_use=lambda: state["in_use"], holding=lambda: state["holding"], now=lambda: state["now"],
+                 idle=idle,
                  set_qos=calls.set_qos, raise_=calls.raise_, lower=calls.lower)
     return p, state, calls
 
@@ -215,6 +216,40 @@ def test_the_menu_or_a_watched_dashboard_raises_every_thread_and_closing_it_lowe
     state["in_use"] = False
     p.refresh()
     assert len(calls.lowered) == 2
+
+
+def test_holding_the_fans_keeps_every_thread_raised_on_a_quiet_mac_and_letting_go_lowers_them(world):
+    p, state, calls = world
+    run_in_thread(p.register)
+    state["holding"] = True  # a profile takes the fans before the Mac has been quiet
+    for state["now"] in (0, 15, 30, 31):
+        p.sampled()
+    assert p.load.state == QUIET and calls.lowered == []  # quiet, but the check-ins must get through
+    state["holding"] = False
+    p.refresh()
+    assert len(calls.lowered) == 1
+    state["holding"] = True  # the next profile chosen on a quiet Mac, nothing open
+    p.refresh()
+    assert len(calls.raised) == 2
+    state["in_use"] = True  # the menu opens and closes while it's held: still raised
+    p.refresh()
+    state["in_use"] = False
+    p.refresh()
+    assert len(calls.raised) == 2 and len(calls.lowered) == 1
+
+
+def test_what_decides_the_priority_is_read_under_the_lock(world):
+    """Read before the lock, a refresh begun just before the menu opened could take the lock after
+    the menu's own refresh and lower everything again."""
+    p, state, calls = world
+    seen = []
+    p._in_use = lambda: seen.append(("in_use", p._lock.locked())) or False
+    p._holding = lambda: seen.append(("holding", p._lock.locked())) or False
+    for state["now"] in (0, 15, 30):
+        p.sampled()
+    state["now"] = 31
+    p.refresh()
+    assert seen and all(locked for _, locked in seen)
 
 
 def test_a_thread_registering_while_the_menu_is_open_is_raised_at_once(world):

@@ -242,7 +242,8 @@ copy that has its own identifier (`scripts/make-test-copy.sh`), as for fan contr
    listens for; the sampler is itself starved by a sudden heavy load, so it can take a while),
    `Mac quiet again` about 30 s after the load ends.
 4. `ps -M -p <pid>` shows each thread's priority: the main thread, the sampler and fan control
-   at 4 (background) when the Mac is quiet and nothing is open, and all at 47 during the load.
+   at 4 (background) when the Mac is quiet, nothing is open and no fan profile holds the fans, and
+   all at 47 during the load (and while a profile holds the fans, whatever the load).
 
 With a profile chosen and the real helper allowed, `Fans held by …` should follow the first
 reading within seconds. A busy Mac can't be told from a slow helper by the app's log alone: the

@@ -12,10 +12,14 @@ So:
 - The three threads sit at background QoS (they set it themselves, `register()`), and full
   priority is a user-interactive override on each of them, which any thread can start or end
   at once, even on a thread that is blocked.
-- Full priority: while the menu is open or the dashboard is being watched, from launch until
-  the Mac has been quiet, and while it's busy.
+- Full priority: while the menu is open or the dashboard is being watched, while a fan profile
+  holds the fans, from launch until the Mac has been quiet, and while it's busy.
+- Holding the fans is a reason of its own, not a late wait to be noticed: the curve's check-ins
+  have to reach the fan helper, which hands the fans back to macOS after 10 s without a word,
+  and a background thread can wait longer than that on a Mac that has just turned busy.
 - Busy: a timed wait of the sampler ended more than `Load.LATE` after it was due. At background
-  QoS they normally end 80–100 ms late.
+  QoS they normally end 80–100 ms late. On macOS default, with nothing open, a quiet Mac that
+  turns busy is exposed until the sampler gets a turn to notice.
 - Quiet again: `Load.QUIET_FOR` seconds with `Load.SPARE` of the CPU idle, which says nothing
   about the threads at full priority, so it comes from the scheduler's tick counts.
 
@@ -148,13 +152,15 @@ class CpuIdle:
 
 
 class Priority:
-    """Puts the threads that `register()` at full priority or at background QoS, as `Load` and
-    `in_use` say. Safe to call from any thread."""
+    """Puts the threads that `register()` at full priority or at background QoS, as `Load`,
+    `in_use` (the menu or the dashboard) and `holding` (fan control holds the fans) say. Safe to
+    call from any thread."""
 
-    def __init__(self, in_use=lambda: False, now=time.monotonic, load=None, idle=None,
+    def __init__(self, in_use=lambda: False, holding=lambda: False, now=time.monotonic, load=None, idle=None,
                  set_qos=set_own_qos, raise_=raise_thread, lower=lower_thread):
         self.load = load or Load()
         self._in_use = in_use
+        self._holding = holding
         self._now = now
         self._idle = idle or CpuIdle(now=now)
         self._set_qos, self._raise, self._lower = set_qos, raise_, lower
@@ -178,9 +184,11 @@ class Priority:
             self._lower(handle)
 
     def refresh(self):
-        """Apply what `Load` and `in_use` say now. Cheap when nothing changed."""
-        full = self.load.full or bool(self._in_use())
+        """Apply what `Load`, `in_use` and `holding` say now. Cheap when nothing changed. What they
+        say is read under the lock: read before it, a refresh that began just before the menu
+        opened could take the lock after the menu's own and lower everything again."""
         with self._lock:
+            full = self.load.full or bool(self._in_use()) or bool(self._holding())
             if full == self._full:
                 return
             self._full = full

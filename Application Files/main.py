@@ -405,7 +405,7 @@ class EngineRoomApp:
         self._recorder = ChargingRecorder(self._store, enabled=prefs["record_history"])
         self._app_path = launch.bundle_path()
         thermals = self._thermals = ThermalsReader()
-        self._priority = Priority(in_use=self._in_use)
+        self._priority = Priority(in_use=self._in_use, holding=lambda: self._fans.holding)
         self._fans = FanControl(self._settings, Helper(self._app_path, _own_bundle_id() or "com.pythonflow.monitor"),
                                 thermals.fan_limits, priority=self._priority)
         self._sampler = Sampler(self._reader, self._on_sample, thermals, self._thermal_parts,
