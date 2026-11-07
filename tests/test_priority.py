@@ -75,12 +75,12 @@ def test_a_late_wait_while_busy_starts_the_count_again():
     assert load.state == QUIET
 
 
-def test_spare_cpu_means_a_quarter_of_the_cores_idle():
+def test_spare_cpu_means_15_percent_of_the_efficiency_cores_idle():
     load = Load()
-    load.idle(0.0, 0.25)  # exactly a quarter: spare
-    load.idle(30.0, 0.25)
+    load.idle(0.0, 0.15)  # exactly 15%: spare
+    load.idle(30.0, 0.15)
     assert load.state == QUIET
-    load.idle(31.0, 0.24)
+    load.idle(31.0, 0.14)
     assert load.state == BUSY
 
 

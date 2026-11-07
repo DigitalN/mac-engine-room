@@ -20,8 +20,8 @@ So:
 - Busy: a timed wait of the sampler ended more than `Load.LATE` after it was due. At background
   QoS they normally end 80–100 ms late. On macOS default, with nothing open, a quiet Mac that
   turns busy is exposed until the sampler gets a turn to notice.
-- Quiet again: `Load.QUIET_FOR` seconds with `Load.SPARE` of the efficiency cores' time idle.
-  Those are the only cores a background thread runs on, and they can be saturated (Spotlight
+- Quiet again: `Load.QUIET_FOR` seconds with `Load.SPARE` (15%) of the efficiency cores' time
+  idle. Those are the only cores a background thread runs on, and they can be saturated (Spotlight
   indexing a build's output, say) while the performance cores have time to spare, so the idle
   share of all the cores together says nothing about whether a background thread gets a turn
   (1.2.15 went quiet that way, and the first menu after took 2.3 s). It comes from the
@@ -55,7 +55,7 @@ class Load:
     login launch took over a minute to show a reading at background QoS."""
 
     LATE = 0.25  # seconds a timed wait may end after it was due; background waits end ~0.09 s late
-    SPARE = 0.25  # share of the efficiency cores' time that must be idle to count as spare CPU
+    SPARE = 0.15  # share of the efficiency cores' time that must be idle to count as spare CPU: on an M1 Pro, background work was only slow below 5% idle (see CLAUDE.md)
     QUIET_FOR = 30.0  # seconds of spare CPU before the Mac is quiet again
 
     def __init__(self):

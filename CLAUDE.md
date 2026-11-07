@@ -193,24 +193,33 @@ To reproduce without touching the user's data, run with
   busy, and **while a fan profile holds the fans**: the curve's check-ins must reach the helper,
   which hands the fans back after 10 s without a word, and a background thread can wait longer
   than that. Busy: a sampler wait ended more than 0.25 s late (they normally end ~0.09 s late).
-  Quiet again: 30 s with at least a quarter of the **efficiency cores'** time idle (per-core tick
-  counts from `host_processor_info`, read only at full priority), not of all the cores together as
-  1.2.15 had it. A background thread runs only on the efficiency cores, and those can stay saturated
-  while the performance cores have time to spare: on the maintainer's M1 Pro during a game compile,
-  `Mac quiet again` came at 09:36:11, a menu took 2.3 s a few seconds later and `Mac busy` followed
-  at 09:36:19. After a later compile there the efficiency cores stayed saturated for 15 minutes (by
-  background daemons) while the rest of the Mac was 57–89% idle. A thread at background QoS doing
-  10 ms of CPU every 2.5 s (a passive probe) took over 100 ms in 14% of 269 tries then (up to 27 s),
-  against 1 of 361 (0.44 s at most) once a quarter of the efficiency cores was idle. A timed wait
-  ended over 0.25 s late in 64 of 301 windows of 2.5 s in that stretch, and in none of 349 after:
-  late waits only show it once the threads have been dropped, the efficiency cores' idle share
-  before. The efficiency cores are the IORegistry `cpu` nodes with `cluster-type` "E" (their
+  Quiet again: 30 s with at least 15% of the **efficiency cores'** time idle (per-core tick
+  counts from `host_processor_info`, read only at full priority), not a quarter of all the cores
+  together as 1.2.15 had it. A background thread runs only on the efficiency cores, and those can
+  stay saturated while the performance cores have time to spare: on the maintainer's M1 Pro during
+  a game compile, `Mac quiet again` came at 09:36:11, a menu took 2.3 s a few seconds later and
+  `Mac busy` followed at 09:36:19. After a later compile there the efficiency cores stayed saturated
+  for 15 minutes (background daemons), then `spotlightknowledged` held about one of the two for
+  over an hour. A thread at background QoS doing 10 ms of CPU every 2.5 s (a passive probe), with
+  the rest of the Mac at least half idle, was slow only when the efficiency cores were under 5%
+  idle: 27 of 193 tries took over 100 ms (up to 27 s), and a timed wait ended over 0.25 s late in
+  46 of 213 windows of 2.5 s. At 5–25% idle none of 437 tries took over 100 ms (0.1 s at most) and
+  1 of 467 windows had a late wait. So the bar is 15%: replayed over that recording, a quarter
+  called the Mac busy for a daemon's ordinary share (quiet for 54% of the time the Mac was at least
+  half idle, against 76%) with the same 2 late waits and 2 slow tries landing while quiet. Late
+  waits show saturation only once the threads have been dropped; the idle share shows it before.
+  The efficiency cores are the IORegistry `cpu` nodes with `cluster-type` "E" (their
   `logical-cpu-id` is the row `host_processor_info` gives them), not the first CPU numbers. A Mac
   with none, or whose nodes don't say clearly, counts every core. On macOS default a quiet Mac that
   turns busy is exposed until the sampler gets a turn to notice, so the first click after a build
   starts can still be slow. Samples are scheduled from when they were due, since background waits
-  end ~90 ms late. Idle energy must not rise: the quiet state reads nothing extra. What full
-  priority costs while a profile is held is not measured yet.
+  end ~90 ms late. Idle energy must not rise: the quiet state reads nothing extra. Holding at full
+  priority costs next to nothing (measured on the M1 Pro, Balanced held through a stand-in helper,
+  10 minutes each, `proc_pid_rusage` V6): 1.2.14 0.61 mW, 1.2.15 0.63 mW per minute at the median
+  (0.70 mW averaged, with one disturbed minute at 1.35), 99.7% of the CPU time on the efficiency
+  cores either way, so it stays user-interactive. Not measured: a Mac that is idle all the way
+  down (the efficiency cores were 33–55% idle, Spotlight was busy), where a raised thread might
+  land on a performance core.
   **Why the 0.3–1.0 s a menu can still take to open with every core busy is not known.** Seen: during
   every slow open the main thread's Python stack was in `performClick_`, in no callback of ours, and
   every other Python thread was idle in a wait, so the GIL was free. That rules out our Python code

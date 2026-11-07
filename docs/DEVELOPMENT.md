@@ -242,7 +242,7 @@ copy that has its own identifier (`scripts/make-test-copy.sh`), as for fan contr
    listens for; the sampler is itself starved by a sudden heavy load, so it can take a while),
    `Mac quiet again` about 30 s after the load ends. Both end with what the app saw: `(a wait ended
    1.4 s late)` or `(efficiency cores 3% idle)`. The Mac is only quiet when the efficiency cores
-   have been a quarter idle for 30 s (the first reading logs `Quiet is judged on the efficiency
+   have been 15% idle for 30 s (the first reading logs `Quiet is judged on the efficiency
    cores (cpu 0, 1 of 10)`): idle performance cores don't count, since a background thread can't
    use them. A real build is the case to watch, because Spotlight and the other background daemons
    keep the efficiency cores busy with its output after it has stopped using the rest: no `Mac
