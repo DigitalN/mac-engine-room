@@ -18,8 +18,12 @@ final class SMCConnection {
     /// do on the M1 Pro (up to a second): a read shows the latest write at least this old. 0
     /// reads back at once. `keys` always holds what the target really is.
     var targetLag: TimeInterval = 0
+    /// The time the lag is counted in; the tests move it by hand, along with the helper's.
+    var clock: () -> Date = Date.init
     /// Reads that showed a target other than the one it really is.
     private(set) var lateReads = 0
+    /// Every read, to check that the helper reads nothing when it has nothing to look at.
+    private(set) var reads = 0
     private var targetWrites: [String: [(at: Date, bytes: [UInt8])]] = [:]
 
     init(model: String, fans: Int = 2) {
@@ -35,8 +39,9 @@ final class SMCConnection {
     }
 
     func read(_ key: String) -> [UInt8]? {
+        reads += 1
         guard targetLag > 0, let seen = targetWrites[key] else { return keys[key] }
-        let cutoff = Date().addingTimeInterval(-targetLag)
+        let cutoff = clock().addingTimeInterval(-targetLag)
         let shown = seen.last { $0.at <= cutoff }?.bytes ?? seen[0].bytes
         if shown != keys[key] { lateReads += 1 }
         return shown
@@ -51,7 +56,7 @@ final class SMCConnection {
         if key.hasSuffix("Tg"), targetLag > 0 {
             // The target read back before this write, first: the value from before any of them.
             if targetWrites[key] == nil { targetWrites[key] = [(.distantPast, keys[key]!)] }
-            targetWrites[key]!.append((Date(), bytes))
+            targetWrites[key]!.append((clock(), bytes))
         }
         keys[key] = bytes
         return true
