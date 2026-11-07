@@ -1,6 +1,10 @@
-"""The fan helper's unlock and hand-back (Fan Helper/Fans.swift), against a simulated SMC
-(tests/fan_helper/FakeSMC.swift) that behaves like an M4, which needs Ftst, or this M1 Pro,
-which has none. Skipped without a Swift compiler."""
+"""The fan helper's unlock and hand-back (Fan Helper/Fans.swift), and how it tells its own fan
+speeds from another app's, against a simulated SMC (tests/fan_helper/FakeSMC.swift) that behaves
+like an M4, which needs Ftst, or this M1 Pro, which has none, and whose fan targets can read back
+late. The checks are in tests/fan_helper/main.swift: a ramp with late read-backs keeps the fans
+held, another app's speed is seen at once and never written over, and fans left at the helper's
+own speeds are taken back or handed back while fans at another app's speed are left alone.
+Skipped without a Swift compiler."""
 
 import shutil
 import subprocess

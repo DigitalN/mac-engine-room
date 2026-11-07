@@ -138,15 +138,17 @@ final class Server {
     }
 
     /// Hands the fans back when the app stops checking in, and quits when there's nothing to do.
+    /// After it gives the fans up, it looks again for a while (`Fans.recheck`) and stays until it has.
     func watch() {
         while true {
             Thread.sleep(forTimeInterval: 1)
             let (silent, idle) = lock.withLock {
                 (Date().timeIntervalSince(lastWord), clients == 0 ? Date().timeIntervalSince(lastSeen) : 0)
             }
+            let looking = fans.recheck()
             if fans.holding && silent > checkInTimeout {
                 fans.release("no word from Mac Engine Room for \(Int(checkInTimeout)) seconds")
-            } else if !fans.holding && idle > idleTimeout {
+            } else if !fans.holding && !looking && idle > idleTimeout {
                 exit(0)  // launchd starts it again on the next connection
             }
         }

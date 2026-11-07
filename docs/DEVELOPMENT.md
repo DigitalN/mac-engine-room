@@ -186,6 +186,16 @@ certificate from the same Apple account before the old one expires.
   `F%dMd`, or `F%dmd` from M5, set to 1), `auto` sets the modes back to 0, then `Ftst`, and
   watches them for 10 seconds, `checkin` keeps the hold, and `status` reports. The app keeps its connection open while it holds the fans: the helper hands
   them back when it closes, after 10 seconds without a word, and before sleep.
+- **Another app's speed:** before each `set` while holding, the helper reads every fan's
+  target. The speed it has set, or one it replaced in the last 2 seconds (a written target can
+  read back late, as the speed from before the write, which may have been set long before), is
+  its own; any other speed means another app took the fan, and the helper lets it have the
+  fans and writes nothing. Fans left in manual mode at its own speeds (it gave them up on a
+  read that was only late, or couldn't hand them back) are still its: the next `set` takes
+  them back, `auto`, a disconnect and sleep hand them to macOS, and for 10 seconds after
+  giving up its watchdog looks again every second and hands them back (the helper doesn't quit
+  while it is looking). The speeds are kept in memory only, so a helper that has restarted
+  leaves manual fans alone.
 
 ## Testing fan control
 
