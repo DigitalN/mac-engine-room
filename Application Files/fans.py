@@ -387,12 +387,12 @@ class FanControl(threading.Thread):
     RETRY_AFTER = 30.0  # after the helper failed
     OTHER_APP_RETRY = 10.0
 
-    def __init__(self, settings, helper, fan_limits, set_qos=lambda busy: None):
+    def __init__(self, settings, helper, fan_limits, priority=None):
         super().__init__(name="pythonflow-fans", daemon=True)
         self._settings = settings
         self._helper = helper
         self._fan_limits = fan_limits
-        self._set_qos = set_qos
+        self._priority = priority  # priority.Priority: this thread runs at the app's one priority
         self._wake = threading.Event()
         self._latest = (None, None)
         self._woke_from_sleep = False
@@ -452,21 +452,23 @@ class FanControl(threading.Thread):
     def run(self):
         import objc
 
-        busy = None
-        self._wake.set()  # the profile chosen last time
-        while not self._stopping:
-            self._wake.wait()
-            self._wake.clear()
-            if self._stopping:
-                break
-            if self._held != busy:
-                busy = self._held
-                self._set_qos(busy)
-            with objc.autorelease_pool():
-                try:
-                    self._tick(time.monotonic())
-                except Exception:
-                    log.exception("Fan control failed")
+        if self._priority:
+            self._priority.register()
+        try:
+            self._wake.set()  # the profile chosen last time
+            while not self._stopping:
+                self._wake.wait()
+                self._wake.clear()
+                if self._stopping:
+                    break
+                with objc.autorelease_pool():
+                    try:
+                        self._tick(time.monotonic())
+                    except Exception:
+                        log.exception("Fan control failed")
+        finally:
+            if self._priority:
+                self._priority.unregister()
 
     # ── one tick ──
 
@@ -552,7 +554,7 @@ class FanControl(threading.Thread):
                 if not self._held:
                     log.info("Fans held by %s at %s rpm (cores %s)", PROFILE_NAMES[self._pid],
                              ", ".join(map(str, targets)), "unknown" if temp is None else f"{temp:.1f}°")
-                self._held, self._sent = True, targets
+                self._set_held(True, targets)
             elif self._helper.request("checkin") == "released":
                 log.info("The fan helper had handed the fans back to macOS; taking them again")
                 self._lost()
@@ -588,16 +590,24 @@ class FanControl(threading.Thread):
             log.info("Fans back to macOS: %s", why)
         except HelperError as e:
             log.warning("Fans may not be back with macOS (%s): %s", e.reason, why)
-        self._held, self._sent = False, None
+        self._set_held(False, None)
         self._helper.close()  # the helper exits once nobody is connected
 
     def _lost(self):
         """The fans aren't held any more (or shouldn't be counted on): start over."""
-        self._held, self._sent = False, None
+        self._set_held(False, None)
         self._helper.close()
         self._safety.reset()
         if self._curve is not None:
             self._curve.reset()
+
+    def _set_held(self, held, sent):
+        """Holding the fans keeps the app's threads at full priority (priority.py), so this is
+        where that is switched, at once, rather than at the next sample."""
+        changed = held != self._held
+        self._held, self._sent = held, sent
+        if changed and self._priority:
+            self._priority.refresh()
 
     def _set_status(self, state, **details):
         status = {"profile": self._pid or MACOS, "state": state, **details}

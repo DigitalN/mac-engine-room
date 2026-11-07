@@ -36,6 +36,14 @@ control stopped because …`. The helper logs to the unified log, not app.log:
 macOS (<why>)`, where why is the app asking, it disconnecting, no word for 10 seconds, or
 sleep. `/var/run/<bundle id>.fans.holding` exists while the helper holds the fans.
 
+`Menu took 1.8 s to open` is timed from the click to the open, filled menu (only logged above
+0.3 s). `Mac busy: running at full priority` and `Mac quiet again` are each switch of the app's
+threads between user-interactive and background (a quiet launch logs neither: it just stays at
+full priority until the Mac has been quiet for 30 s). `First reading 62.4 s after launch` is
+timed from the process's start to the first reading in the menu bar (only logged above 2 s). A
+slow menu or first reading with no `Mac busy` line before it isn't the app's priority: look at
+the macOS log for what else was waiting.
+
 A blank dashboard has been WebKit's graphics helper hanging. At login it got stuck
 setting up audio, and macOS doesn't let WebKit kill its own helpers. The app logs
 `WebKit's graphics process stopped responding; ending it` when it does that itself,
@@ -59,6 +67,12 @@ To reproduce without touching the user's data, run with
 - **Launcher**: `Application Files/main.py`. Handles logging, the single-instance
   lock, the sampler thread, the menu bar item, the pywebview window, and the `Api`
   class exposed to the page. `VERSION` here is the app's only version number.
+- **Priority**: `Application Files/priority.py`. The main thread, the sampler and fan control run at
+  one priority: background QoS, with a user-interactive override on all three at once while the
+  menu is open, the dashboard is watched, a fan profile holds the fans, the app has just launched
+  or the Mac is busy. `Load`
+  (pure, unit-tested) says when it's busy and when it's quiet again; `Priority` raises and lowers
+  the threads. Why: see *Idle work stays on the efficiency cores* below.
 - **Launching**: `Application Files/launch.py`. The offer to move into Applications,
   relaunching, and open at login (`SMAppService`, loaded with `objc.loadBundle`).
 - **The rename**: `Application Files/rename.py`. Moves an installed Pythonflow over once:
@@ -158,14 +172,27 @@ To reproduce without touching the user's data, run with
   the Dashboard or Thermals page (its polls say which page is showing), the open menu
   (which wakes the sampler as it opens), or fan control holding them. The safety
   override's hotspot and `TS0P` sensors only while fan control holds the fans.
-- **Idle work stays on the efficiency cores.** With only the menu bar item showing,
-  the sampler and the main thread run at background QoS, the only one Apple silicon
-  keeps off the performance cores. The dashboard raises the sampler to utility, and the
-  dashboard or the menu raises the main thread to user-interactive: with every core
-  busy, a background thread waited up to 1.6 s for a turn (measured). Samples are
-  scheduled from when they were due, since background waits end ~90 ms late. A fan profile
-  holding the fans raises the sampler and the fan thread to utility, so check-ins reach the
-  helper on a busy Mac; that's whenever a profile other than macOS default is chosen.
+- **Idle work stays on the efficiency cores; full priority when someone needs it.** With only the
+  menu bar item showing and no fan profile chosen, the main thread, the sampler and fan control
+  run at background QoS, the only one Apple silicon keeps off the performance cores. They share
+  the GIL, and CPython makes the holder wait until a thread that has asked for it for 5 ms
+  actually runs, so one starved thread holds the others up: **all three always have the same
+  priority.** With every core busy a background thread waited up to 26 s for a turn (12 busy
+  processes on the M1 Pro's 10 cores; a login launch took 62 s to its first reading), against
+  5 ms at user-interactive. So they're at user-interactive (a `pthread_override_qos_class_start_np`
+  override on each, which works on a blocked thread; a thread can only set its own QoS) while the
+  menu is open or the dashboard is watched, from launch until the Mac has been quiet, while it's
+  busy, and **while a fan profile holds the fans**: the curve's check-ins must reach the helper,
+  which hands the fans back after 10 s without a word, and a background thread can wait longer
+  than that. Busy: a sampler wait ended more than 0.25 s late (they normally end ~0.09 s late).
+  Quiet again: 30 s with at least a quarter of the CPU idle (`host_statistics`, read only at full
+  priority). On macOS default a quiet Mac that turns busy is exposed until the sampler gets a turn
+  to notice, so the first click after a build starts can still be slow. Samples are scheduled from
+  when they were due, since background waits end ~90 ms late. Idle energy must not rise: the quiet
+  state reads nothing extra. What full priority costs while a profile is held is not measured yet.
+  The 0.3–1.0 s a menu can still take to open with every core busy is inside macOS: during every
+  slow open the main thread's Python stack was in `performClick_`, in no callback of ours, and
+  every other Python thread was idle in a wait, so the GIL was free.
 - **Only pass real changes to AppKit and WebKit.** A new menu bar title costs about
   0.9 ms of redraw, and setting the same one again still costs 0.2 ms (measured). The
   menu's rows and tiles are only filled in while it's open, through `_put()`, which
