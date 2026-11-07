@@ -100,11 +100,19 @@ def _is_webkit_gpu_process(pid):
 
 
 SLOW_FIRST_READING = 2.0  # seconds from launch to the first reading in the menu bar above which app.log says so
+_began = None  # seconds from the process starting to main() running: the first launch of a copy waits for macOS
 
 
-def first_reading_note(age):
-    """The line for app.log when the first reading took `age` seconds after launch, or None."""
-    return f"First reading {age:.1f} s after launch" if age > SLOW_FIRST_READING else None
+def first_reading_note(age, began=None):
+    """The line for app.log when the first reading took `age` seconds after launch, or None. `began`:
+    how much of that was before the app's own code began to run, which isn't the app's wait: a copy
+    that had never run once sat at exec for 224 s, with macOS's security scan busy."""
+    if age <= SLOW_FIRST_READING:
+        return None
+    note = f"First reading {age:.1f} s after launch"
+    if began is not None and began > SLOW_FIRST_READING:
+        note += f" ({began:.1f} s of it before the app's code began to run)"
+    return note
 
 
 def _seconds_since_launch():
@@ -475,7 +483,7 @@ class EngineRoomApp:
         if not self._first_reading_seen:
             self._first_reading_seen = True
             age = _seconds_since_launch()
-            note = first_reading_note(age) if age is not None else None
+            note = first_reading_note(age, _began) if age is not None else None
             if note:
                 log.info(note)
         self._check_graphics_process()
@@ -749,8 +757,10 @@ def _own_bundle_id():
 
 
 def main():
+    global _began
     import rename
 
+    _began = _seconds_since_launch()
     # Before logging and the lock, which live in the folders being moved.
     moved = rename.move_old_folders(OLD_FOLDERS, _own_bundle_id())
     if moved is None:
