@@ -15,8 +15,11 @@ a = Analysis(
     ['main.py'],
     pathex=[SPECPATH],
     binaries=[],
+    # The licenses travel with every copy, including ones that update themselves.
     datas=[
         ('index.html', '.'),
+        (os.path.join(SPECPATH, '..', 'LICENSE'), '.'),
+        (os.path.join(SPECPATH, '..', 'THIRD-PARTY-NOTICES'), '.'),
     ],
     hiddenimports=[
         'webview',
@@ -30,9 +33,17 @@ a = Analysis(
     ],
     hookspath=[],
     runtime_hooks=[],
-    # Other pywebview backends and unused stdlib GUI toolkits.
+    # Other pywebview backends and unused stdlib GUI toolkits. cryptography (and bcrypt, which
+    # it imports) is only for pywebview's SSL certificates, and jinja2 (and markupsafe) only for
+    # bottle's templates: both serve pywebview's web server, which never runs because the page
+    # is passed in as html=. PyInstaller follows their deferred imports anyway (about 10 MB).
+    # Anything bundled needs its notice in THIRD-PARTY-NOTICES.
     excludes=[
         'tkinter',
+        'cryptography',
+        'bcrypt',
+        'jinja2',
+        'markupsafe',
         'webview.platforms.android',
         'webview.platforms.cef',
         'webview.platforms.edgechromium',
@@ -80,6 +91,6 @@ app = BUNDLE(
         'LSUIElement': True,
         'LSMinimumSystemVersion': '12.0',
         'NSHighResolutionCapable': True,
-        'NSHumanReadableCopyright': 'MIT License. Based on Powerflow by The Powerflow Team.',
+        'NSHumanReadableCopyright': 'Copyright © 2026 DigitalN. GPL-3.0-or-later. Based on Powerflow by The Powerflow Team.',
     },
 )

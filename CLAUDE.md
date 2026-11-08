@@ -294,8 +294,17 @@ To reproduce without touching the user's data, run with
   was never registered reports *not found*, not *not registered*.
 - **A key from another project's table is used when its reading makes sense**: one established
   project (Stats, iSMC, Asahi Linux, macmon…) listing it for that chip is enough, with the
-  source in a comment next to it. iSMC is GPL: use its dumps as evidence, never copy its table.
-  A Mac that's missing a reading for real hides it; a report proves which it is.
+  source in a comment next to it. iSMC is GPL-3.0: use its dumps as evidence, never copy its
+  table. The app being GPL too would allow it, but keeping other people's GPL code out leaves
+  the maintainer free to relicense their own code, or give a fix to Powerflow or ThermalForge
+  under MIT. A Mac that's missing a reading for real hides it; a report proves which it is.
+- **The app is GPL-3.0-or-later** (MIT up to 1.2.17). Anything the build bundles, and code or
+  other material adapted from another project, needs its notice in `THIRD-PARTY-NOTICES`, which
+  the build copies into the app next to `LICENSE`; `tools/check_notices.py` checks a build
+  against it. The spec excludes what only pywebview's web
+  server would use (cryptography, bcrypt, jinja2, markupsafe): the page goes in as `html=`, so
+  it never runs, but PyInstaller follows deferred imports. Powerflow's MIT notice stays there:
+  the icon is still Powerflow's.
 - WebKit pauses rendering in a window that's covered or hidden, so `ResizeObserver` and
   `requestAnimationFrame` don't run there. A test that drives the page while other
   windows cover it sees no size reports; that's not a bug.

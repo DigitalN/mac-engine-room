@@ -73,6 +73,9 @@ doesn't release anything: the download links only change when a release is publi
 
 - [ ] `scripts/package.sh` makes `dist/Mac-Engine-Room-<version>.dmg`. That's the only file a
   release has: people download it, and installed copies update from it.
+- [ ] `python3 tools/check_notices.py` finds an entry in `THIRD-PARTY-NOTICES` for every
+  package the build bundled. The app carries that file, so a new library needs its notice
+  there (or an exclude in the spec, if the app doesn't use it).
 - [ ] Open the DMG: Mac Engine Room and Applications with the arrow between them, and the
   first-launch card at the bottom easy to read.
 - [ ] The app inside has the new version, a valid signature, and the right team:
