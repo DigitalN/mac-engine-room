@@ -19,6 +19,9 @@ if [[ -z "$TEAM" || "$TEAM" == "not set" ]]; then
     echo "Releases must be signed with an Apple Development certificate (see docs/DEVELOPMENT.md)." >&2
     exit 1
 fi
+# The app carries THIRD-PARTY-NOTICES, so every library the build bundled needs an entry in
+# it. This reads PyInstaller's record of the build, which is deleted at the end.
+python3 tools/check_notices.py >&2
 VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist")
 ICON=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIconFile" "$APP/Contents/Info.plist")
 DMG="dist/Mac-Engine-Room-$VERSION.dmg"

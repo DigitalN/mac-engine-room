@@ -1,8 +1,9 @@
 """Checks that THIRD-PARTY-NOTICES has an entry for every package the last build bundled.
 
-Run it after scripts/build.sh (package.sh runs that too): it reads PyInstaller's record of
-what went into the app. Python itself, and the OpenSSL it brings, aren't from site-packages,
-so they aren't listed here; their entry is checked by eye.
+scripts/package.sh runs it after building, and stops if a package has no entry. To run it on
+its own, run scripts/build.sh first: it reads PyInstaller's record of what went into the app,
+which package.sh deletes when it's done. Python itself, and the OpenSSL it brings, aren't
+from site-packages, so they aren't listed here; their entry is checked by eye.
 
     python3 tools/check_notices.py
 """

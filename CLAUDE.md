@@ -300,8 +300,8 @@ To reproduce without touching the user's data, run with
   under MIT. A Mac that's missing a reading for real hides it; a report proves which it is.
 - **The app is GPL-3.0-or-later** (MIT up to 1.2.17). Anything the build bundles, and code or
   other material adapted from another project, needs its notice in `THIRD-PARTY-NOTICES`, which
-  the build copies into the app next to `LICENSE`; `tools/check_notices.py` checks a build
-  against it. The spec excludes what only pywebview's web
+  the build copies into the app next to `LICENSE`; `scripts/package.sh` checks each build
+  against it (`tools/check_notices.py`). The spec excludes what only pywebview's web
   server would use (cryptography, bcrypt, jinja2, markupsafe): the page goes in as `html=`, so
   it never runs, but PyInstaller follows deferred imports. Powerflow's MIT notice stays there:
   the icon is still Powerflow's.
