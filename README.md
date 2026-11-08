@@ -140,8 +140,9 @@ database without changing it. You can then delete `/Applications/powerflow.app`.
 ## Credits
 
 Based on [Powerflow](https://github.com/lzt1008/powerflow) by The Powerflow Team
-(Samuel Lyon / lzt1008), under the MIT license; the app icon is Powerflow's. The macOS 27 fixes build on diagnoses from community pull
-requests [#19](https://github.com/lzt1008/powerflow/pull/19),
+(Samuel Lyon / lzt1008), under the MIT license; the app icon is Powerflow's. The macOS 27
+fixes build on diagnoses from community pull requests
+[#19](https://github.com/lzt1008/powerflow/pull/19),
 [#21](https://github.com/lzt1008/powerflow/pull/21) and
 [#22](https://github.com/lzt1008/powerflow/pull/22).
 
