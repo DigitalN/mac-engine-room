@@ -90,7 +90,7 @@ from source, see [DEVELOPMENT.md](docs/DEVELOPMENT.md).
 | **Adapter in** | Power from the charger into the Mac. The Adapter box adds the charger's conversion loss. |
 | **Battery** | Power into the battery (positive) or out of it (negative) |
 | **Screen** | Display backlight. On mini-LED screens it rises with bright content. Not shown on a Mac with no screen sensor. |
-| **Chip (CPU + GPU)** | The Apple silicon chip. Apple names the sensor after the heatpipe, but it measures the chip. |
+| **Chip (CPU + GPU)** | The Apple silicon chip. Apple names the sensor after the heatpipe, but it measures the chip. Not shown on a Mac with no chip sensor. |
 | **Time to full / remaining** | macOS's own estimate, rough above about 80%, where charging slows down. With a charge limit set, the time to the limit instead, since macOS's estimate counts to 100%. |
 | **CPU, GPU** | The hottest of the chip's per-core sensors. Not its hotspot sensors, which run up to 10° hotter, and not the battery sensors some apps mistake for the GPU. |
 | **Memory, SSD, Ambient** | The hottest sensor in each group. Ambient is the Mac's air temperature sensor. |

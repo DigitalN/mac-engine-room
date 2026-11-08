@@ -469,7 +469,7 @@ dialog .actions { justify-content: flex-end; }
               <optgroup label="Power" id="s-metric-power">
                 <option value="system">System power</option>
                 <option value="screen" id="s-metric-screen">Screen power</option>
-                <option value="chip">Chip power (CPU + GPU)</option>
+                <option value="chip" id="s-metric-chip">Chip power (CPU + GPU)</option>
               </optgroup>
             </select>
           </div>
@@ -763,7 +763,7 @@ function niceStep(raw) {
 
 // ── state ───────────────────────────────────────────────
 let settings = null, latest = null, seq = 0, points = [], pollTimer = null;
-let liveRange = 300, activeTab = 'dashboard', sessions = [], selectedId = null, screenOffered = true, batteryOffered = true;
+let liveRange = 300, activeTab = 'dashboard', sessions = [], selectedId = null, screenOffered = true, chipOffered = true, batteryOffered = true;
 let thermals = null, tpoints = [], tRange = 300;
 const SERIES = [
   { key: 'system_load', name: 'System', color: '--system', on: true },
@@ -834,7 +834,7 @@ function renderNow() {
   put('l-batt-note', 'text', charging ? 'charging' : draining ? 'from battery' : (s.has_battery ? 'idle' : ''));
 
   // breakdown of system load
-  const screen = s.screen_power, chip = s.chip_power, total = s.system_load;
+  const screen = s.screen_power, chip = s.has_chip_power ? s.chip_power : null, total = s.system_load;
   const hasParts = isNum(total) && total > 0 && (isNum(screen) || isNum(chip));
   put('breakdown', 'display', hasParts ? '' : 'none');
   if (hasParts) {
@@ -875,7 +875,7 @@ function renderNow() {
   kv('d-system', [
     ['Total', fmtW(s.system_load)],
     ...(s.has_screen_power ? [['Screen', fmtW(s.screen_power)]] : []),
-    ...(isNum(s.chip_power) || s.has_battery ? [['Chip (CPU + GPU)', fmtW(s.chip_power)]] : []),
+    ...(s.has_chip_power ? [['Chip (CPU + GPU)', fmtW(s.chip_power)]] : []),
     ...(s.has_battery ? [
       ['Into Mac from adapter', s.external_connected ? fmtW(s.system_in) : '—'],
       ['Battery', isNum(bp) ? `${bp > 0 ? '+' : ''}${bp.toFixed(1)} W` : '—'],
@@ -899,24 +899,36 @@ function kv(id, rows) {
   rows.forEach(([, v], i) => put(el.children[i * 2 + 1], 'text', v));
 }
 
-// A series this Mac can't have isn't offered: Screen without a screen sensor, and on a desktop
-// (no battery) the battery and the adapter, since a desktop's mains isn't one.
+// A series this Mac can't have isn't offered: Screen without a screen sensor, Chip without a
+// chip sensor, and on a desktop (no battery) the battery and the adapter, since a desktop's
+// mains isn't one.
 const offeredSeries = s => s.key === 'screen_power' ? screenOffered
+  : s.key === 'chip_power' ? chipOffered
   : s.key === 'system_in' || s.key === 'battery_power' ? batteryOffered : true;
 function renderToggles() {
   $('live-toggles').innerHTML = SERIES.map((s, i) => !offeredSeries(s) ? '' :
     `<button class="toggle ${s.on ? 'on' : ''}" data-i="${i}"><i style="background:var(${s.color})"></i>${esc(s.name)}</button>`).join('');
 }
 
-// A Mac with no screen sensor doesn't offer Screen as a choice. The breakdown and History
-// skip it by themselves, since they only list what has a number.
-const screenOption = $('s-metric-screen');
+// A Mac with no screen sensor doesn't offer Screen as a choice, nor one with no chip sensor
+// Chip. The breakdown and History skip them by themselves, since they only list what has a
+// number.
+const screenOption = $('s-metric-screen'), chipOption = $('s-metric-chip');
 function offerScreen(offered) {
   if (offered === screenOffered) return;
   screenOffered = offered;
   renderToggles();
-  if (offered) $('s-metric-power').insertBefore(screenOption, $('s-metric-power').lastElementChild);
+  // Before Chip, if that's offered, so the order stays System, Screen, Chip.
+  if (offered) $('s-metric-power').insertBefore(screenOption, chipOption.parentNode ? chipOption : null);
   else screenOption.remove();
+  showMetric();
+}
+function offerChip(offered) {
+  if (offered === chipOffered) return;
+  chipOffered = offered;
+  renderToggles();
+  if (offered) $('s-metric-power').appendChild(chipOption);
+  else chipOption.remove();
   showMetric();
 }
 function offerBattery(offered) {
@@ -1158,7 +1170,7 @@ function renderDashboard() {
 
   if (!s) return;
   const a = s.adapter, power = [{ name: 'System', color: '--system', value: fmtW(s.system_load),
-    sub: [isNum(s.chip_power) && `Chip ${fmtW(s.chip_power)}`, s.has_screen_power && `Screen ${fmtW(s.screen_power)}`].filter(Boolean).join(' · ') }];
+    sub: [s.has_chip_power && `Chip ${fmtW(s.chip_power)}`, s.has_screen_power && `Screen ${fmtW(s.screen_power)}`].filter(Boolean).join(' · ') }];
   if (s.has_battery) {
     const st = statusOf(s).text.replace(/^On battery · /, '');  // "2 hr remaining", "Charging · 1 hr to 80%"
     power.push({ name: 'Battery', color: '--drain', value: isNum(s.battery_level) ? `${s.battery_level}%` : '—',
@@ -1204,7 +1216,8 @@ async function poll() {
         if (changed) renderThermalToggles();
       }
       if (r.latest) {
-        latest = r.latest; offerScreen(latest.has_screen_power); offerBattery(latest.has_battery !== false);
+        latest = r.latest; offerScreen(latest.has_screen_power); offerChip(latest.has_chip_power);
+        offerBattery(latest.has_battery !== false);
         renderNow(); renderLiveChart(); renderThermals(); renderThermalChart(); renderDashboard();
       }
       if (r.update) { updateState = r.update; if (activeTab === 'settings') renderUpdateButton(); }

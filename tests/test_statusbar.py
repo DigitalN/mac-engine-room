@@ -51,6 +51,18 @@ def test_screen_row_only_shows_on_a_mac_with_a_screen_sensor(monkeypatch):
     assert _row(bar, "screen") == "Screen\t7.2 W"
 
 
+def test_chip_row_only_shows_on_a_mac_with_a_chip_sensor(monkeypatch):
+    _fake_status_item(monkeypatch)
+    bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None)
+    bar.update({"has_chip_power": False, "has_screen_power": True, "screen_power": 7.2}, None, {})
+    bar._target.menuNeedsUpdate_(bar._menu)
+    assert bar._rows["chip"].isHidden() and not bar._rows["screen"].isHidden()  # each row is its own
+    bar.update({"has_chip_power": True, "chip_power": 1.8}, None, {})
+    bar._target.menuNeedsUpdate_(bar._menu)
+    assert not bar._rows["chip"].isHidden()
+    assert _row(bar, "chip") == "Chip (CPU + GPU)\t1.8 W"
+
+
 def test_update_only_redraws_what_changed(monkeypatch):
     button = _fake_status_item(monkeypatch)
     menu_events = []
@@ -205,6 +217,19 @@ def test_menu_bar_falls_back_to_system_on_a_mac_with_no_screen_sensor():
     assert menu_bar_value(s, {"menu_bar_metric": "screen"}) == 27.0
     # A missed reading on a Mac that has the sensor shows as missing, not as another number.
     assert menu_bar_value({**s, "has_screen_power": True}, {"menu_bar_metric": "screen"}) is None
+
+
+def test_menu_bar_falls_back_to_system_on_a_mac_with_no_chip_sensor():
+    s = {"system_load": 27.0, "chip_power": None, "has_chip_power": False, "screen_power": 2.0, "has_screen_power": True}
+    settings = {"menu_bar_metric": "chip"}
+    assert menu_bar_value(s, settings) == 27.0
+    assert menu_bar_title(s, None, settings) == "27.0 W"
+    assert settings == {"menu_bar_metric": "chip"}  # the choice itself is kept
+    # With a chip sensor it's the chip's, and a missed reading shows as missing, not as another number.
+    assert menu_bar_value({**s, "chip_power": 1.8, "has_chip_power": True}, settings) == 1.8
+    assert menu_bar_value({**s, "has_chip_power": True}, settings) is None
+    # Each falls back on its own sensor: a Mac with no chip sensor still has its screen's.
+    assert menu_bar_value(s, {"menu_bar_metric": "screen"}) == 2.0
 
 
 def test_the_menu_shows_the_three_profiles_chosen_in_settings(monkeypatch):

@@ -100,11 +100,20 @@ made its fan curves too loud. Do it right from the start:
   `PSTR`, by 2.2 W), so the M1 Air has no screen sensor. A screen key now only shows once it has
   read above 0, on any Mac, and Settings only asks for a report when a laptop has no screen key at
   all (one that reads 0 may be a closed lid).
-- **Sensor reports** (Settings › About) list a Mac's P/T/F keys with their values. Each one that
-  comes in is kept in `tests/sensor_reports/`, and `tests/test_report.py` fails until that Mac
-  finds its CPU and GPU in the table and, on a laptop, its screen key. Settings asks for one
-  only when the app guessed: CPU or GPU by prefix, no GPU key, or a laptop with no screen key
-  that isn't in `power.NO_SCREEN_SENSOR`.
+- **The 13" M4 Air's** `PBLR`, `PHPC`, `PPMR` and `PPSR` read 0.01 W (its sensor report, #51),
+  where the base M4 MacBook Pro (Mac16,1) reads real watts (`PHPC` 1.1–2.3 W, `PBLR`
+  0.29–7.3 W). So a key now counts at 0.1 W, not "above 0", and Chip follows the same rule as
+  Screen: hidden everywhere until `PHPC` has read 0.1 W, and then kept for the launch. Mac16,12
+  is in `power.NO_SCREEN_SENSOR` and `power.NO_CHIP_SENSOR`; the 15" (Mac16,13) isn't proven, so
+  it is judged by what it reads. No other key stands in for them: `PZC0`, `PZC1` and `PHPS` are
+  undocumented, and aren't chip power on the M1 Pro.
+- **Sensor reports** (Settings › About) list a Mac's P/T/F keys with their values, and name the key
+  each power reading uses. Each one that comes in is kept in `tests/sensor_reports/`, and
+  `tests/test_report.py` fails until that Mac finds its CPU and GPU in the table and, on a laptop,
+  a screen key and `PHPC` that read at least 0.1 W (unless it's in `power.NO_SCREEN_SENSOR` or
+  `power.NO_CHIP_SENSOR`). Settings asks for one only when the app guessed: CPU or GPU by prefix,
+  no GPU key, or a laptop with no screen key that isn't in `power.NO_SCREEN_SENSOR`. A chip key
+  that reads next to nothing doesn't ask.
 - **Not counted as CPU:** the chip hotspot keys (`TCDX`, `TCMz` and the like), which run up to
   ~10° above any core, and the helper `Tp` keys next to each core key (on M4 one key in four is
   the core; others read 0 while the core sleeps and 10–13° hot under load). Hotspots are used
