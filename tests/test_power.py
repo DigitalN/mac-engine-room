@@ -214,6 +214,8 @@ def test_screen_power_comes_from_whichever_key_this_mac_has():
     assert normalize(None, {"PDBR": 5.0, "PBLR": 7.2}, now=1.0)["screen_power"] == 5.0
     s = normalize(None, {"PBLR": 0.0}, now=1.0)  # a reading, but it doesn't show the sensor works
     assert s["screen_power"] == 0.0 and not s["has_screen_power"]
+    s = normalize(None, {"PBLR": 0.01}, now=1.0)  # the M4 Air's: a hundredth of a watt isn't one either
+    assert s["screen_power"] == 0.01 and not s["has_screen_power"]
     s = normalize(None, {"PHPC": 2.5}, now=1.0)  # a Mac with no screen sensor
     assert s["screen_power"] is None and not s["has_screen_power"]
     # A reading no screen could give doesn't count; the next key gets its turn.
@@ -221,15 +223,42 @@ def test_screen_power_comes_from_whichever_key_this_mac_has():
     assert not normalize(None, {"PDBR": -1.0}, now=1.0)["has_screen_power"]
 
 
+def test_a_reading_shows_its_sensor_works_from_a_tenth_of_a_watt():
+    assert power.SENSOR_MIN_W == 0.1
+    assert normalize(None, {"PBLR": 0.1}, now=1.0)["has_screen_power"]
+    assert normalize(None, {"PHPC": 0.1}, now=1.0)["has_chip_power"]
+    for watts in (0.0, 0.01, 0.09, 0.099):  # the last is judged as it is, not as the 0.1 it rounds to
+        assert not normalize(None, {"PBLR": watts}, now=1.0)["has_screen_power"]
+        assert not normalize(None, {"PHPC": watts}, now=1.0)["has_chip_power"]
+
+
+def test_chip_power_comes_from_phpc():
+    s = normalize(None, {"PHPC": 2.504}, now=1.0)
+    assert s["chip_power"] == 2.5 and s["has_chip_power"]
+    s = normalize(None, {"PHPC": 0.01}, now=1.0)  # the M4 Air's: read as it is, but not proof of a sensor
+    assert s["chip_power"] == 0.01 and not s["has_chip_power"]
+    s = normalize(None, {"PSTR": 9.0}, now=1.0)  # a Mac with no chip key
+    assert s["chip_power"] is None and not s["has_chip_power"]
+    assert not normalize(None, {"PHPC": -1.0}, now=1.0)["has_chip_power"]
+
+
 def test_a_laptop_without_a_screen_key_asks_for_a_report_unless_known(monkeypatch):
     laptop = {"has_battery": True, "has_screen_power": False}
     assert power.screen_sensor_unknown(laptop, False, "MacBookPro18,3")
-    # A key that reads 0 (a closed lid, a dark screen, or a dead key) doesn't ask.
+    # A key that reads next to nothing (a closed lid, a dark screen, or a dead key) doesn't ask.
     assert not power.screen_sensor_unknown(laptop, True, "MacBookPro18,3")
     assert not power.screen_sensor_unknown({**laptop, "has_battery": False}, False, "Mac16,10")  # a Mac mini
     assert not power.screen_sensor_unknown(None, False, "MacBookPro18,3")
     monkeypatch.setattr(power, "NO_SCREEN_SENSOR", frozenset({"MacBookPro18,3"}))
     assert not power.screen_sensor_unknown(laptop, False, "MacBookPro18,3")
+
+
+def test_a_dead_chip_key_does_not_ask_for_a_report():
+    # Only the screen keys decide: a laptop whose PHPC reads 0.01 W, like the M4 Air, is known.
+    m4_air = {"has_battery": True, "has_screen_power": False, "has_chip_power": False}
+    assert not power.screen_sensor_unknown(m4_air, True, "Mac16,12")
+    assert not power.screen_sensor_unknown(m4_air, False, "Mac16,12")  # listed, so even without a screen key
+
 
 def _every_key_but_screen():
     return {k: 1.0 for k in power.SMC_KEYS if k not in power.SCREEN_POWER_KEYS}
@@ -300,9 +329,11 @@ class _StubSMC:
         return ["PHPC=2.50", "PZZZ=1.00"]
 
 
-def _reader(monkeypatch, smc):
+def _reader(monkeypatch, smc, model="MacBookPro18,1"):
+    """A PowerReader on a Mac of this model (not the one running the tests)."""
     monkeypatch.setattr(power, "SMC", lambda: smc)
     monkeypatch.setattr(power, "read_battery_registry", lambda: None)
+    monkeypatch.setattr(power, "mac_model", lambda: model)
     return power.PowerReader()
 
 
@@ -347,7 +378,11 @@ def test_screen_stays_offered_through_a_missed_reading(monkeypatch):
         assert s["screen_power"] is None and s["has_screen_power"]
 
 
-def test_a_screen_key_shows_once_it_reads_above_0(monkeypatch):
+# Screen (PBLR here, a base chip's key) and Chip (PHPC) follow the same rule.
+SENSORS = [("screen", "PBLR"), ("chip", "PHPC")]
+
+
+def test_a_screen_key_stuck_at_zero_shows_once_it_reads_real_watts(monkeypatch):
     # The M1 Air's PBLR: listed, but 0 at any brightness. Not shown, and not asked about.
     reader = _reader(monkeypatch, _StubSMC({"PBLR": 0.0}, {"PBLR": 0.0}, {"PBLR": 2.1}, {"PBLR": 0.0}))
     for _ in range(2):
@@ -358,17 +393,51 @@ def test_a_screen_key_shows_once_it_reads_above_0(monkeypatch):
     assert s["has_screen_power"] and s["screen_power"] == 0.0
 
 
-def test_a_model_known_to_have_no_screen_sensor_never_shows_one(monkeypatch):
-    monkeypatch.setattr(power, "mac_model", lambda: "MacBookAir10,1")
-    reader = _reader(monkeypatch, _StubSMC({"PBLR": 3.0}))
+@pytest.mark.parametrize("name, key", SENSORS)
+def test_a_key_stuck_at_a_hundredth_of_a_watt_never_shows(monkeypatch, name, key):
+    # The M4 Air's PBLR and PHPC: listed, and 0.01 W even at 25 W of system load.
+    reader = _reader(monkeypatch, _StubSMC(*[{key: 0.01, "PSTR": 25.0}] * 4))
+    for _ in range(4):
+        s = reader.read()
+        assert not s[f"has_{name}_power"] and s[f"{name}_power"] is None
+
+
+@pytest.mark.parametrize("name, key", SENSORS)
+def test_a_key_shows_from_a_tenth_of_a_watt_and_then_stays(monkeypatch, name, key):
+    reader = _reader(monkeypatch, _StubSMC({key: 0.09}, {key: 0.1}, {key: 0.0}, {}, {"PSTR": 9.0}))
     s = reader.read()
-    assert not s["has_screen_power"] and s["screen_power"] is None
+    assert not s[f"has_{name}_power"] and s[f"{name}_power"] is None
+    s = reader.read()
+    assert s[f"has_{name}_power"] and s[f"{name}_power"] == 0.1
+    # It stays through a dark screen or an idle chip (0 W), and through a failed read or a
+    # sample without the key (nothing).
+    s = reader.read()
+    assert s[f"has_{name}_power"] and s[f"{name}_power"] == 0.0
+    for _ in range(2):
+        s = reader.read()
+        assert s[f"has_{name}_power"] and s[f"{name}_power"] is None
 
 
-def test_a_mac_with_no_screen_sensor_never_offers_it(monkeypatch):
+@pytest.mark.parametrize("model, name, key", [
+    ("MacBookAir10,1", "screen", "PBLR"), ("Mac16,12", "screen", "PBLR"), ("Mac16,12", "chip", "PHPC")])
+def test_a_model_known_to_lack_a_sensor_never_shows_it(monkeypatch, model, name, key):
+    reader = _reader(monkeypatch, _StubSMC(*[{key: 3.0}] * 2), model=model)  # even if a read looks real
+    for _ in range(2):
+        s = reader.read()
+        assert not s[f"has_{name}_power"] and s[f"{name}_power"] is None
+
+
+def test_the_m1_air_lacks_only_a_screen_sensor(monkeypatch):
+    # Each list is its own. The M1 Air's sensor report: PBLR 0.00, PHPC 0.53.
+    s = _reader(monkeypatch, _StubSMC({"PBLR": 0.0, "PHPC": 0.53}), model="MacBookAir10,1").read()
+    assert not s["has_screen_power"] and s["has_chip_power"] and s["chip_power"] == 0.53
+
+
+@pytest.mark.parametrize("name", ["screen", "chip"])
+def test_a_mac_with_no_sensor_never_offers_it(monkeypatch, name):
     reader = _reader(monkeypatch, _StubSMC({"PSTR": 9.0}, {"PSTR": 9.0}))
-    assert not reader.read()["has_screen_power"]
-    assert not reader.read()["has_screen_power"]
+    assert not reader.read()[f"has_{name}_power"]
+    assert not reader.read()[f"has_{name}_power"]
 
 
 def test_reads_this_mac():

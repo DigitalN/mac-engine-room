@@ -69,6 +69,21 @@ def test_thermal_points_only_exist_where_temperatures_were_read():
     assert live.since(2)["thermal_points"] == []
 
 
+def test_live_data_tells_the_page_which_power_sensors_this_mac_has():
+    """has_screen_power and has_chip_power ride in `latest` (the whole sample), which is how the
+    page decides what to show."""
+    import power
+
+    app = SimpleNamespace(_updater=SimpleNamespace(status="idle", version=None),
+                          _sampler=SimpleNamespace(dashboard_polled=lambda fans: None),
+                          _live=LiveState(), _fans=SimpleNamespace(status={}))
+    for smc, screen, chip in [({"PSTR": 9.0, "PDBR": 2.3, "PHPC": 1.8}, True, True),
+                              ({"PSTR": 9.0, "PBLR": 0.01, "PHPC": 0.01}, False, False)]:  # the M4 Air's
+        app._live.push(power.normalize(None, smc, now=1.0))
+        latest = Api(app=app).get_live(0)["latest"]
+        assert latest["has_screen_power"] is screen and latest["has_chip_power"] is chip
+
+
 def test_report_a_problem_opens_the_sensor_report_issue(monkeypatch):
     calls = []
     monkeypatch.setattr(AppHelper, "callAfter", lambda func, *args: calls.append((func, args)))

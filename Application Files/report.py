@@ -43,13 +43,34 @@ def _number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
+def power_sources(values):
+    """(screen, chip) as the report words them: the key each reading comes from, once it reads at
+    least power.SENSOR_MIN_W as the app requires, else 'none' and what the keys read."""
+    readable = {k: v for k, v in values.items() if _number(v)}
+    key, watts = power.screen_reading(readable)
+    reads = [f"{k} reads {readable[k]:.2f} W" for k in power.SCREEN_POWER_KEYS if k in readable]
+    if power.sensor_works(watts):
+        screen = key
+    elif reads:
+        screen = f"none ({', '.join(reads)})"
+    else:
+        screen = f"none of {', '.join(power.SCREEN_POWER_KEYS)}"
+    chip_watts = readable.get("PHPC")
+    if power.sensor_works(chip_watts):
+        chip = "PHPC"
+    elif chip_watts is not None:
+        chip = f"none (PHPC reads {chip_watts:.2f} W)"
+    else:
+        chip = "none (PHPC missing)"
+    return screen, chip
+
+
 def build(about, values):
     """The report's text. Pure: `about` as collect() makes it, `values` {key: number or None}."""
     names = {k for k, v in values.items() if v is not None}
     fan_count = int(values.get("FNum") or 0) or thermals.count_fans(names)
     keys = thermals.sensor_keys(names, about.get("chip"), fan_count, about.get("cores") or 0)
-    screen = next((k for k in power.SCREEN_POWER_KEYS
-                   if _number(values.get(k)) and 0 <= values[k] <= power.SCREEN_MAX_W), None)
+    screen, chip = power_sources(values)
     battery = {True: "yes", False: "no"}.get(about.get("battery"), "unknown")
 
     def source(group):
@@ -64,7 +85,8 @@ def build(about, values):
         f"App: {about.get('app')}", f"Mac: {about.get('mac')}", f"Chip: {about.get('chip') or 'unknown'}",
         f"Cores: {about.get('cores') or 'unknown'}", f"Battery: {battery}", f"macOS: {about.get('macos')}", "",
         "Where each reading comes from",
-        f"  Screen power: {screen or 'none of ' + ', '.join(power.SCREEN_POWER_KEYS)}",
+        f"  Screen power: {screen}",
+        f"  Chip power: {chip}",
         f"  Power keys missing: {', '.join(missing) or 'none'}",
         *(f"  {label}: {source(group)}" for group, label in
           (("cpu", "CPU"), ("gpu", "GPU"), ("memory", "Memory"), ("ssd", "SSD"), ("ambient", "Ambient"))),

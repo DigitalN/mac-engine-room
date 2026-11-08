@@ -37,6 +37,7 @@ def options():
     a.add_argument("--fanless", action="store_true", help="a Mac with no fans")
     a.add_argument("--onefan", action="store_true")
     a.add_argument("--noscreen", action="store_true", help="a Mac with no screen power reading")
+    a.add_argument("--nochip", action="store_true", help="a Mac with no chip power reading (with --noscreen: an M4 Air)")
     a.add_argument("--desktop", action="store_true", help="a Mac mini: no battery, no screen")
     a.add_argument("--gpuheld", action="store_true", help="the GPU parked for 3 minutes, showing its last reading")
     a.add_argument("--charging", action="store_true")
@@ -70,7 +71,8 @@ def readings(o):
         "has_battery": True, "battery_level": 63, "charge_limit": 80, "is_charging": o.charging,
         "external_connected": o.charging, "time_remaining_min": 64 if o.charging else 254,
         "system_load": 9.4, "system_in": 52.3 if o.charging else 0, "screen_power": None if o.noscreen else 2.3,
-        "has_screen_power": not o.noscreen, "chip_power": 1.8, "adapter_power": 52.3 if o.charging else 0,
+        "has_screen_power": not o.noscreen, "chip_power": None if o.nochip else 1.8, "has_chip_power": not o.nochip,
+        "adapter_power": 52.3 if o.charging else 0,
         "adapter": {"name": "96W USB-C Power Adapter", "watts": 96} if o.charging else None,
     }
     if o.desktop:

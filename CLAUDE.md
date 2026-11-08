@@ -22,7 +22,8 @@ reconnect) logs `Temperature sensors on <chip>: cpu N, gpu N, …; N fans`, plus
 found by prefix when the chip isn't in the core key table (or its keys don't fit this Mac), and
 `no GPU sensor`. For a Mac you can't reach, ask for its sensor report (Settings › About ›
 Copy, or the "Wrong or missing reading" issue template): it lists every power, temperature and
-fan key with its value, and which keys each reading came from. The app logs `Copied the sensor
+fan key with its value, and which keys each reading came from: a screen or chip key that reads
+under 0.1 W shows as e.g. `Chip power: none (PHPC reads 0.01 W)`. The app logs `Copied the sensor
 report` or `Couldn't make the sensor report (…)`.
 
 Fan control logs `Fan profile: <name>` when one is chosen (and at launch), `Asked macOS to
@@ -252,12 +253,16 @@ To reproduce without touching the user's data, run with
   0 to 25 W wins: `PDBR` on Pro and Max chips, M1 to M5 (measured here and by others on the M1
   Max, M3 Max, M4 Pro, M5 Pro and M5 Max), `PBLR` on base chips (measured on the base M4 at 0.3
   W at one bar and 7.2 W at full; in dumps from a base M2 and M3), `PBwo` on the A18 Pro
-  MacBook Neo (measured by others; the M5 has none). A key only counts once it has read above 0:
-  the M1 Air lists `PBLR` but it reads 0 at any brightness (its sensor reports), so it has no
-  screen reading, and it's in `power.NO_SCREEN_SENSOR`.
+  MacBook Neo (measured by others; the M5 has none). A screen or chip key only counts once it has
+  read at least 0.1 W (`power.SENSOR_MIN_W`), and then it stays for the launch: a board without
+  the sensor can still list the key. The M1 Air's `PBLR` reads 0 at any brightness, and the 13"
+  M4 Air's `PBLR` and `PHPC` read 0.01 W even under load (their sensor reports; #51), so they're
+  in `power.NO_SCREEN_SENSOR` and, for the M4 Air, `power.NO_CHIP_SENSOR`. The quietest working
+  key on file is the base M4's `PBLR` at one bar, 0.3 W.
 - SMC `PHPC` is chip (CPU + GPU package) power, **not** "heatpipe" or fan power,
   despite Apple's key name. Verified: it rises about 11 W under full CPU load while
-  the fans stay at minimum.
+  the fans stay at minimum. Where it doesn't read (the 13" M4 Air), nothing stands in: `PZC0`,
+  `PZC1` and `PHPS` are undocumented, and aren't chip power on the M1 Pro.
 - `~/Documents` is iCloud-synced on this machine. Finder metadata blocks
   `codesign`, so `scripts/build.sh` builds in `~/Library/Caches` and runs `xattr -cr`
   before signing.
@@ -409,8 +414,9 @@ Don't undo these without asking:
   Turning it off sticks.
 - The app always starts in the menu bar only, at login or opened by hand; there's no
   setting. Opening it again while it runs, or **Open Dashboard**, shows the dashboard.
-- A Mac with no screen reading doesn't show Screen anywhere, and the menu bar falls back
-  to System if Screen was chosen. It happens automatically, and there's no estimate.
+- A Mac with no screen or chip reading doesn't show Screen or Chip anywhere, and the menu bar
+  falls back to System if that one was chosen. It happens automatically, with no estimate and
+  no stand-in key (#51).
 - The dashboard window opens as tall as the page, up to the screen's height, and can't
   be made wider or taller than the page needs: extra size only added empty space.
   Switching tabs resizes it to the new page.

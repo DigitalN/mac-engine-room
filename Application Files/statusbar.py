@@ -134,6 +134,8 @@ def menu_bar_value(sample, settings):
     metric = settings.get("menu_bar_metric")
     if metric == "screen" and not sample.get("has_screen_power"):
         metric = "system"  # a Mac with no screen sensor doesn't offer it; the setting stays as it was
+    if metric == "chip" and not sample.get("has_chip_power"):
+        metric = "system"  # nor does one with no chip sensor
     return {
         "system": sample.get("system_load"),
         "screen": sample.get("screen_power"),
@@ -509,6 +511,7 @@ class StatusBar:
         self._put(self._rows["battery"], "setHidden_", not sample.get("has_battery"))
         self._put(self._rows["adapter"], "setHidden_", not sample.get("has_battery"))  # a desktop's is its mains
         self._put(self._rows["screen"], "setHidden_", not sample.get("has_screen_power"))
+        self._put(self._rows["chip"], "setHidden_", not sample.get("has_chip_power"))
 
     def _fill_profiles(self, chosen=None):
         status = self._fan_status() or {}
