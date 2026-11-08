@@ -140,7 +140,7 @@ database without changing it. You can then delete `/Applications/powerflow.app`.
 ## Credits
 
 Based on [Powerflow](https://github.com/lzt1008/powerflow) by The Powerflow Team
-(Samuel Lyon / lzt1008). The macOS 27 fixes build on diagnoses from community pull
+(Samuel Lyon / lzt1008), under the MIT license; the app icon is Powerflow's. The macOS 27 fixes build on diagnoses from community pull
 requests [#19](https://github.com/lzt1008/powerflow/pull/19),
 [#21](https://github.com/lzt1008/powerflow/pull/21) and
 [#22](https://github.com/lzt1008/powerflow/pull/22).
@@ -152,8 +152,14 @@ sensor dumps collected by [iSMC](https://github.com/dkorunic/iSMC) by Dinko Koru
 Fan control is based on [ThermalForge](https://github.com/ProducerGuy/ThermalForge) by
 ProducerGuy (MIT): its fan profiles, and the fan and SMC code, which it adapted from
 [macos-smc-fan](https://github.com/agoodkind/macos-smc-fan) by Alexander Goodkind (MIT).
-Their notices are in [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES).
+
+Their notices, and those of the libraries the app bundles (Python, pywebview, PyObjC and
+others), are in [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES), which is also inside the app.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Copyright (C) 2026 DigitalN
+
+Mac Engine Room is free software, licensed under the GNU General Public License, version 3
+or (at your option) any later version. See [LICENSE](LICENSE). Releases up to 1.2.17 were
+MIT-licensed.
