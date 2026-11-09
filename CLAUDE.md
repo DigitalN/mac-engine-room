@@ -58,12 +58,19 @@ full priority until the Mac has been quiet for 30 s). A `Mac quiet again` follow
 by a slow menu or by `Mac busy` means the Mac wasn't quiet: the brackets say how idle the
 efficiency cores were. The first reading also logs which cores quiet is judged on: `Quiet is
 judged on the efficiency cores (cpu 0, 1 of 10)`, or `… on all 10 cores (no efficiency cores
-found)`. `First reading 62.4 s after launch` is timed from the process's start to the first reading
-in the menu bar (only logged above 2 s). When most of it was before the app's own code began to
-run, the line says so in brackets: a copy that had never run sat at exec (`sample` showed it in
-`_dyld_start`) for 224 s once, with XprotectService busy, so probably macOS's security scan of a
-first launch; that wait isn't the app's. A slow menu or first reading with no `Mac busy` line
-before it isn't the app's priority: look at the macOS log for what else was waiting.
+found)`. `First reading 62.4 s after launch (read at 9.6 s)` is timed from the process's start to
+the first reading in the menu bar (only logged above 2 s); `read at` is when the sampler had it. A
+`read at` well before the first reading means the main thread wasn't running its run loop yet: at
+a 1.2.18 login launch it was silent for 10 s just after AppKit's `finishLaunching` began, cause
+unknown (#59). When most of the wait was before the app's own code began to run, the bracket says
+so too: a copy that had never run sat at exec (`sample` showed it in `_dyld_start`) for 224 s
+once, with XprotectService busy, so probably macOS's security scan of a first launch; that wait
+isn't the app's. A slow menu or first reading with no `Mac busy` line before it isn't the app's
+priority: look at the macOS log for what else was waiting.
+
+`Dashboard took 0.8 s to open the first time` is timed from the click to the page loaded: the
+first open of each launch makes the window and starts WebKit (see *Launcher* below). `Couldn't open
+the dashboard` with a traceback means pywebview couldn't make the window.
 
 A blank dashboard has been WebKit's graphics helper hanging. At login it got stuck
 setting up audio, and macOS doesn't let WebKit kill its own helpers. The app logs
@@ -87,11 +94,18 @@ To reproduce without touching the user's data, run with
 
 - **Launcher**: `Application Files/main.py`. Handles logging, the single-instance
   lock, the sampler thread, the menu bar item, the pywebview window, and the `Api`
-  class exposed to the page. `VERSION` here is the app's only version number.
+  class exposed to the page. `VERSION` here is the app's only version number. The app runs
+  AppKit's run loop itself (`NSApp.run()`), and the window, with WebKit and its processes, is only
+  made the first time the dashboard opens (`_make_window`, which calls `webview.start()` inside the
+  running app): until then there's nothing of WebKit's to start, keep in memory or wait for, and
+  1.2.18's menu bar couldn't show a reading until pywebview had made the window and started the
+  run loop (#59). pywebview sets an app delegate and the menu bar's menus only when it starts the
+  run loop itself, so the app sets the delegate at launch (quitting must hand the fans back) and
+  the menus (`_recreate_menus`) when it makes the window.
 - **Priority**: `Application Files/priority.py`. The main thread, the sampler and fan control run at
   one priority: background QoS, with a user-interactive override on all three at once while the
-  menu is open, the dashboard is watched, a fan profile holds the fans, the app has just launched
-  or the Mac is busy. `Load`
+  menu is open, the dashboard is watched or a fan profile holds the fans, from launch until the app
+  has started and the Mac has been quiet, and while the Mac is busy. `Load`
   and `efficiency_cores` (pure, unit-tested) say when it's busy, when it's quiet again and which
   cores that is judged on; `Priority` raises and lowers the threads. Why: see *Idle work stays on
   the efficiency cores* below.
@@ -206,7 +220,14 @@ To reproduce without touching the user's data, run with
   menu is open or the dashboard is watched, from launch until the Mac has been quiet, while it's
   busy, and **while a fan profile holds the fans**: the curve's check-ins must reach the helper,
   which hands the fans back after 10 s without a word, and a background thread can wait longer
-  than that. Busy: a sampler wait ended more than 0.25 s late (they normally end ~0.09 s late).
+  than that. **A thread takes its override before it lowers its own QoS** (`Priority.register`):
+  1.2.18 did it the other way round, and at a login launch with the efficiency cores 0% idle fan
+  control's first line came 9.6 s after the menu bar item was made (an ordinary launch logs it
+  before the sampler's first reading), while the main thread and the sampler stalled with it
+  (#59). **The main thread keeps its own QoS until the app has started** (`_finish_launching`
+  registers it, then `Priority.started`), with all three at full priority until then, so the work
+  AppKit hands off while the app starts isn't sent at background QoS. Busy: a sampler wait ended
+  more than 0.25 s late (they normally end ~0.09 s late).
   Quiet again: 30 s with at least 15% of the **efficiency cores'** time idle (per-core tick
   counts from `host_processor_info`, read only at full priority), not a quarter of all the cores
   together as 1.2.15 had it. A background thread runs only on the efficiency cores, and those can
