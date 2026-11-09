@@ -38,6 +38,11 @@ it, a run from source moves `~/Library/Application Support/Pythonflow` to the ne
 (`rename.py`), or waits for a running Pythonflow and gives up. Run the tests with
 `python3 -m pytest`.
 
+Set `PYTHONFLOW_CHIP_IOREPORT=1` as well to read Chip power from IOReport on a Mac whose SMC
+`PHPC` works, the path the 13" M4 Air takes (`ioreport.py`). It's read at launch; the log says
+`Chip power from IOReport's … (PYTHONFLOW_CHIP_IOREPORT=1; PHPC reads … W)`. For a test copy:
+`open -n --env PYTHONFLOW_DATA_DIR=/tmp/pf-data --env PYTHONFLOW_CHIP_IOREPORT=1 "$T"`.
+
 To look at the page or the menu without running the app:
 
 ```bash
