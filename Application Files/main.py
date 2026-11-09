@@ -1,7 +1,7 @@
 """Mac Engine Room (formerly Pythonflow) — a menu bar thermals and power monitor for macOS.
 
 Launcher: logging, single-instance lock, sampler thread, menu bar item and the
-pywebview dashboard window.
+pywebview dashboard window, which is only made the first time the dashboard opens.
 
 There is deliberately no HTTP server: the dashboard page talks to Python over
 pywebview's in-process bridge, so the app opens no network ports. Its only network
@@ -103,16 +103,20 @@ SLOW_FIRST_READING = 2.0  # seconds from launch to the first reading in the menu
 _began = None  # seconds from the process starting to main() running: the first launch of a copy waits for macOS
 
 
-def first_reading_note(age, began=None):
-    """The line for app.log when the first reading took `age` seconds after launch, or None. `began`:
-    how much of that was before the app's own code began to run, which isn't the app's wait: a copy
-    that had never run once sat at exec for 224 s, with macOS's security scan busy."""
+def first_reading_note(age, began=None, read=None):
+    """The line for app.log when the first reading reached the menu bar `age` seconds after launch,
+    or None. `read`: when the sampler had it, which tells a slow reading from a main thread that
+    couldn't show it yet (#59: read at 9.6 s, shown at 22.2 s). `began`: how much of `age` was before
+    the app's own code began to run, which isn't the app's wait: a copy that had never run once sat at
+    exec for 224 s, with macOS's security scan busy."""
     if age <= SLOW_FIRST_READING:
         return None
-    note = f"First reading {age:.1f} s after launch"
+    notes = []
+    if read is not None:
+        notes.append(f"read at {read:.1f} s")
     if began is not None and began > SLOW_FIRST_READING:
-        note += f" ({began:.1f} s of it before the app's code began to run)"
-    return note
+        notes.append(f"{began:.1f} s of it before the app's code began to run")
+    return f"First reading {age:.1f} s after launch" + (f" ({'; '.join(notes)})" if notes else "")
 
 
 def _seconds_since_launch():
@@ -423,8 +427,10 @@ class EngineRoomApp:
         self._updater = Updater(
             self._app_path, VERSION, settings=self._settings, data_dir=DATA_DIR,
             is_busy=self._busy_for_update, on_status=self._on_update_status, quit_app=self.quit)
-        self._window = None
+        self._window = None  # the dashboard's, made the first time it opens (_make_window)
         self._html = None
+        self._opening_since = None  # when the first opening of the dashboard began, until its page loads
+        self._app_delegate = None
         self._gpu_pid = 0  # WebKit's graphics process for the page, as last seen
         self._page_size = None  # (width, height) the dashboard page last asked for
         self._statusbar = None
@@ -442,8 +448,9 @@ class EngineRoomApp:
         self._recorder.feed(sample)
         self._fans.feed(thermals, sample)
         if self._statusbar is not None:
-            # One trip to the main thread per sample: each one wakes it.
-            AppHelper.callAfter(self._show_sample, sample, thermals, self._settings.get())
+            # One trip to the main thread per sample: each one wakes it. When it was read goes
+            # along for the first reading's line in app.log.
+            AppHelper.callAfter(self._show_sample, sample, thermals, self._settings.get(), time.monotonic())
 
     def _thermal_parts(self):
         """Temperatures every sample, like power, so the chart has no gaps (about 0.9 ms of
@@ -479,14 +486,17 @@ class EngineRoomApp:
 
     # ── window lifecycle (main thread) ──
 
-    def _show_sample(self, sample, thermals, settings):
+    def _show_sample(self, sample, thermals, settings, read_at=None):
+        """`read_at`: when the sampler read it (time.monotonic())."""
         self._statusbar.update(sample, thermals, settings)
         if not self._first_reading_seen:
             self._first_reading_seen = True
             age = _seconds_since_launch()
-            note = first_reading_note(age, _began) if age is not None else None
-            if note:
-                log.info(note)
+            if age is not None:
+                read = age - (time.monotonic() - read_at) if read_at is not None else None
+                note = first_reading_note(age, _began, read)
+                if note:
+                    log.info(note)
         self._check_graphics_process()
 
     def _in_use(self):
@@ -564,11 +574,58 @@ class EngineRoomApp:
         import AppKit
 
         self._sampler.dashboard_polled(fans=True)  # being watched from now, not from the page's first poll
+        if self._window is None and not self._make_window():
+            return
         AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyRegular)
         self._apply_theme(self._settings.get()["theme"])
         self._show_tab("dashboard")
         self._window.show()
         self._fit_window(grow=True)
+
+    def _make_window(self):
+        """Makes the dashboard's window, and WebKit with it, the first time the dashboard opens
+        rather than at launch: until then the app has no WebKit processes to start, keep in memory
+        or wait for, and nothing stands between the menu bar item and its first reading (#59).
+        Main thread, in the run loop. Returns whether there's a window now.
+
+        It relies on pywebview's internals, checked against pywebview 6.1 by tests/test_window.py:
+        start() inside a running app makes the window and returns, and the menus and app delegate
+        come from BrowserView."""
+        import AppKit
+        import webview
+        from webview.platforms import cocoa
+
+        self._opening_since = time.monotonic()
+        try:
+            self._html = (_app_files_dir() / "index.html").read_text(encoding="utf-8")
+            window = webview.create_window(
+                APP_NAME, html=self._html, js_api=Api(self), width=WINDOW_WIDTH, height=self._initial_height(),
+                min_size=MIN_WINDOW_SIZE, hidden=True, background_color=self._background_color(),
+            )
+            window.events.closing += self._on_closing
+            window.events.loaded += self._on_loaded
+            # The app is already running, so pywebview makes the window and returns.
+            webview.start(private_mode=True, debug=False)
+        except Exception:
+            log.exception("Couldn't open the dashboard")
+            self._opening_since = None
+            return False
+        self._window = window
+        # pywebview sets up the menu bar's menus (Quit, Edit…) only when it starts the run loop itself.
+        browser = cocoa.BrowserView.instances.get(window.uid)
+        if browser is not None:
+            AppKit.NSApp.setMainMenu_(browser._recreate_menus(browser.menu))
+        return True
+
+    def _on_loaded(self):
+        """The page has loaded (on a thread of pywebview's). The first time, app.log says how long
+        the dashboard took to open, making its window and starting WebKit included."""
+        from PyObjCTools import AppHelper
+
+        AppHelper.callAfter(self._apply_theme, self._settings.get()["theme"])
+        since, self._opening_since = self._opening_since, None
+        if since is not None:
+            log.info("Dashboard took %.1f s to open the first time", time.monotonic() - since)
 
     def _show_tab(self, tab):
         """Switch the page to a tab, e.g. the Dashboard as the window opens. WebKit is asked
@@ -580,9 +637,16 @@ class EngineRoomApp:
     def _finish_launching(self):
         """Runs as the app finishes launching, while macOS's "open application" event is
         still current: the only moment a login launch can be told apart. The app always
-        starts in the menu bar; opening it again while it runs shows the dashboard."""
+        starts in the menu bar; opening it again while it runs shows the dashboard.
+
+        Only now does the main thread go to background QoS like the others (at full priority
+        until then, see priority.py): the work AppKit hands off while it starts the app goes at
+        the main thread's QoS, and at background QoS it could wait for a busy Mac's efficiency
+        cores (#59)."""
         import launch
 
+        self._priority.register()
+        self._priority.started()
         log.info("Mac Engine Room %s started%s", VERSION, ", opened at login" if launch.launched_at_login() else "")
 
     def _check_graphics_process(self):
@@ -643,6 +707,10 @@ class EngineRoomApp:
 
         If WebKit's process for the page quits (a crash, or macOS reclaiming memory),
         the page is loaded again instead of staying blank.
+
+        pywebview only sets an app delegate as it makes the window, which waits for the
+        dashboard to open, so one is set here: quitting (the fans go back to macOS first) and
+        opening the app again go through it before then.
         """
         import AppKit
         import objc
@@ -672,6 +740,8 @@ class EngineRoomApp:
         objc.classAddMethods(cocoa.BrowserView.BrowserDelegate, [
             objc.selector(web_process_quit, selector=b"webViewWebContentProcessDidTerminate:", signature=b"v@:@"),
         ])
+        self._app_delegate = cocoa.BrowserView.AppDelegate.alloc().init()  # kept: NSApp doesn't retain it
+        AppKit.NSApp.setDelegate_(self._app_delegate)
 
     def _background_color(self):
         import AppKit
@@ -691,7 +761,6 @@ class EngineRoomApp:
 
     def run(self):
         import AppKit
-        import webview
         import webview.platforms.cocoa  # noqa: F401 — sets up NSApp so the menu bar item can exist early
         from PyObjCTools import AppHelper
 
@@ -710,20 +779,10 @@ class EngineRoomApp:
         if rename.LOGIN_ITEM_ARGUMENT in sys.argv:
             self._login_item.set_enabled(True)
 
-        # The window starts hidden: the app starts in the menu bar, and the menu or opening the
-        # app again shows the dashboard.
+        # The app starts in the menu bar. The menu or opening the app again shows the dashboard,
+        # whose window is made then (`_make_window`).
         AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
         self._install_delegate_methods()
-
-        self._html = (_app_files_dir() / "index.html").read_text(encoding="utf-8")
-        self._window = webview.create_window(
-            APP_NAME, html=self._html, js_api=Api(self), width=WINDOW_WIDTH, height=self._initial_height(),
-            min_size=MIN_WINDOW_SIZE, hidden=True, background_color=self._background_color(),
-        )
-        self._window.events.closing += self._on_closing
-        # Non-locking pywebview events fire on a worker thread; AppKit needs the main one.
-        self._window.events.loaded += lambda: AppHelper.callAfter(
-            self._apply_theme, self._settings.get()["theme"])
 
         self._statusbar = StatusBar(
             on_open=self.show_dashboard, on_check_updates=self._updater.check_now, on_quit=self.quit,
@@ -737,7 +796,7 @@ class EngineRoomApp:
         threading.Thread(target=self._import_legacy_history, name="legacy-import", daemon=True).start()
         self._login_item.turn_on_by_default()
         self._updater.start()
-        self._priority.register()  # the main thread: background QoS, and full priority while the Mac needs it
+        # The main thread registers with the app's priority in _finish_launching.
 
         if AppKit.NSRunningApplication.currentApplication().isFinishedLaunching():  # e.g. after offer_to_move
             AppHelper.callAfter(self._finish_launching)
@@ -745,7 +804,9 @@ class EngineRoomApp:
             AppKit.NSNotificationCenter.defaultCenter().addObserverForName_object_queue_usingBlock_(
                 AppKit.NSApplicationDidFinishLaunchingNotification, None, None,
                 lambda notification: self._finish_launching())
-        webview.start(private_mode=True, debug=False)
+        # The app runs itself rather than through pywebview's start(), which makes the window first.
+        AppHelper.installMachInterrupt()
+        AppKit.NSApp.run()
         os._exit(0)
 
 

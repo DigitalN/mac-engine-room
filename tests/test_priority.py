@@ -2,6 +2,7 @@
 which cores that is judged on (`efficiency_cores`, `CpuIdle`), and how the threads are raised and
 lowered (`Priority`, against stand-ins for the system calls). A few tests make the real calls."""
 
+import ctypes
 import logging
 import os
 import resource
@@ -227,28 +228,39 @@ class Stand_ins:
     def __init__(self):
         self.qos = []
         self.raised, self.lowered = [], []
+        self.order = []  # every call, in the order they came
         self.fail = False
 
     def set_qos(self, qos_class):
         self.qos.append(qos_class)
+        self.order.append(("qos", qos_class))
 
     def raise_(self, ident):
         self.raised.append(ident)
+        self.order.append(("raise", ident))
         return None if self.fail else 1000 + len(self.raised)
 
     def lower(self, handle):
         self.lowered.append(handle)
+        self.order.append(("lower", handle))
+
+
+def make_priority(state, calls):
+    """A Priority as the app has it before it has started."""
+    idle = CpuIdle(read=lambda: ((0, 0, 0, 0),), cores=(0,))
+    idle.share = lambda: state["share"]
+    return Priority(in_use=lambda: state["in_use"], holding=lambda: state["holding"], now=lambda: state["now"],
+                    idle=idle,
+                    set_qos=calls.set_qos, raise_=calls.raise_, lower=calls.lower)
 
 
 @pytest.fixture
 def world():
+    """A Priority once the app has started, the stand-ins' state and what they were told."""
     state = {"in_use": False, "holding": False, "now": 0.0, "share": 0.9}
     calls = Stand_ins()
-    idle = CpuIdle(read=lambda: ((0, 0, 0, 0),), cores=(0,))
-    idle.share = lambda: state["share"]
-    p = Priority(in_use=lambda: state["in_use"], holding=lambda: state["holding"], now=lambda: state["now"],
-                 idle=idle,
-                 set_qos=calls.set_qos, raise_=calls.raise_, lower=calls.lower)
+    p = make_priority(state, calls)
+    p.started()
     return p, state, calls
 
 
@@ -289,6 +301,37 @@ def test_a_thread_registers_at_background_qos_and_starts_at_full_priority(world)
     ident = run_in_thread(p.register)
     assert calls.qos == [priority.QOS_CLASS_BACKGROUND]
     assert calls.raised == [ident]  # launch: full priority
+
+
+def test_a_registering_thread_takes_its_override_before_it_goes_to_background_qos(world):
+    """The other way round it sits at background QoS with nothing to lift it, and a busy Mac's
+    efficiency cores can keep it waiting for seconds there, holding up the other threads as it
+    waits for the interpreter lock (#59)."""
+    p, state, calls = world
+    ident = run_in_thread(p.register)
+    assert calls.order == [("raise", ident), ("qos", priority.QOS_CLASS_BACKGROUND)]
+
+
+def test_a_thread_registering_on_a_quiet_mac_just_goes_to_background_qos(world):
+    p, state, calls = world
+    for state["now"] in (0, 15, 30, 31):
+        p.sampled()
+    run_in_thread(p.register)
+    assert calls.order == [("qos", priority.QOS_CLASS_BACKGROUND)]
+
+
+def test_the_threads_stay_at_full_priority_until_the_app_has_started(world):
+    """The main thread keeps its own QoS until the app has started, so the others mustn't drop
+    below it, however quiet the Mac is."""
+    _, state, calls = world
+    p = make_priority(state, calls)
+    end = keep_registered(p, 2)
+    for state["now"] in (0, 15, 30, 31, 60):
+        p.sampled()
+    assert p.load.state == QUIET and calls.lowered == []
+    p.started()
+    assert len(calls.lowered) == 2
+    end()
 
 
 def test_threads_drop_to_background_once_the_mac_is_quiet_and_nothing_is_open(world, caplog):
@@ -456,6 +499,48 @@ def test_the_real_calls_raise_and_lower_a_thread_that_is_waiting():
     assert done.wait(5)
     t.join()
     assert priority.cpu_ticks() is not None
+
+
+class _ThreadInfo(ctypes.Structure):  # <mach/thread_info.h> thread_extended_info
+    _fields_ = [("user_time", ctypes.c_uint64), ("system_time", ctypes.c_uint64)] + [
+        (name, ctypes.c_int32) for name in (
+            "cpu_usage", "policy", "run_state", "flags", "sleep_time", "curpri", "priority", "maxpriority")
+    ] + [("name", ctypes.c_char * 64)]
+
+
+def base_priority():
+    """The calling thread's base scheduling priority: 4 at background QoS."""
+    lib = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+    lib.mach_thread_self.restype = ctypes.c_uint32
+    lib.thread_info.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32)]
+    lib.mach_port_deallocate.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
+    port, info = lib.mach_thread_self(), _ThreadInfo()
+    count = ctypes.c_uint32(ctypes.sizeof(_ThreadInfo) // 4)
+    try:
+        assert lib.thread_info(port, 5, ctypes.byref(info), ctypes.byref(count)) == 0  # THREAD_EXTENDED_INFO
+    finally:
+        lib.mach_port_deallocate(ctypes.c_uint32.in_dll(lib, "mach_task_self_").value, port)
+    return info.priority
+
+
+def test_the_real_override_outlasts_the_thread_lowering_its_own_qos_after_it():
+    """What register() relies on: the thread is above background priority from the override on,
+    and drops to it only when the override ends. (Outside an app the override tops out at 31, the
+    default QoS; in the app it's 47.)"""
+    p = Priority()
+    seen = []
+
+    def worker():
+        p.register()
+        seen.append(base_priority())
+        p.unregister()
+        seen.append(base_priority())
+
+    t = threading.Thread(target=worker)
+    t.start()
+    t.join()
+    raised, lowered = seen
+    assert lowered == 4 < raised
 
 
 def test_the_real_core_counts_have_a_row_for_each_cpu_and_the_array_they_come_in_is_given_back():
