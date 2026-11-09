@@ -839,10 +839,16 @@ function renderNow() {
   put('breakdown', 'display', hasParts ? '' : 'none');
   if (hasParts) {
     const other = Math.max(0, total - (screen || 0) - (chip || 0));
+    // On a Mac with no working chip sensor (the 13" M4 Air), Chip is IOReport's: less of the chip.
+    const fromCounters = isNum(chip) && s.chip_source === 'ioreport';
     const parts = [
       ['Screen', screen, '--screen', 'Display backlight, from an SMC sensor. On mini-LED screens this rises with bright content.'],
-      ['Chip (CPU + GPU)', chip, '--chip', 'Apple silicon package: CPU, GPU and other on-chip blocks (SMC sensor PHPC, which Apple names after the heatpipe that cools it). Fans are not included.'],
-      ['Everything else', other, '--system', 'Memory, storage, Wi-Fi, fans, speakers and other components.'],
+      ['Chip (CPU + GPU)', chip, '--chip', fromCounters
+        ? 'The CPU, GPU and Neural Engine, from macOS’s energy counters: this Mac has no working chip sensor. They leave out the rest of the chip, which is in Everything else.'
+        : 'Apple silicon package: CPU, GPU and other on-chip blocks (SMC sensor PHPC, which Apple names after the heatpipe that cools it). Fans are not included.'],
+      ['Everything else', other, '--system', fromCounters
+        ? 'The rest of the chip, memory, storage, Wi-Fi, fans, speakers and other components.'
+        : 'Memory, storage, Wi-Fi, fans, speakers and other components.'],
     ].filter(p => isNum(p[1]));
     const sum = parts.reduce((acc, p) => acc + Math.max(0, p[1]), 0) || 1;
     // Rebuilt only when the parts change; otherwise just the widths and values are written.

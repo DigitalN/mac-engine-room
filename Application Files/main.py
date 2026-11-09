@@ -354,7 +354,8 @@ class Api:
 
         try:
             reader = self._app._reader
-            text = report.collect(VERSION, self._app._live.latest(), reader.ioreport_source, reader.ioreport_error)
+            text = report.collect(VERSION, self._app._live.latest(), reader.ioreport_source, reader.ioreport_error,
+                                  reader.ioreport_counters)
         except OSError as e:
             log.warning("Couldn't make the sensor report (%s)", e)
             return False

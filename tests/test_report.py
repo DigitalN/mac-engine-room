@@ -68,8 +68,28 @@ def test_a_report_names_ioreport_where_chip_comes_from_it():
     about = {**ABOUT, "mac": "Mac16,12", "chip": "Apple M4", "ioreport": "CLPC energy counters", "ioreport_error": None}
     text = report.build(about, m4_air)
     assert "  Chip power: IOReport's CLPC energy counters, CPU + GPU + ANE (PHPC reads 0.01 W)\n" in text
+    assert "IOReport counters" not in text  # only once it has some
     back, _ = report.parse(text)  # the source is for people: reading a report back skips it
     assert back == {k: v for k, v in about.items() if not k.startswith("ioreport")}
+
+
+def test_a_report_says_what_each_ioreport_counter_read():
+    # One report is enough to tell a counter that's missing or in a unit the app doesn't know.
+    m4_air = {"PBLR": 0.01, "PHPC": 0.01}
+    for counters in ("CPU 1.20 W, no GPU counter, ANE 0.00 W", 'CPU 1.20 W, GPU in "xJ", ANE 0.00 W', "no reading yet"):
+        about = {**ABOUT, "mac": "Mac16,12", "chip": "Apple M4", "ioreport": "CLPC energy counters",
+                 "ioreport_counters": counters}
+        text = report.build(about, m4_air)
+        assert ("  Chip power: IOReport's CLPC energy counters, CPU + GPU + ANE (PHPC reads 0.01 W)\n"
+                f"  IOReport counters: {counters}\n") in text
+        back, values = report.parse(text)
+        assert back == {k: v for k, v in about.items() if not k.startswith("ioreport")} and values == m4_air
+    # And after IOReport gave up, what they read before it did.
+    about = {**ABOUT, "ioreport_error": "the CPU counter isn't counting (Energy Model)",
+             "ioreport_counters": "CPU 0.00 W, GPU 1.50 W, ANE 0.00 W"}
+    text = report.build(about, m4_air)
+    assert ("  Chip power: none (PHPC reads 0.01 W; IOReport unavailable: the CPU counter isn't counting (Energy Model))\n"
+            "  IOReport counters: CPU 0.00 W, GPU 1.50 W, ANE 0.00 W\n") in text
 
 
 @pytest.mark.parametrize("path", REPORTS, ids=[p.stem for p in REPORTS])

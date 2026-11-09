@@ -8,7 +8,8 @@ import objc
 import pytest
 
 import ioreport
-from ioreport import chip_watts, clpc_channels, counter_deltas, energy_model_part
+from ioreport import (chip_watts, clpc_channels, counter_deltas, describe_readings, energy_model_part,
+                      part_readings, reading_problems)
 
 # The Energy Model's channels on the M1 Pro (macOS 27.2), abridged: per-core and per-cluster CPU
 # channels, the totals, and the rest of the chip.
@@ -86,15 +87,20 @@ def test_deltas_go_by_channel_name():
 
 
 class _Counters(ioreport.ChipEnergy):
-    """ChipEnergy's reading over given counters, each (seconds, CPU nJ, GPU nJ), without IOReport."""
+    """ChipEnergy's reading over given counters, without IOReport. Each is (seconds, CPU nJ, GPU nJ),
+    or (seconds, {channel name: (part, value, unit)}) for anything else."""
 
     def __init__(self, monkeypatch, *readings):
         self.source, self._sub, self._prev, self._watts, self._cpu_moved = ioreport.CLPC_SOURCE, True, None, None, False
+        self.readings, self.resets = None, 0
         self.closed, self._readings, self._clock = False, list(readings), 0.0
         monkeypatch.setattr(ioreport.time, "monotonic", lambda: self._clock)
 
     def _counters(self):
-        self._clock, cpu, gpu = self._readings.pop(0)
+        self._clock, *counters = self._readings.pop(0)
+        if isinstance(counters[0], dict):
+            return counters[0]
+        cpu, gpu = counters
         return {"CPU Energy": ("cpu", cpu, "nJ"), "GPU Energy": ("gpu", gpu, "nJ")}
 
     def close(self):
@@ -132,6 +138,48 @@ def test_a_cpu_counter_that_stops_gives_no_reading_but_is_kept(monkeypatch):
     assert chip.read() is None  # 6 s without moving: no stale number
     assert chip.read() == pytest.approx(4.0 / 7)  # it moved again: the energy since it last did
     assert not chip.closed
+
+
+def test_a_counter_that_goes_backwards_starts_again_from_there(monkeypatch):
+    # A reset: rather than waiting for it to climb past its old value, with Chip at "—" until then.
+    chip = _Counters(monkeypatch, (0.0, 0, 0), (1.0, 5e9, 5e9), (2.0, 1e9, 6e9), (3.0, 3e9, 7e9))
+    chip.read()
+    assert chip.read() == pytest.approx(10.0)
+    assert chip.read() == pytest.approx(10.0)  # the CPU counter reset: the last reading stands
+    assert chip.read() == pytest.approx(3.0)  # and the next counts from the reset
+    assert chip.resets == 1 and not chip.closed
+
+
+def test_a_reading_that_cant_be_used_says_why(monkeypatch):
+    # The M4's GPU report ID not matching on the Air: the subscription leaves the channel out.
+    def cpu_only(value):
+        return {"CPU Energy": ("cpu", value, "nJ"), "ANE": ("ane", 0, "nJ")}
+    chip = _Counters(monkeypatch, (0.0, cpu_only(0)), (1.0, cpu_only(1.2e9)))
+    chip.read()
+    assert chip.read() is None
+    assert describe_readings(chip.readings) == "CPU 1.20 W, no GPU counter, ANE 0.00 W"
+    assert reading_problems(chip.readings) == ["no GPU counter"]
+
+
+def test_samples_without_a_cpu_counter_say_so(monkeypatch):
+    gpu_only = {"GPU Energy": ("gpu", 0, "nJ")}
+    chip = _Counters(monkeypatch, (0.0, gpu_only), (1.0, gpu_only), (5.0, gpu_only))
+    chip.read()
+    assert chip.read() is None
+    with pytest.raises(OSError, match="its samples have no CPU counter"):
+        chip.read()
+    assert describe_readings(chip.readings) == "no CPU counter, GPU 0.00 W, no ANE counter"
+
+
+def test_each_part_says_what_it_read_or_what_is_wrong():
+    readings = part_readings([("cpu", 1_200_000_000, "nJ"), ("gpu", 310_000, "uJ"), ("ane", 0, "nJ")], 1.0)
+    assert describe_readings(readings) == "CPU 1.20 W, GPU 0.31 W, ANE 0.00 W" and reading_problems(readings) == []
+    readings = part_readings([("cpu", 1000, "mJ"), ("gpu", 5, "xJ")], 1.0)
+    assert describe_readings(readings) == 'CPU 1.00 W, GPU in "xJ", no ANE counter'
+    assert reading_problems(readings) == ['GPU in "xJ"']  # a missing ANE counter doesn't stop Chip
+    readings = part_readings([("cpu", 1000, "mJ"), ("gpu", -5, "mJ"), ("ane", 0, "mJ")], 1.0)
+    assert reading_problems(readings) == ["GPU went backwards"]
+    assert chip_watts([("cpu", 2000, "mJ"), ("gpu", 1000, "mJ")], 1.0) == pytest.approx(3.0)  # no ANE counter
 
 
 def test_reads_this_mac():

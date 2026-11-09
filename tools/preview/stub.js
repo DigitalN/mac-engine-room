@@ -3,7 +3,8 @@
 //
 // Query options, combined with commas: ?s=holding,fahrenheit&tab=thermals
 //   fan control: off (default) holding max override approval unavailable other error
-//   this Mac:    fanless onefan noscreen nochip hot charging desktop gpuheld (GPU parked 3 min) hint
+//   this Mac:    fanless onefan noscreen nochip ioreport hot charging desktop gpuheld (GPU parked 3 min) hint
+//                (noscreen,fanless,ioreport is the 13" M4 Air)
 //   settings:    fahrenheit dark light
 //   tab:         dashboard (default) thermals power history settings
 // Change window.__state while it runs to try anything else; the next poll picks it up.
@@ -20,7 +21,7 @@
     power: {
       has_battery: true, has_smc: true, is_charging: false, fully_charged: false, external_connected: false,
       battery_level: 63, charge_limit: 80, at_charge_limit: false, time_remaining_min: 254, system_in: 0,
-      adapter_power: 0, efficiency_loss: 0, has_screen_power: true, has_chip_power: true, temperature: 30.1, cycle_count: 212,
+      adapter_power: 0, efficiency_loss: 0, has_screen_power: true, has_chip_power: true, chip_source: 'phpc', temperature: 30.1, cycle_count: 212,
       design_capacity: 6075, max_capacity: 5402, current_capacity: 3401, health_pct: 88.9, voltage: 12.4,
       amperage: -0.76, adapter: null,
     },
@@ -48,7 +49,8 @@
     fanless: () => { state.available = state.available.filter(k => k !== 'fans'); state.fans = []; state.fanControl = { profile: 'macos', state: 'nofans' }; },
     onefan: () => { state.fans = state.fans.slice(0, 1); },
     noscreen: () => { state.power.has_screen_power = false; },
-    nochip: () => { state.power.has_chip_power = false; },  // with noscreen: an M4 Air
+    nochip: () => { state.power.has_chip_power = false; },  // with noscreen: an M4 Air without IOReport
+    ioreport: () => { state.power.chip_source = 'ioreport'; },  // Chip from IOReport, where PHPC doesn't work
     // A Mac mini: no battery, no screen; its PDTR makes it look plugged in.
     desktop: () => Object.assign(state.power, {
       has_battery: false, external_connected: true, battery_level: null, charge_limit: null, time_remaining_min: null,

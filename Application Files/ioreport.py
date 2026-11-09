@@ -112,27 +112,66 @@ def cpu_moved(deltas):
     return any(part == "cpu" and value > 0 for part, value, _ in deltas)
 
 
-def chip_watts(deltas, seconds):
-    """Chip power (W) from one reading's counter deltas, [(part, value, unit)] over `seconds`.
+def went_backwards(deltas):
+    """Whether a counter reads below its last reading: it was reset, so the deltas mean nothing."""
+    return any(value < 0 for _, value, _ in deltas)
 
-    CPU + GPU + ANE: ANE reads 0 unless something uses the Neural Engine, and it's on the chip,
-    like everything PHPC counts. None when it can't be trusted: no CPU or GPU channel, a unit it
-    doesn't know, a counter that went backwards, or CPU energy that didn't move (a frozen counter,
-    like the Energy Model's on macOS 27).
-    """
-    if not seconds or seconds <= 0:
+
+LABELS = dict(zip(PARTS, ("CPU", "GPU", "ANE")))
+
+
+def _no_counter(part):
+    return f"no {LABELS[part]} counter"
+
+
+def part_readings(deltas, seconds):
+    """What each part's counters read over `seconds`: [(part, watts, problem)] for CPU, GPU and
+    ANE in turn. Watts is None where there's a problem: no counter for that part ("no GPU
+    counter"), a unit the app doesn't know ('GPU in "xJ"'), or a counter that went backwards."""
+    readings = []
+    for part in PARTS:
+        mine = [(value, unit) for p, value, unit in deltas if p == part]
+        unknown = next((unit for value, unit in mine if energy_joules(value, unit) is None), None)
+        joules = [energy_joules(value, unit) for value, unit in mine]
+        if not mine:
+            readings.append((part, None, _no_counter(part)))
+        elif unknown is not None:
+            readings.append((part, None, f'{LABELS[part]} in "{unknown}"'))
+        elif any(j < 0 for j in joules):
+            readings.append((part, None, f"{LABELS[part]} went backwards"))
+        else:
+            readings.append((part, sum(joules) / seconds if seconds and seconds > 0 else None, None))
+    return readings
+
+
+def reading_problems(readings):
+    """Why these readings can't give Chip power: every problem but a missing ANE counter (Chip
+    is still the CPU and GPU without one)."""
+    return [problem for part, _, problem in readings if problem and problem != _no_counter("ane")]
+
+
+def describe_readings(readings):
+    """The readings as the sensor report and the log put them: "CPU 1.20 W, GPU 0.31 W, ANE 0.00 W",
+    with a problem in place of a part's watts ("no GPU counter")."""
+    return ", ".join(problem or (f"{LABELS[part]} {watts:.2f} W" if watts is not None else f"{LABELS[part]} ?")
+                     for part, watts, problem in readings)
+
+
+def chip_total(readings):
+    """Chip power (W) from part_readings(): CPU + GPU + ANE. ANE reads 0 unless something uses the
+    Neural Engine, and it's on the chip, like everything PHPC counts. None when it can't be
+    trusted: a problem (see reading_problems), or CPU energy that didn't move (a frozen counter,
+    like the Energy Model's on macOS 27)."""
+    watts = {part: w for part, w, _ in readings}
+    if reading_problems(readings) or not watts.get("cpu") or watts["cpu"] <= 0 or watts.get("gpu") is None:
         return None
-    totals = dict.fromkeys(PARTS, 0.0)
-    seen = set()
-    for part, value, unit in deltas:
-        joules = energy_joules(value, unit)
-        if part not in totals or joules is None or joules < 0:
-            return None
-        totals[part] += joules
-        seen.add(part)
-    if not {"cpu", "gpu"} <= seen or totals["cpu"] <= 0:
-        return None
-    return sum(totals.values()) / seconds
+    return watts["cpu"] + watts["gpu"] + (watts.get("ane") or 0.0)
+
+
+def chip_watts(deltas, seconds):
+    """Chip power (W) from one reading's counter deltas, [(part, value, unit)] over `seconds`, or
+    None (see chip_total)."""
+    return chip_total(part_readings(deltas, seconds))
 
 
 # ── IOReport and CoreFoundation via ctypes ────────────────────────────────
@@ -248,7 +287,8 @@ class ChipEnergy:
 
     Raises OSError, saying why, when IOReport can't give Chip power here. read() gives watts,
     or None for the first reading and for one that can't be trusted, and raises OSError once
-    the CPU counter turns out not to count. The caller holds an autorelease pool.
+    the CPU counter turns out not to count. `readings` keeps what each part last read, so a
+    reading that can't be used says why. The caller holds an autorelease pool.
     """
 
     def __init__(self):
@@ -257,6 +297,8 @@ class ChipEnergy:
         self._sub = self._subbed = self._prev = self._watts = None
         self._held = None  # the channel descriptions, kept alive while IOReport may use them
         self._cpu_moved = False
+        self.readings = None  # the last part_readings(), for the sensor report and the log
+        self.resets = 0  # how often a counter has gone backwards
         macos = macos_version()
         driver = _clpc_driver()
         channels = clpc_channels(driver[1], macos) if driver else None
@@ -335,18 +377,28 @@ class ChipEnergy:
             return None
         before, then = self._prev
         deltas = counter_deltas(before, counters)
+        if went_backwards(deltas):
+            # Reset: waiting for it to climb past its old value would leave Chip at "—" until
+            # then, so it starts again from here. The last reading stands meanwhile.
+            self._prev = counters, now
+            self.resets += 1
+            return self._watts
         if not cpu_moved(deltas):
             # Too soon for the counters to move (the menu woke the sampler early): the last
             # reading stands, and the next one spans the whole time. Or it isn't counting.
             if now - then < FROZEN_SECONDS:
                 return self._watts
+            self.readings = part_readings(deltas, now - then)  # for the report: what didn't move
             if not self._cpu_moved:
                 self.close()
+                if not any(part == "cpu" for part, _, _ in counters.values()):
+                    raise OSError(f"its samples have no CPU counter ({self.source})")
                 raise OSError(f"the CPU counter isn't counting ({self.source})")
             self._watts = None
             return None
         self._prev, self._cpu_moved = (counters, now), True
-        self._watts = chip_watts(deltas, now - then)
+        self.readings = part_readings(deltas, now - then)
+        self._watts = chip_total(self.readings)
         return self._watts
 
     def close(self):
