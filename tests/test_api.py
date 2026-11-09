@@ -99,14 +99,15 @@ def test_copy_sensor_report_puts_it_on_the_clipboard_or_says_it_couldnt(monkeypa
 
     calls = []
     monkeypatch.setattr(AppHelper, "callAfter", lambda func, *args: calls.append((func, args)))
-    monkeypatch.setattr(report, "collect", lambda version, sample, source, error: f"report {version} {sample} {source} {error}")
+    monkeypatch.setattr(report, "collect", lambda version, sample, source, error, counters: f"report {version} {sample} {source} {error} {counters}")
     live = LiveState()
     # Where Chip comes from IOReport, the reader says so, and the report names it.
-    reader = SimpleNamespace(ioreport_source="CLPC energy counters", ioreport_error=None)
+    reader = SimpleNamespace(ioreport_source="CLPC energy counters", ioreport_error=None,
+                             ioreport_counters="CPU 1.20 W, GPU 0.31 W, ANE 0.00 W")
     assert Api(app=SimpleNamespace(_live=live, _reader=reader)).copy_sensor_report() is True
-    assert calls == [(main._copy_to_clipboard, (f"report {main.VERSION} None CLPC energy counters None",))]
+    assert calls == [(main._copy_to_clipboard, (f"report {main.VERSION} None CLPC energy counters None CPU 1.20 W, GPU 0.31 W, ANE 0.00 W",))]
 
-    def no_smc(version, sample, source, error):
+    def no_smc(version, sample, source, error, counters):
         raise OSError("AppleSMC service not found")
     monkeypatch.setattr(report, "collect", no_smc)
     assert Api(app=SimpleNamespace(_live=live, _reader=reader)).copy_sensor_report() is False

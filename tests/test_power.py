@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import ioreport
 import power
 from power import decode_smc_value, normalize, parse_charge_limit
 
@@ -332,17 +333,21 @@ class _StubSMC:
 
 
 class _FakeChipEnergy:
-    """ioreport.ChipEnergy with its readings given: watts, None, or an exception to raise."""
+    """ioreport.ChipEnergy with what each read() gives: watts, None, an exception to raise, or
+    (watts, part readings[, resets so far]) to set what the counters read too."""
     source = "CLPC energy counters"
 
-    def __init__(self, *readings):
-        self.readings, self.closed = list(readings), False
+    def __init__(self, *reads):
+        self._reads, self.closed, self.readings, self.resets = list(reads), False, None, 0
 
     def read(self):
-        reading = self.readings.pop(0)
-        if isinstance(reading, Exception):
-            raise reading
-        return reading
+        result = self._reads.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        if isinstance(result, tuple):
+            result, self.readings, *resets = result
+            self.resets = resets[0] if resets else self.resets
+        return result
 
     def close(self):
         self.closed = True
@@ -359,7 +364,8 @@ def _reader(monkeypatch, smc, model="MacBookPro18,1", chip_energy=_no_ioreport, 
     monkeypatch.setattr(power, "SMC", lambda: smc)
     monkeypatch.setattr(power, "read_battery_registry", lambda: None)
     monkeypatch.setattr(power, "mac_model", lambda: model)
-    monkeypatch.setitem(sys.modules, "ioreport", SimpleNamespace(ChipEnergy=chip_energy))
+    monkeypatch.setitem(sys.modules, "ioreport", SimpleNamespace(
+        ChipEnergy=chip_energy, describe_readings=ioreport.describe_readings, reading_problems=ioreport.reading_problems))
     if forced:
         monkeypatch.setenv(power.CHIP_IOREPORT_ENV, "1")
     else:
@@ -487,9 +493,9 @@ def test_a_mac_whose_phpc_works_never_opens_ioreport(monkeypatch, caplog):
     with caplog.at_level(logging.INFO, logger="power"):
         for _ in range(2):
             s = reader.read()
-    assert s["chip_power"] == 1.8 and s["has_chip_power"]
+    assert s["chip_power"] == 1.8 and s["has_chip_power"] and s["chip_source"] == "phpc"
     assert _chip_source_lines(caplog) == ["Chip power from PHPC (reads 1.80 W)"]
-    assert reader.ioreport_source is None and reader.ioreport_error is None
+    assert reader.ioreport_source is None and reader.ioreport_error is None and reader.ioreport_counters is None
 
 
 @pytest.mark.parametrize("model, smc, why", [
@@ -505,7 +511,7 @@ def test_chip_comes_from_ioreport_where_phpc_cant_give_it(monkeypatch, caplog, m
     s = reader.read()  # under SENSOR_MIN_W isn't proof yet, as with PHPC
     assert s["chip_power"] is None and not s["has_chip_power"]
     s = reader.read()
-    assert s["chip_power"] == 2.5 and s["has_chip_power"]
+    assert s["chip_power"] == 2.5 and s["has_chip_power"] and s["chip_source"] == "ioreport"  # for the page's wording
     # Once shown it stays, through an idle chip and a reading with nothing.
     s = reader.read()
     assert s["chip_power"] == 0.0 and s["has_chip_power"]
@@ -513,6 +519,55 @@ def test_chip_comes_from_ioreport_where_phpc_cant_give_it(monkeypatch, caplog, m
     assert s["chip_power"] is None and s["has_chip_power"]
     assert _chip_source_lines(caplog) == [f"Chip power from IOReport's CLPC energy counters ({why})"]
     assert reader.ioreport_source == "CLPC energy counters" and reader.ioreport_error is None
+
+
+CPU_ONLY = [("cpu", 1.2, None), ("gpu", None, "no GPU counter"), ("ane", 0.0, None)]  # a GPU report ID that didn't match
+WORKING = [("cpu", 1.2, None), ("gpu", 0.31, None), ("ane", 0.0, None)]
+
+
+def _ioreport_lines(caplog):
+    return [r.getMessage() for r in caplog.records if r.getMessage().startswith("IOReport's")]
+
+
+def test_readings_that_cant_be_used_say_why_once_and_in_the_report(monkeypatch, caplog):
+    chip = _FakeChipEnergy(None, (None, CPU_ONLY), (None, CPU_ONLY), (None, CPU_ONLY))
+    reader = _reader(monkeypatch, _StubSMC(*[AIR_SMC] * 4), model="Mac16,12", chip_energy=lambda: chip)
+    with caplog.at_level(logging.INFO, logger="power"):
+        reader.read()
+        assert reader.ioreport_counters == "no reading yet"
+        for _ in range(3):
+            s = reader.read()
+            assert not s["has_chip_power"] and s["chip_power"] is None
+    assert _ioreport_lines(caplog) == ["IOReport's readings can't be used: CPU 1.20 W, no GPU counter, ANE 0.00 W"]
+    assert reader.ioreport_counters == "CPU 1.20 W, no GPU counter, ANE 0.00 W"
+
+
+def test_working_readings_log_nothing_more(monkeypatch, caplog):
+    chip = _FakeChipEnergy(None, (1.51, WORKING), (None, WORKING))  # the second: too soon, or a stall
+    reader = _reader(monkeypatch, _StubSMC(*[AIR_SMC] * 3), model="Mac16,12", chip_energy=lambda: chip)
+    with caplog.at_level(logging.INFO, logger="power"):
+        for _ in range(3):
+            reader.read()
+    assert _ioreport_lines(caplog) == [] and reader.ioreport_counters == "CPU 1.20 W, GPU 0.31 W, ANE 0.00 W"
+
+
+def test_a_counter_reset_is_logged_once(monkeypatch, caplog):
+    chip = _FakeChipEnergy(None, (1.5, WORKING, 1), (1.5, WORKING, 1), (1.5, WORKING, 2))
+    reader = _reader(monkeypatch, _StubSMC(*[AIR_SMC] * 4), model="Mac16,12", chip_energy=lambda: chip)
+    with caplog.at_level(logging.INFO, logger="power"):
+        for _ in range(4):
+            assert reader.read()["chip_power"] in (None, 1.5)
+    assert _ioreport_lines(caplog) == ["IOReport's counters went backwards; reading again from there"]
+
+
+def test_the_report_keeps_what_the_counters_read_after_ioreport_gives_up(monkeypatch):
+    frozen = [("cpu", 0.0, None), ("gpu", 1.5, None), ("ane", 0.0, None)]
+    chip = _FakeChipEnergy(None, (None, frozen), OSError("the CPU counter isn't counting (Energy Model)"))
+    reader = _reader(monkeypatch, _StubSMC(*[AIR_SMC] * 3), model="Mac16,12", chip_energy=lambda: chip)
+    for _ in range(3):
+        s = reader.read()
+    assert reader.ioreport_error == "the CPU counter isn't counting (Energy Model)" and s["chip_source"] == "phpc"
+    assert reader.ioreport_counters == "CPU 0.00 W, GPU 1.50 W, ANE 0.00 W"
 
 
 def test_the_switch_reads_chip_from_ioreport_where_phpc_works(monkeypatch, caplog):

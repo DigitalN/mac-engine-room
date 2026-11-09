@@ -25,10 +25,10 @@ PER_LINE = 8
 _PAIR = re.compile(r"(?:^|  )(.{4})=(\S+)")  # SMC keys are four characters, a space included
 
 
-def collect(version, sample=None, ioreport_source=None, ioreport_error=None):
+def collect(version, sample=None, ioreport_source=None, ioreport_error=None, ioreport_counters=None):
     """The report for this Mac, from its own SMC connection. Raises OSError without one.
-    `ioreport_source` and `ioreport_error` are PowerReader's: where Chip comes from IOReport, or
-    why it couldn't."""
+    `ioreport_source`, `ioreport_error` and `ioreport_counters` are PowerReader's: where Chip
+    comes from IOReport, or why it couldn't, and what each of its counters last read."""
     with objc.autorelease_pool():
         smc = power.SMC()
         try:
@@ -37,7 +37,8 @@ def collect(version, sample=None, ioreport_source=None, ioreport_error=None):
             smc.close()
     about = {"app": version, "mac": power.mac_model(), "chip": thermals.chip_name(),
              "cores": thermals.core_count(), "battery": sample.get("has_battery") if sample else None,
-             "macos": platform.mac_ver()[0], "ioreport": ioreport_source, "ioreport_error": ioreport_error}
+             "macos": platform.mac_ver()[0], "ioreport": ioreport_source, "ioreport_error": ioreport_error,
+             "ioreport_counters": ioreport_counters}
     return build(about, values)
 
 
@@ -74,7 +75,8 @@ def power_sources(values, ioreport=None, ioreport_error=None):
 
 def build(about, values):
     """The report's text. Pure: `about` as collect() makes it, `values` {key: number or None}.
-    Its IOReport fields only show in the Chip power line, so parse() doesn't give them back."""
+    Its IOReport fields only show in the Chip power and IOReport counters lines, so parse() doesn't
+    give them back."""
     names = {k for k, v in values.items() if v is not None}
     fan_count = int(values.get("FNum") or 0) or thermals.count_fans(names)
     keys = thermals.sensor_keys(names, about.get("chip"), fan_count, about.get("cores") or 0)
@@ -95,6 +97,9 @@ def build(about, values):
         "Where each reading comes from",
         f"  Screen power: {screen}",
         f"  Chip power: {chip}",
+        # Where IOReport was opened: enough to tell a counter that's missing, in a unit the app
+        # doesn't know, or reading something odd, without asking again.
+        *([f"  IOReport counters: {about['ioreport_counters']}"] if about.get("ioreport_counters") else []),
         f"  Power keys missing: {', '.join(missing) or 'none'}",
         *(f"  {label}: {source(group)}" for group, label in
           (("cpu", "CPU"), ("gpu", "GPU"), ("memory", "Memory"), ("ssd", "SSD"), ("ambient", "Ambient"))),

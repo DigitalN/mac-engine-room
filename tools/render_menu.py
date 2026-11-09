@@ -37,7 +37,7 @@ def options():
     a.add_argument("--fanless", action="store_true", help="a Mac with no fans")
     a.add_argument("--onefan", action="store_true")
     a.add_argument("--noscreen", action="store_true", help="a Mac with no screen power reading")
-    a.add_argument("--nochip", action="store_true", help="a Mac with no chip power reading (with --noscreen: an M4 Air)")
+    a.add_argument("--nochip", action="store_true", help="a Mac with no chip power reading (with --noscreen: an M4 Air without IOReport)")
     a.add_argument("--desktop", action="store_true", help="a Mac mini: no battery, no screen")
     a.add_argument("--gpuheld", action="store_true", help="the GPU parked for 3 minutes, showing its last reading")
     a.add_argument("--charging", action="store_true")

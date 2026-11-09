@@ -640,6 +640,7 @@ def normalize(battery, smc, now=None, charge_limit=None):
         "has_screen_power": sensor_works(screen_power),  # this reading shows the sensor works
         "chip_power": _round(chip_power),
         "has_chip_power": sensor_works(chip_power),  # likewise (PowerReader.read keeps it once seen)
+        "chip_source": "phpc",  # or "ioreport", where PowerReader reads Chip from IOReport instead
         "temperature": _round(temperature, 1),
         "cycle_count": _num(b.get("CycleCount")),
         "design_capacity": design_mah,
@@ -674,6 +675,8 @@ class PowerReader:
         # can't be used, why. Both None on a Mac that reads Chip from PHPC.
         self.ioreport_source = None
         self.ioreport_error = None
+        self._ioreport_readings = None  # what each counter last read (ioreport.part_readings)
+        self._logged_unusable = self._logged_reset = False
         self._open_smc()
 
     def _open_smc(self):
@@ -742,16 +745,38 @@ class PowerReader:
 
     def _read_chip_energy(self, sample, smc):
         """Chip power from IOReport in place of PHPC's."""
+        chip = self._chip_energy
         try:
-            watts = self._chip_energy.read()
+            watts = chip.read()
         except Exception as e:
             if not isinstance(e, OSError):
                 log.exception("Reading IOReport failed")
-            self._chip_energy.close()
+            self._ioreport_readings = getattr(chip, "readings", None) or self._ioreport_readings
+            chip.close()
             self._ioreport_unavailable(str(e), phpc_words(smc.get("PHPC")))
             return
+        self._ioreport_readings = chip.readings or self._ioreport_readings
+        if watts is None and self._ioreport_readings and not self._logged_unusable:
+            import ioreport
+            if ioreport.reading_problems(self._ioreport_readings):
+                # Once per launch: Chip stays hidden, and one sensor report or log says why.
+                self._logged_unusable = True
+                log.info("IOReport's readings can't be used: %s", ioreport.describe_readings(self._ioreport_readings))
+        if chip.resets and not self._logged_reset:
+            self._logged_reset = True
+            log.info("IOReport's counters went backwards; reading again from there")
         sample["chip_power"] = _round(watts)
         sample["has_chip_power"] = sensor_works(watts)
+        sample["chip_source"] = "ioreport"
+
+    @property
+    def ioreport_counters(self):
+        """What each IOReport counter last read, for the sensor report: "CPU 1.20 W, GPU 0.31 W,
+        ANE 0.00 W", "no reading yet", or None on a Mac that never opened IOReport."""
+        if self._ioreport_readings:
+            import ioreport
+            return ioreport.describe_readings(self._ioreport_readings)
+        return "no reading yet" if self.ioreport_source else None
 
     def _read_charge_limit(self):
         """Re-read powerd's charging prefs only when the file has changed."""
