@@ -17,14 +17,21 @@ and no new `Mac Engine Room` process (see *How updates work* in DEVELOPMENT.md).
 login launch. A Mac missing any SMC key the app reads
 logs `SMC keys missing on <model>, macOS <version>: …` once per launch, with the power
 keys it does have. Reopening the app at one bar of brightness and again at full shows
-which of them is the screen. The first temperature reading after launch (or after an SMC
+which of them is the screen. The first SMC reading also logs where Chip comes from: `Chip power
+from PHPC (reads 1.85 W)`, or where PHPC can't give it, `Chip power from IOReport's CLPC energy
+counters (PHPC reads 0.01 W)` (`IOReport's Energy Model` before macOS 27), or `IOReport
+unavailable: <why> (PHPC reads 0.01 W)`, and Chip stays hidden. That last line comes later too if
+IOReport stops counting. `PYTHONFLOW_CHIP_IOREPORT=1` at launch reads Chip from IOReport on a Mac
+whose PHPC works, to test that path. The first temperature reading after launch (or after an SMC
 reconnect) logs `Temperature sensors on <chip>: cpu N, gpu N, …; N fans`, plus the groups
 found by prefix when the chip isn't in the core key table (or its keys don't fit this Mac), and
 `no GPU sensor`. For a Mac you can't reach, ask for its sensor report (Settings › About ›
 Copy, or the "Wrong or missing reading" issue template): it lists every power, temperature and
 fan key with its value, and which keys each reading came from: a screen or chip key that reads
-under 0.1 W shows as e.g. `Chip power: none (PHPC reads 0.01 W)`. The app logs `Copied the sensor
-report` or `Couldn't make the sensor report (…)`.
+under 0.1 W shows as e.g. `Chip power: none (PHPC reads 0.01 W)`, and Chip from IOReport as
+`Chip power: IOReport's CLPC energy counters, CPU + GPU + ANE (PHPC reads 0.01 W)` (or with
+`IOReport unavailable: <why>`). The app logs `Copied the sensor report` or `Couldn't make the
+sensor report (…)`.
 
 Fan control logs `Fan profile: <name>` when one is chosen (and at launch), `Asked macOS to
 allow the fan helper`, `Fan control is waiting for the helper to be allowed in Login Items`,
@@ -110,7 +117,13 @@ To reproduce without touching the user's data, run with
   (ctypes + PyObjC bridging) and the SMC (ctypes `IOConnectCallStructMethod`), plus
   the charge limit from powerd's `/Library/Preferences/com.apple.powerd.charging.plist`.
   `normalize()` is pure and unit-tested with captured registry dicts. Its `SMC` class
-  (read-only) is shared with the Thermals tool.
+  (read-only) is shared with the Thermals tool. Chip is `PHPC`, or IOReport's where
+  `wants_ioreport()` says PHPC can't give it.
+- **IOReport**: `Application Files/ioreport.py`. Chip power for Macs whose `PHPC` doesn't work:
+  the CPU, GPU and Neural Engine energy counters, AppleCLPC's on macOS 27 (channels made from
+  macmon's table of report IDs, `CLPC_REPORTS`) and the Energy Model's before. `ChipEnergy`
+  keeps one subscription for the reader's life. Picking the channels, the watts and the
+  frozen-counter check are pure and unit-tested.
 - **Thermals sensors**: `Application Files/thermals.py`. CPU and GPU are the hottest
   *core* sensor, from a per-chip table of core keys (Stats', checked against iSMC's dumps),
   with keys found by prefix for chips it doesn't know or whose table doesn't fit; memory, SSD
@@ -261,8 +274,20 @@ To reproduce without touching the user's data, run with
   key on file is the base M4's `PBLR` at one bar, 0.3 W.
 - SMC `PHPC` is chip (CPU + GPU package) power, **not** "heatpipe" or fan power,
   despite Apple's key name. Verified: it rises about 11 W under full CPU load while
-  the fans stay at minimum. Where it doesn't read (the 13" M4 Air), nothing stands in: `PZC0`,
-  `PZC1` and `PHPS` are undocumented, and aren't chip power on the M1 Pro.
+  the fans stay at minimum. No other SMC key stands in for it: `PZC0`, `PZC1` and `PHPS` are
+  undocumented, and aren't chip power on the M1 Pro.
+- **Where `PHPC` can't give Chip, IOReport does, and nowhere else.** That's a model in
+  `power.NO_CHIP_SENSOR` (the 13" M4 Air) or a Mac with no `PHPC` key; every other Mac never
+  opens IOReport, so its idle cost doesn't rise. An unlisted Mac whose `PHPC` is listed but dead
+  stays hidden until its sensor report lists it. IOReport counts only the CPU, GPU and Neural
+  Engine, not the rest of the package, so it reads lower than `PHPC`: a steady 7 to 8 W less on
+  the M1 Pro (two 20 s runs, medians 9.3 W against 16.8 W and 4.0 W against 13.5 W). On macOS 27 the Energy Model's CPU
+  counter doesn't count without an Apple entitlement (measured here: 0 while `PHPC` read 10 to
+  30 W), so 27 uses AppleCLPC's counters, whose report IDs are per driver and per macOS: macmon
+  extracts them from Apple's restore images. A newer macOS isn't in `ioreport.CLPC_REPORTS`, so
+  it tries the Energy Model and gives up if its CPU counter doesn't move; take macmon's new table
+  when it has one. Chip never shows a counter that doesn't count, and IOReport's readings follow
+  `SENSOR_MIN_W` like `PHPC`'s.
 - `~/Documents` is iCloud-synced on this machine. Finder metadata blocks
   `codesign`, so `scripts/build.sh` builds in `~/Library/Caches` and runs `xattr -cr`
   before signing.
@@ -425,7 +450,8 @@ Don't undo these without asking:
   setting. Opening it again while it runs, or **Open Dashboard**, shows the dashboard.
 - A Mac with no screen or chip reading doesn't show Screen or Chip anywhere, and the menu bar
   falls back to System if that one was chosen. It happens automatically, with no estimate and
-  no stand-in key (#51).
+  no stand-in SMC key (#51). Chip comes from IOReport where `PHPC` can't give it (#51 again);
+  only when that can't give it either is Chip hidden. Screen has no such source.
 - The dashboard window opens as tall as the page, up to the screen's height, and can't
   be made wider or taller than the page needs: extra size only added empty space.
   Switching tabs resizes it to the new page.
@@ -446,5 +472,6 @@ Don't undo these without asking:
 ## Tests
 
 `python3 -m pytest`. `tests/test_power.py::test_reads_this_mac` does a live
-hardware read, and is skipped where there's no battery or SMC. `tests/test_fan_helper.py`
+hardware read, and is skipped where there's no battery or SMC; `tests/test_ioreport.py::test_reads_this_mac`
+reads this Mac's IOReport for 0.3 s, and is skipped where it can't be used. `tests/test_fan_helper.py`
 compiles the fan helper with `swiftc` (about 3 s), and is skipped without it.

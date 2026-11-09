@@ -56,6 +56,22 @@ def test_a_report_names_the_key_each_power_reading_uses():
         assert about == ABOUT and back == {k: None if v is None else round(v, 2) for k, v in values.items()}
 
 
+def test_a_report_names_ioreport_where_chip_comes_from_it():
+    m4_air = {"PBLR": 0.01, "PHPC": 0.01}
+    assert report.power_sources(m4_air, "CLPC energy counters") == (
+        "none (PBLR reads 0.01 W)", "IOReport's CLPC energy counters, CPU + GPU + ANE (PHPC reads 0.01 W)")
+    assert report.power_sources({}, "Energy Model")[1] == "IOReport's Energy Model, CPU + GPU + ANE (PHPC missing)"
+    # Where it was wanted but couldn't be used, why. A working PHPC (the switch) is used instead.
+    assert report.power_sources(m4_air, None, "libIOReport won't load")[1] == \
+        "none (PHPC reads 0.01 W; IOReport unavailable: libIOReport won't load)"
+    assert report.power_sources({"PHPC": 3.2}, None, "libIOReport won't load")[1] == "PHPC"
+    about = {**ABOUT, "mac": "Mac16,12", "chip": "Apple M4", "ioreport": "CLPC energy counters", "ioreport_error": None}
+    text = report.build(about, m4_air)
+    assert "  Chip power: IOReport's CLPC energy counters, CPU + GPU + ANE (PHPC reads 0.01 W)\n" in text
+    back, _ = report.parse(text)  # the source is for people: reading a report back skips it
+    assert back == {k: v for k, v in about.items() if not k.startswith("ioreport")}
+
+
 @pytest.mark.parametrize("path", REPORTS, ids=[p.stem for p in REPORTS])
 def test_every_reported_mac_finds_its_sensors(path):
     about, values = report.parse(path.read_text())

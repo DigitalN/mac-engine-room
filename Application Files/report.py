@@ -25,8 +25,10 @@ PER_LINE = 8
 _PAIR = re.compile(r"(?:^|  )(.{4})=(\S+)")  # SMC keys are four characters, a space included
 
 
-def collect(version, sample=None):
-    """The report for this Mac, from its own SMC connection. Raises OSError without one."""
+def collect(version, sample=None, ioreport_source=None, ioreport_error=None):
+    """The report for this Mac, from its own SMC connection. Raises OSError without one.
+    `ioreport_source` and `ioreport_error` are PowerReader's: where Chip comes from IOReport, or
+    why it couldn't."""
     with objc.autorelease_pool():
         smc = power.SMC()
         try:
@@ -35,7 +37,7 @@ def collect(version, sample=None):
             smc.close()
     about = {"app": version, "mac": power.mac_model(), "chip": thermals.chip_name(),
              "cores": thermals.core_count(), "battery": sample.get("has_battery") if sample else None,
-             "macos": platform.mac_ver()[0]}
+             "macos": platform.mac_ver()[0], "ioreport": ioreport_source, "ioreport_error": ioreport_error}
     return build(about, values)
 
 
@@ -43,9 +45,11 @@ def _number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
-def power_sources(values):
+def power_sources(values, ioreport=None, ioreport_error=None):
     """(screen, chip) as the report words them: the key each reading comes from, once it reads at
-    least power.SENSOR_MIN_W as the app requires, else 'none' and what the keys read."""
+    least power.SENSOR_MIN_W as the app requires, else 'none' and what the keys read. Where Chip
+    comes from IOReport (`ioreport`, its source) that's named instead, with what PHPC reads, and
+    where IOReport was wanted but couldn't be used, why (`ioreport_error`)."""
     readable = {k: v for k, v in values.items() if _number(v)}
     key, watts = power.screen_reading(readable)
     reads = [f"{k} reads {readable[k]:.2f} W" for k in power.SCREEN_POWER_KEYS if k in readable]
@@ -56,21 +60,25 @@ def power_sources(values):
     else:
         screen = f"none of {', '.join(power.SCREEN_POWER_KEYS)}"
     chip_watts = readable.get("PHPC")
-    if power.sensor_works(chip_watts):
+    phpc = power.phpc_words(chip_watts)
+    if ioreport:
+        chip = f"IOReport's {ioreport}, CPU + GPU + ANE ({phpc})"
+    elif power.sensor_works(chip_watts):
         chip = "PHPC"
-    elif chip_watts is not None:
-        chip = f"none (PHPC reads {chip_watts:.2f} W)"
+    elif ioreport_error:
+        chip = f"none ({phpc}; IOReport unavailable: {ioreport_error})"
     else:
-        chip = "none (PHPC missing)"
+        chip = f"none ({phpc})"
     return screen, chip
 
 
 def build(about, values):
-    """The report's text. Pure: `about` as collect() makes it, `values` {key: number or None}."""
+    """The report's text. Pure: `about` as collect() makes it, `values` {key: number or None}.
+    Its IOReport fields only show in the Chip power line, so parse() doesn't give them back."""
     names = {k for k, v in values.items() if v is not None}
     fan_count = int(values.get("FNum") or 0) or thermals.count_fans(names)
     keys = thermals.sensor_keys(names, about.get("chip"), fan_count, about.get("cores") or 0)
-    screen, chip = power_sources(values)
+    screen, chip = power_sources(values, about.get("ioreport"), about.get("ioreport_error"))
     battery = {True: "yes", False: "no"}.get(about.get("battery"), "unknown")
 
     def source(group):

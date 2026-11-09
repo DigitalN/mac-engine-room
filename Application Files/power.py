@@ -10,6 +10,8 @@ Two sources, because neither is complete on its own:
     Which keys exist depends on the Mac, so one it can't read is logged at launch.
   - AppleSmartBattery (IORegistry) is authoritative for battery state, capacity
     and adapter details, but its power telemetry only refreshes every ~30 s.
+A Mac whose PHPC doesn't work (the 13" M4 Air) gets Chip from IOReport instead (ioreport.py),
+which no other Mac opens.
 
 macOS 27 removed AppleRawCurrentCapacity, AppleRawMaxCapacity, DesignCapacity,
 AbsoluteCapacity and Temperature from the top level of AppleSmartBattery; the
@@ -79,9 +81,12 @@ NO_SCREEN_SENSOR = frozenset({
     "Mac16,12",  # the M4 Air 13": PBLR and PHPC read 0.01 W even at 25 W of system load (#51)
 })
 # The same for Chip (PHPC). Only the 13" M4 Air is proven; the 15" (Mac16,13) is judged by what it reads.
+# These, and a Mac with no PHPC key, get Chip from IOReport instead (see wants_ioreport).
 NO_CHIP_SENSOR = frozenset({
     "Mac16,12",  # the M4 Air 13": see above
 })
+# Set to 1 to read Chip from IOReport on a Mac whose PHPC works, to test that path. Read at launch.
+CHIP_IOREPORT_ENV = "PYTHONFLOW_CHIP_IOREPORT"
 SMC_KEYS = (
     "PDTR",  # power delivered from the adapter into the system (W)
     "PSTR",  # total system power (W)
@@ -503,6 +508,20 @@ def sensor_works(watts):
     return watts is not None and watts >= SENSOR_MIN_W
 
 
+def wants_ioreport(model, smc, forced=False):
+    """Whether Chip should come from IOReport: only where PHPC can't give it (a model known to
+    have no chip sensor, or a Mac with no PHPC key), or when forced to test it. Every other Mac
+    keeps PHPC and never opens IOReport, so its idle cost doesn't rise. An unlisted Mac whose
+    PHPC is listed but dead stays on PHPC, hidden, until its sensor report puts it in
+    NO_CHIP_SENSOR."""
+    return forced or model in NO_CHIP_SENSOR or "PHPC" not in smc
+
+
+def phpc_words(watts):
+    """What PHPC read, as the log and the sensor report put it."""
+    return "PHPC missing" if watts is None else f"PHPC reads {watts:.2f} W"
+
+
 def normalize(battery, smc, now=None, charge_limit=None):
     """Merge a battery registry dict and SMC values into one sample.
 
@@ -649,6 +668,12 @@ class PowerReader:
         self._has_chip_power = False
         self.has_screen_key = False  # one of SCREEN_POWER_KEYS was read, whatever its value
         self._model = mac_model()
+        self._force_ioreport = os.environ.get(CHIP_IOREPORT_ENV) == "1"
+        self._chip_energy = None  # ioreport.ChipEnergy, only where PHPC can't give Chip
+        # For the sensor report: where IOReport is used, its source; where it was wanted but
+        # can't be used, why. Both None on a Mac that reads Chip from PHPC.
+        self.ioreport_source = None
+        self.ioreport_error = None
         self._open_smc()
 
     def _open_smc(self):
@@ -688,6 +713,46 @@ class PowerReader:
         log.info("SMC keys missing on %s, macOS %s: %s. Power keys here: %s",
                  mac_model(), platform.mac_ver()[0], ", ".join(missing), keys)
 
+    def _choose_chip_source(self, smc):
+        """Once per launch, on the first SMC reading: PHPC, or IOReport where PHPC can't give
+        Chip (see wants_ioreport). IOReport is only imported and opened here."""
+        if not wants_ioreport(self._model, smc, self._force_ioreport):
+            log.info("Chip power from PHPC (reads %.2f W)", smc["PHPC"])
+            return
+        phpc = phpc_words(smc.get("PHPC"))
+        why = f"{CHIP_IOREPORT_ENV}=1; {phpc}" if self._force_ioreport else phpc
+        try:
+            import ioreport
+            self._chip_energy = ioreport.ChipEnergy()
+        except OSError as e:
+            self._ioreport_unavailable(str(e), why)
+            return
+        except Exception as e:  # a private library: anything it does wrong only costs Chip
+            log.exception("Opening IOReport failed")
+            self._ioreport_unavailable(f"{type(e).__name__}: {e}", why)
+            return
+        self.ioreport_source = self._chip_energy.source
+        log.info("Chip power from IOReport's %s (%s)", self.ioreport_source, why)
+
+    def _ioreport_unavailable(self, error, why):
+        log.info("IOReport unavailable: %s (%s)", error, why)
+        self._chip_energy = self.ioreport_source = None
+        self.ioreport_error = error
+        self._has_chip_power = False  # PHPC decides again, as on a Mac without IOReport
+
+    def _read_chip_energy(self, sample, smc):
+        """Chip power from IOReport in place of PHPC's."""
+        try:
+            watts = self._chip_energy.read()
+        except Exception as e:
+            if not isinstance(e, OSError):
+                log.exception("Reading IOReport failed")
+            self._chip_energy.close()
+            self._ioreport_unavailable(str(e), phpc_words(smc.get("PHPC")))
+            return
+        sample["chip_power"] = _round(watts)
+        sample["has_chip_power"] = sensor_works(watts)
+
     def _read_charge_limit(self):
         """Re-read powerd's charging prefs only when the file has changed."""
         try:
@@ -713,6 +778,7 @@ class PowerReader:
             smc = self._read_smc()
             if smc and not self._checked_smc_keys:
                 self._log_missing_smc_keys(smc)
+                self._choose_chip_source(smc)
             # Plugging in or unplugging shows up in SMC instantly; refresh the
             # registry right away so charge state doesn't lag the power numbers.
             external_hint = smc.get("PDTR", 0) > 1.0 if "PDTR" in smc else None
@@ -726,10 +792,13 @@ class PowerReader:
                 self._battery_read_at = time.monotonic()
                 self._last_external = external_hint
             sample = normalize(self._battery, smc, charge_limit=self._charge_limit)
+            if self._chip_energy:
+                self._read_chip_energy(sample, smc)
             # Screen and Chip show once their key has read at least SENSOR_MIN_W: one that's listed
             # but never gets there isn't a sensor (the M1 Air's PBLR reads 0 at any brightness, the
             # M4 Air's PBLR and PHPC 0.01 W even under load). Once seen, it stays: a failed read, an
-            # SMC reconnect, the backlight going off or an idle chip shouldn't hide it.
+            # SMC reconnect, the backlight going off or an idle chip shouldn't hide it. Chip from
+            # IOReport follows the same rule.
             self.has_screen_key = self.has_screen_key or any(k in smc for k in SCREEN_POWER_KEYS)
             self._has_screen_power = ((self._has_screen_power or sample["has_screen_power"])
                                       and self._model not in NO_SCREEN_SENSOR)
@@ -737,7 +806,7 @@ class PowerReader:
             if not self._has_screen_power:
                 sample["screen_power"] = None
             self._has_chip_power = ((self._has_chip_power or sample["has_chip_power"])
-                                    and self._model not in NO_CHIP_SENSOR)
+                                    and (self._chip_energy is not None or self._model not in NO_CHIP_SENSOR))
             sample["has_chip_power"] = self._has_chip_power
             if not self._has_chip_power:
                 sample["chip_power"] = None

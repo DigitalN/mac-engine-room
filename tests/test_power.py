@@ -3,6 +3,8 @@
 import logging
 import plistlib
 import struct
+import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -329,11 +331,39 @@ class _StubSMC:
         return ["PHPC=2.50", "PZZZ=1.00"]
 
 
-def _reader(monkeypatch, smc, model="MacBookPro18,1"):
-    """A PowerReader on a Mac of this model (not the one running the tests)."""
+class _FakeChipEnergy:
+    """ioreport.ChipEnergy with its readings given: watts, None, or an exception to raise."""
+    source = "CLPC energy counters"
+
+    def __init__(self, *readings):
+        self.readings, self.closed = list(readings), False
+
+    def read(self):
+        reading = self.readings.pop(0)
+        if isinstance(reading, Exception):
+            raise reading
+        return reading
+
+    def close(self):
+        self.closed = True
+
+
+def _no_ioreport():
+    raise OSError("IOReport isn't opened in tests")
+
+
+def _reader(monkeypatch, smc, model="MacBookPro18,1", chip_energy=_no_ioreport, forced=False):
+    """A PowerReader on a Mac of this model (not the one running the tests). `chip_energy` makes
+    the ChipEnergy where the reader opens IOReport: by default it can't, so no test opens the real
+    one. `forced` sets the switch that reads Chip from IOReport where PHPC works."""
     monkeypatch.setattr(power, "SMC", lambda: smc)
     monkeypatch.setattr(power, "read_battery_registry", lambda: None)
     monkeypatch.setattr(power, "mac_model", lambda: model)
+    monkeypatch.setitem(sys.modules, "ioreport", SimpleNamespace(ChipEnergy=chip_energy))
+    if forced:
+        monkeypatch.setenv(power.CHIP_IOREPORT_ENV, "1")
+    else:
+        monkeypatch.delenv(power.CHIP_IOREPORT_ENV, raising=False)
     return power.PowerReader()
 
 
@@ -421,6 +451,7 @@ def test_a_key_shows_from_a_tenth_of_a_watt_and_then_stays(monkeypatch, name, ke
 @pytest.mark.parametrize("model, name, key", [
     ("MacBookAir10,1", "screen", "PBLR"), ("Mac16,12", "screen", "PBLR"), ("Mac16,12", "chip", "PHPC")])
 def test_a_model_known_to_lack_a_sensor_never_shows_it(monkeypatch, model, name, key):
+    # Not from that key. Chip can still come from IOReport (see below); here it can't.
     reader = _reader(monkeypatch, _StubSMC(*[{key: 3.0}] * 2), model=model)  # even if a read looks real
     for _ in range(2):
         s = reader.read()
@@ -431,6 +462,98 @@ def test_the_m1_air_lacks_only_a_screen_sensor(monkeypatch):
     # Each list is its own. The M1 Air's sensor report: PBLR 0.00, PHPC 0.53.
     s = _reader(monkeypatch, _StubSMC({"PBLR": 0.0, "PHPC": 0.53}), model="MacBookAir10,1").read()
     assert not s["has_screen_power"] and s["has_chip_power"] and s["chip_power"] == 0.53
+
+
+def test_only_a_mac_whose_phpc_cant_give_chip_wants_ioreport():
+    assert not power.wants_ioreport("MacBookPro18,1", {"PHPC": 1.8})
+    assert not power.wants_ioreport("Mac16,13", {"PHPC": 0.01})  # unlisted: hidden until its report lists it
+    assert power.wants_ioreport("Mac16,12", {"PHPC": 0.01})  # the 13" M4 Air
+    assert power.wants_ioreport("MacBookPro18,1", {"PSTR": 9.0})  # no PHPC key
+    assert power.wants_ioreport("MacBookPro18,1", {"PHPC": 1.8}, forced=True)
+
+
+def _chip_source_lines(caplog):
+    return [r.getMessage() for r in caplog.records
+            if r.getMessage().startswith(("Chip power from", "IOReport unavailable"))]
+
+
+AIR_SMC = {"PHPC": 0.01, "PBLR": 0.01, "PSTR": 25.0}  # the 13" M4 Air's, under load
+
+
+def test_a_mac_whose_phpc_works_never_opens_ioreport(monkeypatch, caplog):
+    def opened():
+        raise AssertionError("IOReport was opened")
+    reader = _reader(monkeypatch, _StubSMC(*[{"PHPC": 1.8}] * 2), chip_energy=opened)
+    with caplog.at_level(logging.INFO, logger="power"):
+        for _ in range(2):
+            s = reader.read()
+    assert s["chip_power"] == 1.8 and s["has_chip_power"]
+    assert _chip_source_lines(caplog) == ["Chip power from PHPC (reads 1.80 W)"]
+    assert reader.ioreport_source is None and reader.ioreport_error is None
+
+
+@pytest.mark.parametrize("model, smc, why", [
+    ("Mac16,12", AIR_SMC, "PHPC reads 0.01 W"),
+    ("MacBookPro18,1", {"PSTR": 9.0}, "PHPC missing"),
+])
+def test_chip_comes_from_ioreport_where_phpc_cant_give_it(monkeypatch, caplog, model, smc, why):
+    reader = _reader(monkeypatch, _StubSMC(*[smc] * 5), model=model,
+                     chip_energy=lambda: _FakeChipEnergy(None, 0.05, 2.504, 0.0, None))
+    with caplog.at_level(logging.INFO, logger="power"):
+        s = reader.read()  # the first reading has nothing to measure from
+    assert s["chip_power"] is None and not s["has_chip_power"]
+    s = reader.read()  # under SENSOR_MIN_W isn't proof yet, as with PHPC
+    assert s["chip_power"] is None and not s["has_chip_power"]
+    s = reader.read()
+    assert s["chip_power"] == 2.5 and s["has_chip_power"]
+    # Once shown it stays, through an idle chip and a reading with nothing.
+    s = reader.read()
+    assert s["chip_power"] == 0.0 and s["has_chip_power"]
+    s = reader.read()
+    assert s["chip_power"] is None and s["has_chip_power"]
+    assert _chip_source_lines(caplog) == [f"Chip power from IOReport's CLPC energy counters ({why})"]
+    assert reader.ioreport_source == "CLPC energy counters" and reader.ioreport_error is None
+
+
+def test_the_switch_reads_chip_from_ioreport_where_phpc_works(monkeypatch, caplog):
+    reader = _reader(monkeypatch, _StubSMC(*[{"PHPC": 12.0}] * 2), forced=True,
+                     chip_energy=lambda: _FakeChipEnergy(None, 4.0))
+    with caplog.at_level(logging.INFO, logger="power"):
+        assert reader.read()["chip_power"] is None
+        assert reader.read()["chip_power"] == 4.0  # IOReport's, not PHPC's
+    assert _chip_source_lines(caplog) == [
+        "Chip power from IOReport's CLPC energy counters (PYTHONFLOW_CHIP_IOREPORT=1; PHPC reads 12.00 W)"]
+
+
+def test_without_ioreport_chip_stays_hidden_where_phpc_cant_give_it(monkeypatch, caplog):
+    reader = _reader(monkeypatch, _StubSMC(*[AIR_SMC] * 2), model="Mac16,12")
+    with caplog.at_level(logging.INFO, logger="power"):
+        for _ in range(2):
+            s = reader.read()
+            assert not s["has_chip_power"] and s["chip_power"] is None
+    assert _chip_source_lines(caplog) == ["IOReport unavailable: IOReport isn't opened in tests (PHPC reads 0.01 W)"]
+    assert reader.ioreport_error == "IOReport isn't opened in tests" and reader.ioreport_source is None
+
+
+def test_anything_ioreport_does_wrong_only_costs_chip(monkeypatch):
+    def broken():
+        raise ValueError("bad channel")
+    s = _reader(monkeypatch, _StubSMC(AIR_SMC), model="Mac16,12", chip_energy=broken).read()
+    assert s["system_load"] == 25.0 and not s["has_chip_power"] and s["chip_power"] is None
+
+
+@pytest.mark.parametrize("error", [OSError("the CPU counter isn't counting (Energy Model)"), RuntimeError("boom")])
+def test_ioreport_that_stops_working_hides_chip_again(monkeypatch, caplog, error):
+    chip = _FakeChipEnergy(None, 3.0, error)
+    reader = _reader(monkeypatch, _StubSMC(*[AIR_SMC] * 4), model="Mac16,12", chip_energy=lambda: chip)
+    reader.read()
+    assert reader.read()["has_chip_power"]
+    with caplog.at_level(logging.INFO, logger="power"):
+        for _ in range(2):  # and it isn't read again
+            s = reader.read()
+            assert not s["has_chip_power"] and s["chip_power"] is None
+    assert chip.closed and reader.ioreport_source is None and reader.ioreport_error == str(error)
+    assert _chip_source_lines(caplog) == [f"IOReport unavailable: {error} (PHPC reads 0.01 W)"]
 
 
 @pytest.mark.parametrize("name", ["screen", "chip"])

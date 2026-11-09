@@ -349,7 +349,8 @@ class Api:
         from PyObjCTools import AppHelper
 
         try:
-            text = report.collect(VERSION, self._app._live.latest())
+            reader = self._app._reader
+            text = report.collect(VERSION, self._app._live.latest(), reader.ioreport_source, reader.ioreport_error)
         except OSError as e:
             log.warning("Couldn't make the sensor report (%s)", e)
             return False
