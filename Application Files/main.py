@@ -585,7 +585,11 @@ class EngineRoomApp:
         """Makes the dashboard's window, and WebKit with it, the first time the dashboard opens
         rather than at launch: until then the app has no WebKit processes to start, keep in memory
         or wait for, and nothing stands between the menu bar item and its first reading (#59).
-        Main thread, in the run loop. Returns whether there's a window now."""
+        Main thread, in the run loop. Returns whether there's a window now.
+
+        It relies on pywebview's internals, checked against pywebview 6.1 by tests/test_window.py:
+        start() inside a running app makes the window and returns, and the menus and app delegate
+        come from BrowserView."""
         import AppKit
         import webview
         from webview.platforms import cocoa
