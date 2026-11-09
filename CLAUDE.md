@@ -101,7 +101,8 @@ To reproduce without touching the user's data, run with
   1.2.18's menu bar couldn't show a reading until pywebview had made the window and started the
   run loop (#59). pywebview sets an app delegate and the menu bar's menus only when it starts the
   run loop itself, so the app sets the delegate at launch (quitting must hand the fans back) and
-  the menus (`_recreate_menus`) when it makes the window.
+  the menus (`_recreate_menus`) when it makes the window. Those are pywebview 6.1's internals:
+  `tests/test_window.py` fails if a newer pywebview changes them.
 - **Priority**: `Application Files/priority.py`. The main thread, the sampler and fan control run at
   one priority: background QoS, with a user-interactive override on all three at once while the
   menu is open, the dashboard is watched or a fan profile holds the fans, from launch until the app
