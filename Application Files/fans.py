@@ -441,12 +441,17 @@ class FanControl(threading.Thread):
         self._helper.open_login_items()
 
     def stop(self):
-        """At quit: lets a write in progress finish, then hands the fans back (ThermalForge #76, #77)."""
+        """At quit: lets a write in progress finish (ThermalForge #76, #77), then closes the
+        connection to the helper, which hands the fans back to macOS as it closes, the same way
+        `auto` does. Quitting doesn't ask for `auto` and wait for the reply: on a busy Mac that
+        took 4.4 s, with the app's menu bar item still there and Quit beach-balling."""
         self._stopping = True
         self._wake.set()
         if self.is_alive():
             self.join(timeout=45)
-        self._release("Mac Engine Room quit")
+        if self._held:
+            log.info("Fans left for the fan helper to hand back to macOS as Mac Engine Room quits")
+        self._set_held(False, None)
         self._helper.close()
 
     def run(self):

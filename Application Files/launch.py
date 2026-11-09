@@ -25,14 +25,16 @@ REPORT_ISSUE_URL = f"https://github.com/{REPOSITORY}/issues/new?template=sensor-
 # now; up to 1.2.10 this kept the dashboard from popping up. rename.py passes it on.
 BACKGROUND_ARGUMENT = "--background"
 
-# Waits for the quitting copy to exit, opens the app, and checks that it's running, trying
-# once more if it isn't after 5 seconds. `open -n`: LaunchServices can still list an app as
-# running for a moment after it has quit, and a plain `open` then goes to the instance that's
-# gone, so nothing starts (the maintainer's update from 1.2.8 to 1.2.9). The check matches
-# the app's own executable exactly, not the fan helper in the same bundle.
+# Waits up to 60 seconds for the quitting copy to exit, opens the app, and checks that it's
+# running, trying once more if it isn't after 5 seconds. A quit can take a while on a busy Mac:
+# it first lets a fan write in progress finish, which can take up to 40 s. `open -n`:
+# LaunchServices can still list an app as running for a moment after it has quit, and a plain
+# `open` then goes to the instance that's gone, so nothing starts (the maintainer's update from
+# 1.2.8 to 1.2.9). The check matches the app's own executable exactly, not the fan helper in the
+# same bundle.
 RELAUNCH_SCRIPT = (
     'pid=$1; exe=$2; shift 2; tries=0\n'
-    'while kill -0 "$pid" 2>/dev/null && [ $tries -lt 100 ]; do sleep 0.1; tries=$((tries + 1)); done\n'
+    'while kill -0 "$pid" 2>/dev/null && [ $tries -lt 600 ]; do sleep 0.1; tries=$((tries + 1)); done\n'
     'for attempt in 1 2; do\n'
     '  /usr/bin/open -n "$@"\n'
     '  tries=0\n'

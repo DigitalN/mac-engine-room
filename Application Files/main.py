@@ -430,7 +430,8 @@ class EngineRoomApp:
             is_busy=self._busy_for_update, on_status=self._on_update_status, quit_app=self.quit)
         self._window = None  # the dashboard's, made the first time it opens (_make_window)
         self._html = None
-        self._opening_since = None  # when the first opening of the dashboard began, until its page loads
+        self._opening_since = None  # when the dashboard began to open, until its page has loaded for the first time
+        self._page_ready = False  # the dashboard's page has loaded
         self._app_delegate = None
         self._gpu_pid = 0  # WebKit's graphics process for the page, as last seen
         self._page_size = None  # (width, height) the dashboard page last asked for
@@ -448,7 +449,7 @@ class EngineRoomApp:
         self._live.push(sample, thermals)
         self._recorder.feed(sample)
         self._fans.feed(thermals, sample)
-        if self._statusbar is not None:
+        if self._statusbar is not None and not self._quitting:
             # One trip to the main thread per sample: each one wakes it. When it was read goes
             # along for the first reading's line in app.log.
             AppHelper.callAfter(self._show_sample, sample, thermals, self._settings.get(), time.monotonic())
@@ -489,6 +490,8 @@ class EngineRoomApp:
 
     def _show_sample(self, sample, thermals, settings, read_at=None):
         """`read_at`: when the sampler read it (time.monotonic())."""
+        if self._quitting:
+            return  # the menu bar item has gone
         self._statusbar.update(sample, thermals, settings)
         if not self._first_reading_seen:
             self._first_reading_seen = True
@@ -501,8 +504,12 @@ class EngineRoomApp:
         self._check_graphics_process()
 
     def _in_use(self):
-        """Someone is looking: the menu is open or the dashboard is being watched."""
-        return (self._statusbar is not None and self._statusbar.menu_open) or self._sampler.dashboard_watched()
+        """Someone is looking, or waiting to: the menu is open, or the dashboard is opening or being
+        watched. Opening lasts until its page has loaded (or the window closes): its polls are what
+        keep it watched, and starting WebKit for it once took 6 s on a busy Mac, twice as long as a
+        poll keeps it watched."""
+        return ((self._statusbar is not None and self._statusbar.menu_open) or self._opening_since is not None
+                or self._sampler.dashboard_watched())
 
     def _on_menu_open(self):
         self._priority.refresh()  # before the sampler wakes: it has to wake at full priority
@@ -572,10 +579,16 @@ class EngineRoomApp:
         return int(min(FIRST_PAGE_HEIGHT, fits))
 
     def show_dashboard(self):
+        """Main thread. The app is at full priority from here, the main thread's own QoS included
+        (the sampler's dashboard_polled refreshes the priority), before the window and WebKit are
+        made: WebKit's start goes at the main thread's QoS."""
         import AppKit
 
+        if not self._page_ready and self._opening_since is None:
+            self._opening_since = time.monotonic()  # opening until the page has loaded (see _in_use)
         self._sampler.dashboard_polled(fans=True)  # being watched from now, not from the page's first poll
         if self._window is None and not self._make_window():
+            self._opening_since = None  # no window: nothing is opening
             return
         AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyRegular)
         self._apply_theme(self._settings.get()["theme"])
@@ -596,7 +609,6 @@ class EngineRoomApp:
         import webview
         from webview.platforms import cocoa
 
-        self._opening_since = time.monotonic()
         try:
             self._html = (_app_files_dir() / "index.html").read_text(encoding="utf-8")
             window = webview.create_window(
@@ -609,7 +621,6 @@ class EngineRoomApp:
             webview.start(private_mode=True, debug=False)
         except Exception:
             log.exception("Couldn't open the dashboard")
-            self._opening_since = None
             return False
         self._window = window
         # pywebview sets up the menu bar's menus (Quit, Edit…) only when it starts the run loop itself.
@@ -619,14 +630,27 @@ class EngineRoomApp:
         return True
 
     def _on_loaded(self):
-        """The page has loaded (on a thread of pywebview's). The first time, app.log says how long
-        the dashboard took to open, making its window and starting WebKit included."""
+        """The page has loaded (on a thread of pywebview's)."""
         from PyObjCTools import AppHelper
 
-        AppHelper.callAfter(self._apply_theme, self._settings.get()["theme"])
+        AppHelper.callAfter(self._page_loaded, time.monotonic())
+
+    def _page_loaded(self, at):
+        """Main thread: the page loaded at `at`. The first time, app.log says how long the dashboard
+        took to open, making its window and starting WebKit included, and it stops counting as
+        opening (`_in_use`); its polls keep it watched from here."""
+        self._apply_theme(self._settings.get()["theme"])
+        self._page_ready = True
         since, self._opening_since = self._opening_since, None
         if since is not None:
-            log.info("Dashboard took %.1f s to open the first time", time.monotonic() - since)
+            log.info("Dashboard took %.1f s to open the first time", at - since)
+
+    def _stop_opening(self):
+        """Main thread: the window closed, or the app is quitting, before the page loaded. app.log
+        says how long it had waited: a blank dashboard on a busy Mac was WebKit still starting."""
+        since, self._opening_since = self._opening_since, None
+        if since is not None:
+            log.info("Dashboard hadn't loaded after %.1f s", time.monotonic() - since)
 
     def _show_tab(self, tab):
         """Switch the page to a tab, e.g. the Dashboard as the window opens. WebKit is asked
@@ -640,13 +664,13 @@ class EngineRoomApp:
         still current: the only moment a login launch can be told apart. The app always
         starts in the menu bar; opening it again while it runs shows the dashboard.
 
-        Only now does the main thread go to background QoS like the others (at full priority
-        until then, see priority.py): the work AppKit hands off while it starts the app goes at
-        the main thread's QoS, and at background QoS it could wait for a busy Mac's efficiency
-        cores (#59)."""
+        Only now does the main thread join the app's priority (at full priority until then, see
+        priority.py), and its own QoS follows what the app needs from here: the work AppKit hands
+        off while it starts the app goes at the main thread's QoS, and at background QoS it could
+        wait for a busy Mac's efficiency cores (#59)."""
         import launch
 
-        self._priority.register()
+        self._priority.register(main=True)
         self._priority.started()
         log.info("Mac Engine Room %s started%s", VERSION, ", opened at login" if launch.launched_at_login() else "")
 
@@ -687,14 +711,56 @@ class EngineRoomApp:
             return True
         self._window.hide()
         AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
+        self._stop_opening()
+        self._priority.refresh()  # it isn't opening any more
         return False
 
     def quit(self):
+        """The menu's Quit and the updater's relaunch. ⌘Q goes to `_should_terminate` directly."""
         import AppKit
 
+        if self._quitting:
+            # Already quitting. Another terminate: while AppKit waits for the answer to the first
+            # one quits at once without asking the delegate (measured), before the fan thread's
+            # write has finished.
+            return
         log.info("Quitting")
-        self._quitting = True
         AppKit.NSApp.terminate_(None)
+
+    def _should_terminate(self):
+        """AppKit asks before the app quits (the menu's Quit, ⌘Q, the updater's relaunch, logging
+        out). The menu bar item goes at once, and AppKit is answered later, by `_finish_quitting` on
+        a thread of its own: until then AppKit runs the run loop in its modal panel mode, so the
+        app stays responsive instead of beach-balling. Main thread."""
+        import AppKit
+
+        if self._quitting:
+            return AppKit.NSTerminateLater  # already being answered
+        self._quitting = True
+        self._priority.quit()  # nothing drops to background QoS from here
+        self._stop_opening()
+        if self._statusbar is not None:
+            self._statusbar.remove()
+        threading.Thread(target=self._finish_quitting, name="pythonflow-quit", daemon=True).start()
+        return AppKit.NSTerminateLater
+
+    def _finish_quitting(self):
+        """Lets a fan write in progress finish and closes the connection to the fan helper, which
+        hands the fans back to macOS as it closes, then tells AppKit to go ahead. On a busy Mac,
+        waiting for the helper's answer to `auto` on the main thread took 4.4 s at Quit."""
+        import AppKit
+
+        import priority
+
+        priority.set_own_qos(priority.QOS_CLASS_USER_INTERACTIVE)  # someone is waiting for the app to go
+        try:
+            self._fans.stop()
+        except Exception:
+            log.exception("Fan control didn't stop cleanly")
+        finally:
+            # call_on_main posts in the run loop's common modes, which include the modal panel mode
+            # AppKit waits in (AppHelper.callLater's delayed perform doesn't run there).
+            priority.call_on_main(lambda: AppKit.NSApp.replyToApplicationShouldTerminate_(True))
 
     def _install_delegate_methods(self):
         """Add to pywebview's delegates.
@@ -710,8 +776,8 @@ class EngineRoomApp:
         the page is loaded again instead of staying blank.
 
         pywebview only sets an app delegate as it makes the window, which waits for the
-        dashboard to open, so one is set here: quitting (the fans go back to macOS first) and
-        opening the app again go through it before then.
+        dashboard to open, so one is set here: quitting (the fans go back to macOS as the app goes)
+        and opening the app again go through it before then.
         """
         import AppKit
         import objc
@@ -721,9 +787,7 @@ class EngineRoomApp:
         app = self
 
         def applicationShouldTerminate_(self, sender):
-            app._quitting = True
-            app._fans.stop()  # the fans go back to macOS before the app goes
-            return AppKit.NSTerminateNow
+            return app._should_terminate()  # the fans go back to macOS as the app goes
 
         def reopen(self, sender, has_visible_windows):
             if has_visible_windows:

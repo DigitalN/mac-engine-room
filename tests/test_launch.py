@@ -55,6 +55,31 @@ def test_it_gives_up_after_two_tries(tmp_path):
     assert len(calls) == 2
 
 
+def test_it_waits_up_to_60_seconds_for_the_old_copy_and_only_while_it_runs(tmp_path):
+    """A quit on a busy Mac can take longer than the 10 s 1.2.19 waited: it lets a fan write in
+    progress finish first. Run at a tenth of the time: each step sleeps 0.01 s, not 0.1 s."""
+    assert "[ $tries -lt 600 ]; do sleep 0.1;" in launch.RELAUNCH_SCRIPT  # 600 × 0.1 s
+    fast = launch.RELAUNCH_SCRIPT.replace("sleep 0.1", "sleep 0.01")
+    calls = tmp_path / "calls"
+    fake_open = tmp_path / "open"
+    fake_open.write_text(f'#!/bin/sh\nkill -0 "$OLD" 2>/dev/null && echo alive >> "{calls}" || echo gone >> "{calls}"\n')
+    script = (fast.replace("/usr/bin/open", f'/bin/sh "{fake_open}"')
+              .replace("/bin/ps -axo comm=", 'echo "$exe"'))  # the new copy is running at once
+    exe = launch.executable(tmp_path / "Mac Engine Room.app")
+
+    def run(old):
+        calls.write_text("")
+        start = time.monotonic()
+        subprocess.run(["/bin/sh", "-c", script, "sh", old, exe, "/Applications/Mac Engine Room.app"],
+                       env={**os.environ, "OLD": old}, timeout=30, check=True)
+        return calls.read_text().split(), time.monotonic() - start
+
+    seen, took = run(_quitting_process(2.5))  # longer than 100 steps (1 s here, 10 s for real), within 600
+    assert seen == ["gone"] and took >= 2.0
+    seen, took = run(_quitting_process(0))  # already gone: no wait
+    assert seen == ["gone"] and took < 1.0
+
+
 def test_the_check_looks_for_the_apps_own_executable(tmp_path):
     app = tmp_path / "Mac Engine Room.app"
     (app / "Contents").mkdir(parents=True)
