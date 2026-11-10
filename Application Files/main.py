@@ -25,7 +25,7 @@ from pathlib import Path
 
 APP_NAME = "Mac Engine Room"
 OLD_NAME = "Pythonflow"  # its name until 1.2.7; see rename.py
-VERSION = "1.2.19"  # the build reads it from here; see the release checklist in docs/DEVELOPMENT.md
+VERSION = "1.3.0"  # the build reads it from here; see the release checklist in docs/DEVELOPMENT.md
 if os.environ.get("PYTHONFLOW_DATA_DIR"):  # for development/testing against a throwaway folder
     DATA_DIR = Path(os.environ["PYTHONFLOW_DATA_DIR"]).expanduser()
     LOG_DIR = DATA_DIR / "Logs"
