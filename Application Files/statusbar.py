@@ -287,6 +287,11 @@ class StatusBar:
         self._item.setMenu_(menu)
         self._menu = menu
 
+    def remove(self):
+        """Takes the item out of the menu bar, as the app quits: it's gone at once, while the app
+        finishes quitting."""
+        NSStatusBar.systemStatusBar().removeStatusItem_(self._item)
+
     @staticmethod
     def _symbol(name, point_size, description=None):
         image = NSImage.imageWithSystemSymbolName_accessibilityDescription_(name, description)

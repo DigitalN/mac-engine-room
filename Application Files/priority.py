@@ -15,11 +15,21 @@ So:
   own QoS, never after: in between it's at background QoS with nothing to lift it, and while it
   waits there for the interpreter lock it holds up every other thread (#59: a login launch with
   the efficiency cores 0% idle).
-- Full priority: while the menu is open or the dashboard is being watched, while a fan profile
-  holds the fans, from launch until the app has started and the Mac has been quiet, and while
-  it's busy. The main thread only registers once the app has started (`started()`): AppKit's
-  own start-up work runs at the main thread's QoS, and handed off at background QoS it can wait
-  for the efficiency cores with everything else.
+- Full priority: while the menu is open or the dashboard is opening or being watched, while a
+  fan profile holds the fans, from launch until the app has started and the Mac has been quiet,
+  while it's busy, and once the app is quitting (`quit()`: nothing lowers anything after that).
+  The main thread only registers once the app has started (`started()`): AppKit's own start-up
+  work runs at the main thread's QoS, and handed off at background QoS it can wait for the
+  efficiency cores with everything else.
+- The main thread also sets its own QoS to user-interactive for all of those reasons but one:
+  holding the fans on a quiet Mac, which stays at background QoS with the override, as measured
+  for energy. The override raises only the thread's own priority: the work it hands off goes at
+  its own QoS. WebKit's start, handed off by a main thread at background QoS with the override,
+  took 0.4 to 18.6 s to load the dashboard's page on a Mac with every core busy, against 0.32 to
+  0.35 s at user-interactive QoS. Only a thread can set its own QoS, so a change decided on
+  another thread (the sampler noticing a busy Mac) is sent to the main thread (`on_main`), whose
+  override lets it run promptly; one decided on the main thread (the menu opening, the dashboard
+  opening) applies at once, before the work it's for.
 - Holding the fans is a reason of its own, not a late wait to be noticed: the curve's check-ins
   have to reach the fan helper, which hands the fans back to macOS after 10 s without a word,
   and a background thread can wait longer than that on a Mac that has just turned busy.
@@ -34,7 +44,11 @@ So:
   scheduler's tick counts for each core (`cpu_ticks`), which say nothing about the threads at
   full priority either, and the efficiency cores are the ones the IORegistry's `cpu` nodes give
   `cluster-type` "E", not the first few CPU numbers (`efficiency_cores`). A Mac with none, or
-  whose nodes can't be read, counts all of its cores.
+  whose nodes can't be read, counts all of its cores. They're read whenever the threads are at
+  full priority, whatever the reason, and never while they're at background QoS: raised, the
+  threads' waits no longer end late, so the cores are what tells `Load` the Mac has turned busy
+  (1.2.19 read them only while `Load` said busy, so with a profile holding the fans it went on
+  calling a busy Mac quiet, and a quit dropped the main thread to background QoS halfway through).
 
 `Load` and `efficiency_cores` are the pure parts and are unit-tested.
 """
@@ -152,6 +166,14 @@ def raise_thread(ident):
 
 def lower_thread(handle):
     _libsystem.pthread_override_qos_class_end_np(handle)
+
+
+def call_on_main(func):
+    """Runs `func` on the main thread, soon. AppHelper.callAfter posts it in the run loop's common
+    modes, so it also runs while a menu is open or AppKit waits for a quit to be answered."""
+    from PyObjCTools import AppHelper
+
+    AppHelper.callAfter(func)
 
 
 def cpu_ticks():
@@ -281,36 +303,56 @@ class CpuIdle:
 class Priority:
     """Puts the threads that `register()` at full priority or at background QoS, as `Load`,
     `in_use` (the menu or the dashboard) and `holding` (fan control holds the fans) say, once the
-    app has `started()`. Safe to call from any thread."""
+    app has `started()`, and keeps them at full priority once it is quitting (`quit()`). The main
+    thread's own QoS follows too, except for `holding` alone. Safe to call from any thread.
+    `on_main` runs a function on the main thread."""
 
     def __init__(self, in_use=lambda: False, holding=lambda: False, now=time.monotonic, load=None, idle=None,
-                 set_qos=set_own_qos, raise_=raise_thread, lower=lower_thread):
+                 set_qos=set_own_qos, raise_=raise_thread, lower=lower_thread, on_main=call_on_main):
         self.load = load or Load()
         self._in_use = in_use
         self._holding = holding
         self._now = now
         self._idle = idle or CpuIdle(now=now)
-        self._set_qos, self._raise, self._lower = set_qos, raise_, lower
+        self._set_qos, self._raise, self._lower, self._on_main = set_qos, raise_, lower, on_main
         self._seen = ""  # what the last step of `Load` was given, for the log
         self._lock = threading.Lock()
         self._threads = {}  # thread ident -> its override while it's at full priority
         self._full = True  # threads begin at their ordinary priority, which is full enough
+        self._wanted = True  # full priority for a reason other than holding the fans: the main thread's own QoS follows it
+        self._main = None  # the main thread's ident, once it has registered
+        self._main_qos = None  # the QoS the main thread last gave itself
         self._starting = True  # until the app has started (`started()`), whatever the Mac is doing
+        self._quitting = False  # from `quit()` on, nothing is lowered
+        self._resumed = False  # the threads went back to full priority since the cores were last read
 
-    def register(self):
+    def register(self, main=False):
         """Called by a thread on itself, as it starts: it gets the override if the app is at full
         priority, then goes to background QoS. In that order: the other way round it would sit at
-        background QoS with no override for as long as the efficiency cores kept it waiting."""
+        background QoS with no override for as long as the efficiency cores kept it waiting.
+        `main`: the main thread, whose own QoS then follows what the app needs (`_apply_main`)."""
         ident = threading.get_ident()
         with self._lock:
             self._threads[ident] = self._raise(ident) if self._full else None
-        self._set_qos(QOS_CLASS_BACKGROUND)
+            if main:
+                self._main = ident
+        if main:
+            self._apply_main()
+        else:
+            self._set_qos(QOS_CLASS_BACKGROUND)
 
     def started(self):
         """The app has started (its run loop is running, and the main thread has registered).
         Until now the threads stayed at full priority, so the main thread, still at its own QoS
         while the app started, was never above the others."""
         self._starting = False
+        self.refresh()
+
+    def quit(self):
+        """The app has begun to quit: from now on nothing lowers the threads or the main thread's
+        QoS. Lowered halfway through a quit, the main thread waited 4.6 s for a busy Mac's
+        efficiency cores before it could answer AppKit."""
+        self._quitting = True
         self.refresh()
 
     def unregister(self):
@@ -323,18 +365,41 @@ class Priority:
     def refresh(self):
         """Apply what `Load`, `in_use` and `holding` say now. Cheap when nothing changed. What they
         say is read under the lock: read before it, a refresh that began just before the menu
-        opened could take the lock after the menu's own and lower everything again."""
+        opened could take the lock after the menu's own and lower everything again.
+
+        The main thread's own QoS changes at once when the refresh runs on it (opening the
+        dashboard: up before WebKit starts), and otherwise as soon as the main thread gets to it.
+        Its override is already there or gone by then: raised, it's never at background QoS with
+        nothing to lift it; lowered, it stays above the others until it gets there."""
         with self._lock:
-            full = self._starting or self.load.full or bool(self._in_use()) or bool(self._holding())
-            if full == self._full:
-                return
-            self._full = full
-            for ident, handle in self._threads.items():
-                if full and handle is None:
-                    self._threads[ident] = self._raise(ident)
-                elif not full and handle is not None:
-                    self._lower(handle)
-                    self._threads[ident] = None
+            wanted = self._starting or self._quitting or self.load.full or bool(self._in_use())
+            full = wanted or bool(self._holding())
+            if full != self._full:
+                self._full = full
+                self._resumed = self._resumed or full
+                for ident, handle in self._threads.items():
+                    if full and handle is None:
+                        self._threads[ident] = self._raise(ident)
+                    elif not full and handle is not None:
+                        self._lower(handle)
+                        self._threads[ident] = None
+            changed, self._wanted = wanted != self._wanted, wanted
+            main = self._main
+        if changed and main is not None:
+            if threading.get_ident() == main:
+                self._apply_main()
+            else:
+                self._on_main(self._apply_main)
+
+    def _apply_main(self):
+        """On the main thread: user-interactive QoS while the app is wanted (see `refresh`), else
+        background QoS. Only a thread can set its own QoS. Works out what's wanted when it runs,
+        so one sent from another thread that arrives late can't undo a newer change."""
+        with self._lock:
+            qos = QOS_CLASS_USER_INTERACTIVE if self._wanted else QOS_CLASS_BACKGROUND
+            if qos != self._main_qos:
+                self._main_qos = qos
+                self._set_qos(qos)
 
     def waited(self, late):
         """The sampler: a timed wait ended `late` seconds after it was due."""
@@ -342,13 +407,18 @@ class Priority:
         self._observe(lambda: self.load.waited(self._now(), late))
 
     def sampled(self):
-        """The sampler, after each sample. Reads the CPU only while it has to: at full priority
-        because of launch or a busy Mac; while quiet nothing is read."""
+        """The sampler, after each sample. Reads the CPU whenever the threads are at full
+        priority, whatever the reason; while they're at background QoS nothing is read."""
         self._observe(self._read_cpu)
 
     def _read_cpu(self):
-        if not self.load.full:
+        if not self._full:
             return
+        if self._resumed:
+            # The cores weren't read while the threads were at background QoS: count from now. Only
+            # the sampler reads them, so this is done here rather than where the threads were raised.
+            self._resumed = False
+            self._idle.restart()
         share = self._idle.share()
         if share is not CpuIdle.NOT_YET:
             self._seen = "no reading of the cores" if share is None else f"{self._idle.what} {share:.0%} idle"
@@ -365,6 +435,4 @@ class Priority:
                 log.info("Mac busy: running at full priority (%s)", self._seen)
             elif before == BUSY:
                 log.info("Mac quiet again (%s)", self._seen)
-            if before == QUIET:
-                self._idle.restart()  # the next reading counts from now
         self.refresh()

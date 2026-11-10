@@ -83,7 +83,7 @@ def test_the_first_reading_shown_takes_when_it_was_read_to_the_log(monkeypatch, 
     monkeypatch.setattr(main.time, "monotonic", lambda: 1000.0)
     shown = []
     app = SimpleNamespace(_statusbar=SimpleNamespace(update=lambda *reading: shown.append(reading)),
-                          _first_reading_seen=False, _check_graphics_process=lambda: None)
+                          _first_reading_seen=False, _check_graphics_process=lambda: None, _quitting=False)
     with caplog.at_level(logging.INFO, logger="pythonflow"):
         EngineRoomApp._show_sample(app, {"t": 1}, None, {}, 1000.0 - 12.6)
         EngineRoomApp._show_sample(app, {"t": 2}, None, {}, 1000.0)  # only the first one says anything

@@ -223,13 +223,24 @@ def test_all_the_cores_count_when_the_registry_names_cpus_the_reading_doesnt_hav
 # ── Priority ──
 
 class Stand_ins:
-    """Records what the threads were told, in place of the system calls."""
+    """Records what the threads were told, in place of the system calls, and what was sent to the
+    main thread (`posted`, run by `run_posted` as the main thread's run loop would)."""
 
     def __init__(self):
         self.qos = []
         self.raised, self.lowered = [], []
         self.order = []  # every call, in the order they came
+        self.posted = []
         self.fail = False
+
+    def on_main(self, func):
+        self.posted.append(func)
+        self.order.append(("posted",))
+
+    def run_posted(self):
+        posted, self.posted = self.posted, []
+        for func in posted:
+            func()
 
     def set_qos(self, qos_class):
         self.qos.append(qos_class)
@@ -251,7 +262,7 @@ def make_priority(state, calls):
     idle.share = lambda: state["share"]
     return Priority(in_use=lambda: state["in_use"], holding=lambda: state["holding"], now=lambda: state["now"],
                     idle=idle,
-                    set_qos=calls.set_qos, raise_=calls.raise_, lower=calls.lower)
+                    set_qos=calls.set_qos, raise_=calls.raise_, lower=calls.lower, on_main=calls.on_main)
 
 
 @pytest.fixture
@@ -476,6 +487,188 @@ def test_a_failed_override_is_tried_again_at_the_next_switch(world):
     assert len(calls.raised) == 2 and len(calls.lowered) == 0
 
 
+# ── the main thread's own QoS ──
+# The test's own thread stands in for the main thread: what it calls is on the main thread, and what
+# another thread decides waits in `calls.posted` until `calls.run_posted()`.
+
+UI, BACKGROUND = priority.QOS_CLASS_USER_INTERACTIVE, priority.QOS_CLASS_BACKGROUND
+
+
+def go_quiet(p, state, start=0.0):
+    """Spare readings from the sampler's thread until the Mac is quiet."""
+    for state["now"] in (start, start + 15, start + 30, start + 31):
+        run_in_thread(p.sampled)
+
+
+@pytest.fixture
+def main_world():
+    """A Priority whose main thread (this one) has registered, once the app has started."""
+    state = {"in_use": False, "holding": False, "now": 0.0, "share": 0.9}
+    calls = Stand_ins()
+    p = make_priority(state, calls)
+    p.register(main=True)
+    p.started()
+    return p, state, calls
+
+
+def test_the_main_thread_registers_at_user_interactive_qos_while_the_app_starts(main_world):
+    """Its override first, then its own QoS, which stays user-interactive: the work it hands off
+    goes at its own QoS, whatever the override (WebKit's start took up to 18.6 s at background QoS
+    with the override on a busy Mac, 0.35 s at most at user-interactive)."""
+    p, state, calls = main_world
+    ident = threading.get_ident()
+    assert calls.order == [("raise", ident), ("qos", UI)]
+
+
+def test_the_main_thread_drops_to_background_qos_once_the_mac_is_quiet(main_world):
+    p, state, calls = main_world
+    go_quiet(p, state)
+    assert calls.lowered == [1001] and calls.qos == [UI]  # decided on the sampler's thread: sent to the main thread
+    assert len(calls.posted) == 1
+    calls.run_posted()
+    assert calls.qos == [UI, BACKGROUND]
+
+
+def test_a_busy_mac_seen_by_the_sampler_raises_the_main_thread_at_once_and_its_qos_when_it_gets_there(main_world):
+    """Never at background QoS with nothing to lift it: its override comes first, so it gets to the
+    change promptly."""
+    p, state, calls = main_world
+    go_quiet(p, state)
+    calls.run_posted()
+    del calls.order[:]
+    state["now"] = 60.0
+    run_in_thread(lambda: p.waited(1.4))
+    assert calls.order == [("raise", threading.get_ident()), ("posted",)]
+    calls.run_posted()
+    assert calls.order[-1] == ("qos", UI)
+
+
+def test_the_menu_or_the_dashboard_opening_on_the_main_thread_changes_its_qos_at_once(main_world):
+    """Before the work it's for: the dashboard's window and WebKit are made right after."""
+    p, state, calls = main_world
+    go_quiet(p, state)
+    calls.run_posted()
+    state["in_use"] = True
+    p.refresh()
+    assert calls.qos[-1] == UI and calls.posted == []
+    state["in_use"] = False
+    p.refresh()
+    assert calls.qos[-1] == BACKGROUND and calls.posted == []
+
+
+def test_holding_the_fans_on_a_quiet_mac_keeps_the_main_thread_at_background_qos_with_its_override(main_world):
+    """As measured for energy: the override alone, as before."""
+    p, state, calls = main_world
+    state["holding"] = True
+    go_quiet(p, state)
+    calls.run_posted()
+    assert calls.qos == [UI, BACKGROUND] and calls.lowered == []
+    state["in_use"] = True  # the menu opens and closes while the fans are held
+    p.refresh()
+    state["in_use"] = False
+    p.refresh()
+    assert calls.qos == [UI, BACKGROUND, UI, BACKGROUND] and calls.lowered == []
+    state["holding"] = False  # the fans go back to macOS: the override goes too
+    p.refresh()
+    assert calls.lowered == [1001] and calls.qos[-1] == BACKGROUND
+
+
+def test_a_change_sent_to_the_main_thread_does_what_is_wanted_when_it_arrives(main_world):
+    """A late arrival can't undo a newer change made on the main thread."""
+    p, state, calls = main_world
+    go_quiet(p, state)  # sent: background
+    state["in_use"] = True
+    p.refresh()  # the menu opens before it arrives
+    calls.run_posted()
+    assert calls.qos == [UI]  # still user-interactive: it never dropped
+
+
+def test_quitting_never_lowers_anything_again(main_world):
+    p, state, calls = main_world
+    go_quiet(p, state)
+    calls.run_posted()
+    raised = len(calls.raised)
+    p.quit()  # on the main thread: at once
+    assert calls.qos[-1] == UI and len(calls.raised) == raised + 1
+    lowered = len(calls.lowered)
+    state["holding"] = True
+    p.refresh()
+    state["holding"] = False  # the fans let go as the app quits
+    p.refresh()
+    go_quiet(p, state, start=100)
+    state["now"] = 200.0
+    run_in_thread(lambda: p.waited(0.0))
+    calls.run_posted()
+    assert len(calls.lowered) == lowered and calls.qos[-1] == UI
+
+
+def test_a_thread_registering_while_the_app_quits_is_raised(main_world):
+    p, state, calls = main_world
+    go_quiet(p, state)
+    p.quit()
+    ident = run_in_thread(p.register)
+    assert calls.raised[-1] == ident
+
+
+# ── reading the cores ──
+
+def test_the_cores_are_read_while_the_fans_keep_the_threads_raised_so_a_busy_mac_is_noticed(main_world, caplog):
+    """Raised for the fans, the sampler's waits no longer end late, so only the cores can say the
+    Mac has turned busy (1.2.19 called a busy Mac quiet for as long as a profile held the fans)."""
+    p, state, calls = main_world
+    reads = []
+    real_share = p._idle.share
+    p._idle.share = lambda: reads.append(1) or real_share()
+    state["holding"] = True
+    go_quiet(p, state)
+    calls.run_posted()
+    assert p.load.state == QUIET and calls.qos[-1] == BACKGROUND
+    read = len(reads)
+    with caplog.at_level(logging.INFO, logger="pythonflow"):
+        state["share"] = 0.02  # a build starts
+        state["now"] = 40.0
+        run_in_thread(p.sampled)
+    assert len(reads) == read + 1
+    assert p.load.state == BUSY
+    calls.run_posted()
+    assert calls.qos[-1] == UI  # busy: the main thread's own QoS goes up as well
+    assert [r.getMessage() for r in caplog.records] == ["Mac busy: running at full priority (efficiency cores 2% idle)"]
+
+
+def test_the_cores_are_read_while_the_menu_or_dashboard_keeps_the_threads_raised(world):
+    p, state, calls = world
+    reads = []
+    p._idle.share = lambda: reads.append(1) or 0.9
+    for state["now"] in (0, 15, 30, 31):
+        p.sampled()
+    read = len(reads)
+    state["in_use"] = True
+    p.refresh()
+    for state["now"] in (40, 42.5):
+        p.sampled()
+    assert len(reads) == read + 2
+
+
+def test_reading_counts_from_when_the_threads_were_raised_again_and_not_across_the_gap(world):
+    p, state, calls = world
+    restarts = []
+    p._idle.restart = lambda: restarts.append(state["now"])
+    for state["now"] in (0, 15, 30, 31, 35):
+        p.sampled()
+    assert restarts == []  # read without a gap until quiet, then not read
+    state["in_use"] = True  # the menu opens 20 s later
+    state["now"] = 55.0
+    p.refresh()
+    for state["now"] in (55.1, 57.5, 60):
+        p.sampled()
+    assert restarts == [55.1]  # once, at the first reading after the gap
+    state["in_use"], state["holding"] = False, True  # still raised: no gap
+    p.refresh()
+    for state["now"] in (61, 62):
+        p.sampled()
+    assert restarts == [55.1]
+
+
 # ── the real calls ──
 
 def test_the_real_calls_raise_and_lower_a_thread_that_is_waiting():
@@ -541,6 +734,29 @@ def test_the_real_override_outlasts_the_thread_lowering_its_own_qos_after_it():
     t.join()
     raised, lowered = seen
     assert lowered == 4 < raised
+
+
+def test_the_real_main_thread_registration_follows_what_the_app_needs_with_its_own_qos():
+    """What _apply_main relies on: a thread can lower its own QoS to background and raise it back to
+    user-interactive itself, with or without the override."""
+    p = Priority(idle=CpuIdle(read=lambda: None, cores=()), on_main=lambda func: None)
+    seen = []
+
+    def worker():
+        p.register(main=True)  # launching: user-interactive
+        seen.append(base_priority())
+        p._starting, p.load.state = False, QUIET
+        p.refresh()  # quiet, nothing open: background, no override
+        seen.append(base_priority())
+        p.quit()
+        seen.append(base_priority())
+        p.unregister()
+
+    t = threading.Thread(target=worker)
+    t.start()
+    t.join()
+    launching, quiet, quitting = seen
+    assert quiet == 4 < launching and quitting == launching
 
 
 def test_the_real_core_counts_have_a_row_for_each_cpu_and_the_array_they_come_in_is_given_back():

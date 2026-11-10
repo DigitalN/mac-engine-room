@@ -317,3 +317,13 @@ def test_the_log_says_how_long_a_click_took_to_open_the_menu(monkeypatch, caplog
         bar._target.menuNeedsUpdate_(bar._menu)
         bar._target.menuWillOpen_(bar._menu)
     assert [r.getMessage() for r in caplog.records] == ["Menu took 1.8 s to open"]
+
+
+def test_quitting_takes_the_item_out_of_the_menu_bar(monkeypatch):
+    removed = []
+    item = SimpleNamespace(button=lambda: _FakeButton(), setMenu_=lambda menu: None)
+    monkeypatch.setattr(statusbar, "NSStatusBar", SimpleNamespace(systemStatusBar=lambda: SimpleNamespace(
+        statusItemWithLength_=lambda length: item, removeStatusItem_=removed.append)))
+    bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None)
+    bar.remove()
+    assert removed == [item]

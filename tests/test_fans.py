@@ -1,6 +1,8 @@
 """Fan control: the curves, the safety override, the tuning limits, and the controller
 against a stand-in for the helper (nothing here talks to the real one)."""
 
+import logging
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -281,11 +283,60 @@ def test_after_sleep_or_a_missed_check_in_the_fans_are_taken_again_from_scratch(
     assert helper.sent[-1] == "set 1499 1499"  # set again, not just a check-in
 
 
-def test_quitting_hands_the_fans_back(control):
+def test_quitting_leaves_the_fans_to_the_helper_without_waiting_for_auto(control, caplog):
+    """The helper hands the fans back as the connection closes, as it does for `auto`. Asking for
+    `auto` and waiting for the answer took 4.4 s at a quit on a busy Mac."""
     c, helper = control("balanced")
     feed(c, [40])
-    c.stop()
-    assert helper.sent[-1] == "auto" and not c.holding
+    closed = helper.closed
+    with caplog.at_level(logging.INFO, logger="pythonflow"):
+        c.stop()
+    assert "auto" not in helper.sent and helper.sent == ["set 1499 1499"]
+    assert helper.closed == closed + 1 and not c.holding
+    assert [r.getMessage() for r in caplog.records] == [
+        "Fans left for the fan helper to hand back to macOS as Mac Engine Room quits"]
+
+
+def test_quitting_lets_a_fan_write_in_progress_finish_before_closing_the_connection(control):
+    """ThermalForge #76, #77: the connection closes only after the write the fan thread was making."""
+    c, helper = control("balanced")
+    writing, finish, order = threading.Event(), threading.Event(), []
+
+    def request(line, timeout=5.0):
+        writing.set()
+        finish.wait(5)
+        order.append(line)
+        return ""
+
+    helper.request = request
+    helper.close = lambda: order.append("close")
+    c.feed({"cpu": 40, "gpu": 35}, {"temperature": 30.0})
+    c.start()
+    assert writing.wait(5)  # the fan thread is in the middle of its `set`
+    stopper = threading.Thread(target=c.stop)
+    stopper.start()
+    stopper.join(0.2)
+    assert stopper.is_alive() and order == []  # stop() waits for it
+    finish.set()
+    stopper.join(5)
+    assert order == ["set 1499 1499", "close"] and not c.is_alive()
+
+
+def test_quitting_with_the_fans_with_macos_says_nothing_and_still_closes_the_connection(control, caplog):
+    c, helper = control(MACOS)
+    feed(c, [40])
+    with caplog.at_level(logging.INFO, logger="pythonflow"):
+        c.stop()
+    assert helper.sent == [] and helper.closed >= 1
+    assert "Fans left" not in caplog.text
+
+
+def test_choosing_macos_default_still_asks_the_helper_for_auto(control):
+    c, helper = control("balanced")
+    feed(c, [40])
+    c._settings.values["fan_profile"] = MACOS
+    feed(c, [40], start=1)
+    assert helper.sent == ["set 1499 1499", "auto"] and not c.holding
 
 
 def test_a_mac_without_fans_has_no_fan_control(control):

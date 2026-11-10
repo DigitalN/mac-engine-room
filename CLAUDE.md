@@ -38,7 +38,11 @@ allow the fan helper`, `Fan control is waiting for the helper to be allowed in L
 `Fans held by <profile> at <rpm> rpm (cores N°)`, `Fans back to macOS: <why>`,
 `Safety override: fans at full speed (<why>)` and `Safety override over`, `Another app is
 controlling the fans; leaving them alone`, and `Fan control isn't available …` or `Fan
-control stopped because …`. The helper logs to the unified log, not app.log:
+control stopped because …`. A quit with the fans held logs `Fans left for the fan helper to hand
+back to macOS as Mac Engine Room quits`: it doesn't ask for `auto` and wait for the answer (4.4 s
+at a quit on a busy Mac), it closes the connection, and the helper hands them back as it closes,
+logging `Fans back with macOS (Mac Engine Room disconnected)`. The helper logs to the unified log,
+not app.log:
 `/usr/bin/log show --last 1h --predicate 'subsystem == "com.pythonflow.monitor"'` (zsh's own
 `log` command shadows it) shows `Holding the fans at [rpm, rpm] rpm` and `Fans back with
 macOS (<why>)`, where why is the app asking, it disconnecting, no word for 10 seconds, or
@@ -76,7 +80,11 @@ isn't the app's. A slow menu or first reading with no `Mac busy` line before it 
 priority: look at the macOS log for what else was waiting.
 
 `Dashboard took 0.8 s to open the first time` is timed from the click to the page loaded: the
-first open of each launch makes the window and starts WebKit (see *Launcher* below). `Couldn't open
+first open of each launch makes the window and starts WebKit (see *Launcher* below). `Dashboard
+hadn't loaded after 6.0 s` means the window was closed, or the app quit, before then: that's a
+blank dashboard, WebKit still starting. On a busy Mac 1.2.19 left it blank for over 11 s, the main
+thread handing WebKit's start off at background QoS (see *Idle work stays on the efficiency
+cores*). A window opened again before its page loaded times from the new click. `Couldn't open
 the dashboard` with a traceback means pywebview couldn't make the window.
 
 A blank dashboard has been WebKit's graphics helper hanging. At login it got stuck
@@ -109,14 +117,22 @@ To reproduce without touching the user's data, run with
   run loop (#59). pywebview sets an app delegate and the menu bar's menus only when it starts the
   run loop itself, so the app sets the delegate at launch (quitting must hand the fans back) and
   the menus (`_recreate_menus`) when it makes the window. Those are pywebview 6.1's internals:
-  `tests/test_window.py` fails if a newer pywebview changes them.
+  `tests/test_window.py` fails if a newer pywebview changes them. Quitting (the menu's Quit, ⌘Q,
+  the updater's relaunch) goes through `_should_terminate`: the menu bar item goes at once, and
+  AppKit gets `NSTerminateLater` and waits, its run loop still running in the modal panel mode,
+  while a thread of its own lets a fan write in progress finish and closes the helper's
+  connection, then answers through `AppHelper.callAfter` (it posts in the common modes;
+  `callLater` doesn't run there). A second `terminate:` during that wait quits at once without
+  asking the delegate (measured), so `quit()` doesn't send one. The relaunch after an update waits
+  up to 60 s for the old copy to exit (`launch.RELAUNCH_SCRIPT`).
 - **Priority**: `Application Files/priority.py`. The main thread, the sampler and fan control run at
   one priority: background QoS, with a user-interactive override on all three at once while the
-  menu is open, the dashboard is watched or a fan profile holds the fans, from launch until the app
-  has started and the Mac has been quiet, and while the Mac is busy. `Load`
-  and `efficiency_cores` (pure, unit-tested) say when it's busy, when it's quiet again and which
-  cores that is judged on; `Priority` raises and lowers the threads. Why: see *Idle work stays on
-  the efficiency cores* below.
+  menu is open, the dashboard is opening or watched or a fan profile holds the fans, from launch
+  until the app has started and the Mac has been quiet, while the Mac is busy, and once the app is
+  quitting. The main thread also sets its own QoS to user-interactive for all of those but the fans
+  alone (`register(main=True)`, `_apply_main`). `Load` and `efficiency_cores` (pure, unit-tested)
+  say when it's busy, when it's quiet again and which cores that is judged on; `Priority` raises
+  and lowers the threads. Why: see *Idle work stays on the efficiency cores* below.
 - **Launching**: `Application Files/launch.py`. The offer to move into Applications,
   relaunching, and open at login (`SMAppService`, loaded with `objc.loadBundle`).
 - **The rename**: `Application Files/rename.py`. Moves an installed Pythonflow over once:
@@ -240,11 +256,40 @@ To reproduce without touching the user's data, run with
   before the sampler's first reading), while the main thread and the sampler stalled with it
   (#59). **The main thread keeps its own QoS until the app has started** (`_finish_launching`
   registers it, then `Priority.started`), with all three at full priority until then, so the work
-  AppKit hands off while the app starts isn't sent at background QoS. Busy: a sampler wait ended
-  more than 0.25 s late (they normally end ~0.09 s late).
+  AppKit hands off while the app starts isn't sent at background QoS.
+  **The main thread's own QoS goes up too, except for the fans alone.** The override raises only
+  its kernel priority, and the work it hands off goes at its own QoS. WebKit's start is such work:
+  during a game recompile on the maintainer's M1 Pro, with every core busy, a scratch app loaded the
+  real `index.html` into a WKWebView in a window never shown, five or six times each way. It has to
+  be an app of its own (LSUIElement, opened with `open -n -W`): run as a child of Claude, WebKit's
+  helpers get Claude's foreground role and are always fast.
+
+  | Main thread | Page loaded in |
+  |---|---|
+  | user-interactive QoS | 0.35, 0.33, 0.32, 0.34, 0.32 s |
+  | background QoS with the override (1.2.19) | 7.9, 3.3, 7.3, 18.6, 0.4, 1.6 s (the fast two when the performance cores briefly had idle time) |
+
+  So the main thread sets its own QoS to user-interactive (`pthread_set_qos_class_self_np`, which
+  only works on the calling thread) while the menu is open, the dashboard is opening (from **Open
+  Dashboard** until its page has loaded or the window closes: a 1.2.19 first open under load took
+  6.0 s, and "watched" lapses 3 s after the last poll) or watched, the app is launching, the Mac is
+  busy, or the app is quitting. Otherwise it's at background QoS, **including while a fan profile
+  holds the fans on a quiet Mac**: that stays exactly as measured below for energy, with the
+  override alone. A change decided on the main thread (opening the menu or the dashboard) applies
+  at once, before the window and WebKit are made; one decided on another thread (the sampler
+  noticing a busy Mac) is sent to the main thread with `AppHelper.callAfter`, and its override lets
+  it run promptly. The sampler and fan control keep the override alone. **Once the app is quitting
+  nothing is lowered** (`Priority.quit`): at a 1.2.19 quit during a recompile, the fans' hand-back
+  refreshed the priority, nothing else held it up (the blank page had never polled, the menu was
+  closed, `Load` had said quiet for nearly two hours), and the main thread waited 4.6 s at
+  background QoS before it could answer AppKit. Busy: a sampler wait ended more than 0.25 s late
+  (they normally end ~0.09 s late).
   Quiet again: 30 s with at least 15% of the **efficiency cores'** time idle (per-core tick
-  counts from `host_processor_info`, read only at full priority), not a quarter of all the cores
-  together as 1.2.15 had it. A background thread runs only on the efficiency cores, and those can
+  counts from `host_processor_info`, read whenever the threads are at full priority for any reason,
+  and never at background QoS), not a quarter of all the cores together as 1.2.15 had it. Raised,
+  the threads' waits don't end late, so the cores are what notice a Mac that has turned busy: 1.2.19
+  read them only while `Load` said busy, so while a profile held the fans it never saw the
+  recompile above. A background thread runs only on the efficiency cores, and those can
   stay saturated while the performance cores have time to spare: on the maintainer's M1 Pro during
   a game compile, `Mac quiet again` came at 09:36:11, a menu took 2.3 s a few seconds later and
   `Mac busy` followed at 09:36:19. After a later compile there the efficiency cores stayed saturated
@@ -276,8 +321,12 @@ To reproduce without touching the user's data, run with
   priority; its own QoS stays background (`qos_class_self()` still says so), and libdispatch, XPC and
   NSOperation hand the QoS on to the work the main thread passes off; and `ps -M` under load showed
   two threads at priority 4 while the three managed ones were at 47. The experiment that would
-  tell, the main thread also setting its own QoS to user-interactive while it's raised, was stopped
-  before it gave results. Until it's run, don't write that the delay is inside macOS.
+  tell, the main thread also setting its own QoS to user-interactive while it's raised, has now been
+  run for WebKit's start (the table above), not for menus, so the menu delay is still unmeasured. The
+  app now does it while the menu is open and while the Mac is busy, so `Menu took … s to open` lines
+  from a busy Mac after a `Mac busy` line (the main thread already up when the click came) are that
+  measurement. It's probably the same mechanism, but until menus are measured, don't write that the
+  delay is inside macOS, or that raising the main thread's QoS fixed it.
 - **Only pass real changes to AppKit and WebKit.** A new menu bar title costs about
   0.9 ms of redraw, and setting the same one again still costs 0.2 ms (measured). The
   menu's rows and tiles are only filled in while it's open, through `_put()`, which
@@ -421,6 +470,9 @@ To reproduce without touching the user's data, run with
 
 Don't undo these without asking:
 
+- WebKit still starts the first time the dashboard opens, not at launch (#59), and there's no
+  "Starting…" placeholder while it does: the fix for the blank dashboard under load is the main
+  thread's own QoS (see *Idle work stays on the efficiency cores*).
 - The window opens on the Dashboard, a short page with a row of tiles per tool, rather
   than cutting Power's Battery, Adapter and System cards to make Now shorter.
 - Fan control starts on macOS default, and the helper is only registered the first time
