@@ -30,6 +30,16 @@ import settings  # noqa: E402
 MARKER = "<script>\n'use strict';"
 
 
+def _strftime(t, fmt):
+    from datetime import datetime
+
+    return datetime.fromtimestamp(t).strftime(fmt)
+
+
+def _clock(fmt, h24):
+    return {"h24": h24, "labels": keepawake.half_hour_labels(fmt, h24), "hours": keepawake.bar_labels(fmt, h24)}
+
+
 def app_facts():
     importlib.reload(fans)  # an edit to them shows on the next load, like one to the page
     importlib.reload(keepawake)
@@ -39,7 +49,10 @@ def app_facts():
             "fan_profiles": fans.page_profiles(), "fan_tuning_limits": fans.TUNING_LIMITS,
             "fan_names": fans.PROFILE_NAMES,
             "keep_awake_choices": [[c, keepawake.CHOICE_NAMES[c]] for c in keepawake.CHOICES],
-            "keep_awake_battery_levels": keepawake.BATTERY_LEVELS}
+            "keep_awake_battery_levels": keepawake.BATTERY_LEVELS,
+            # The bar's labels, through the app's own helper, as a 12-hour and a 24-hour Mac show them.
+            "clock12": _clock(lambda t: _strftime(t, "%-I:%M %p"), False),
+            "clock24": _clock(lambda t: _strftime(t, "%H:%M"), True)}
 
 
 def build():

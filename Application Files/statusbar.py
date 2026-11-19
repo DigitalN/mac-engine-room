@@ -9,7 +9,8 @@ in Settings), then the temperatures as tiles with a small grey label above each 
 the last tile); Keep Awake's four choices as tiles in two rows, with a line under them; then
 Power rows with an SF Symbol, a grey label and the value on the right, then Check for Updates…
 and Quit. They're only filled in while the menu is open, and only values that changed are
-passed to AppKit. While Keep Awake holds the screen on, a cup follows the menu bar's reading.
+passed to AppKit. While Keep Awake holds the screen on, a steaming cup follows the menu bar's
+reading.
 
 Every method here must run on the main thread (main.py dispatches with
 AppHelper.callAfter).
@@ -52,7 +53,8 @@ ROW_HEIGHT = 22
 PROFILE_HEIGHT = 24
 # Keep Awake's tiles, two to a row, in the menu's order.
 KEEP_AWAKE_ROWS = ((keepawake.HOUR, keepawake.TWO_HOURS), (keepawake.OFF, keepawake.UNTIL_SLEEP))
-KEEP_AWAKE_SYMBOL = "cup.and.saucer.fill"
+# A cup with steam (macOS 14 and later), or a plain one before that.
+KEEP_AWAKE_SYMBOLS = ("cup.and.heat.waves.fill", "cup.and.saucer.fill")
 # Fan control states with the profile buttons available to click.
 PROFILES_USABLE = ("off", "holding", "override", "other", "approval", "error")
 
@@ -251,7 +253,7 @@ class StatusBar:
         self._bolt = self._symbol("bolt.fill", size - 2, "Charging")
         self._showing_bolt = False
         self._title_font = NSFont.monospacedDigitSystemFontOfSize_weight_(size, AppKit.NSFontWeightRegular)
-        self._cup = self._symbol(KEEP_AWAKE_SYMBOL, size - 2, "Keep Awake")
+        self._cup = next(filter(None, (self._symbol(name, size - 2, "Keep Awake") for name in KEEP_AWAKE_SYMBOLS)), None)
         self._showing_cup = False
 
         self._target = _MenuTarget.alloc().init()

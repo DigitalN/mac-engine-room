@@ -7,6 +7,7 @@
 //                (noscreen,fanless,ioreport is the 13" M4 Air)
 //   keep awake:  ka1h ka2h kasleep kaschedule kaofftoday kabattery (paused by the battery rule)
 //                kahours (work hours on) karule (battery rule on) sunday (the week starts on Sunday)
+//                h24 (a Mac set to 24-hour time) kaday (work hours 0:00–24:00) kanoon (8:00–Noon)
 //   settings:    fahrenheit dark light
 //   tab:         dashboard (default) thermals keepawake power history settings
 // Change window.__state while it runs to try anything else; the next poll picks it up.
@@ -35,6 +36,7 @@
     fanRpm: null,  // [rpm, …] to show; null follows fan control (0 while macOS has them cool)
     keepAwake: { choice: 'off', holding: false, line: null },  // keepawake.KeepAwake.status()
     firstWeekday: 0,  // Python's weekday the Mac's calendar starts on: 0 Monday, 6 Sunday
+    h24: false,  // the Mac shows 24-hour time (the bar's labels come from keepawake.half_hour_labels)
     sessions: [],
     update: ['idle', null],
     updateUnavailable: null,
@@ -77,6 +79,9 @@
     kahours: () => { state.settings.keep_awake_hours = { ...state.settings.keep_awake_hours, on: true }; },
     karule: () => { state.settings.keep_awake_battery = { ...state.settings.keep_awake_battery, on: true }; },
     sunday: () => { state.firstWeekday = 6; },
+    h24: () => { state.h24 = true; },
+    kaday: () => { state.settings.keep_awake_hours = { ...state.settings.keep_awake_hours, start: '00:00', end: '24:00' }; },
+    kanoon: () => { state.settings.keep_awake_hours = { ...state.settings.keep_awake_hours, start: '08:00', end: '12:00' }; },
     fahrenheit: () => { state.settings.temperature_unit = 'fahrenheit'; },
     dark: () => { state.settings.theme = 'dark'; },
     light: () => { state.settings.theme = 'light'; },
@@ -159,7 +164,7 @@
       history_recording: state.settings.record_history, update_unavailable_reason: state.updateUnavailable,
       fan_profiles: app.fan_profiles, fan_tuning_limits: app.fan_tuning_limits, sensor_hint: state.sensorHint,
       keep_awake_choices: app.keep_awake_choices, keep_awake_battery_levels: app.keep_awake_battery_levels,
-      first_weekday: state.firstWeekday,
+      first_weekday: state.firstWeekday, clock: state.h24 ? app.clock24 : app.clock12,
     }),
     copy_sensor_report: () => new Promise(done => setTimeout(() => done(true), 300)),
     report_problem: () => null,

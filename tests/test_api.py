@@ -19,8 +19,10 @@ def test_keep_awake_buttons_choose_and_return_what_to_show():
 
 def test_app_info_gives_the_page_keep_awakes_choices_and_the_first_weekday():
     app = SimpleNamespace(_sensor_hint=lambda: False, _settings=SimpleNamespace(get=lambda: {"record_history": True}),
-                          _updater=SimpleNamespace(unavailable_reason=None))
+                          _updater=SimpleNamespace(unavailable_reason=None),
+                          _keep_awake=SimpleNamespace(clock=lambda: {"h24": False, "labels": ["Midnight"], "hours": []}))
     info = Api(app=app).app_info()
+    assert info["clock"]["labels"] == ["Midnight"]
     assert info["keep_awake_choices"] == [["off", "Off"], ["1h", "1 Hour"], ["2h", "2 Hours"], ["sleep", "Until Sleep"]]
     assert info["keep_awake_battery_levels"] == (10, 20, 30, 40, 50)
     assert info["first_weekday"] in range(7)

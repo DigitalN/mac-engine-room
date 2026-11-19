@@ -388,3 +388,18 @@ def test_cup_follows_the_reading_only_while_keep_awake_holds(monkeypatch):
     assert button.titles[-1] == "12.3 W"
     bar.set_keep_awake(False)
     assert button.titles.count("12.3 W") == 1
+
+
+def test_the_cup_has_steam_and_falls_back_to_a_plain_one(monkeypatch):
+    assert statusbar.KEEP_AWAKE_SYMBOLS == ("cup.and.heat.waves.fill", "cup.and.saucer.fill")
+    asked, real = [], StatusBar._symbol
+
+    def symbol(name, point_size, description=None):
+        asked.append(name)
+        return None if name == "cup.and.heat.waves.fill" else real(name, point_size, description)  # macOS 12 or 13
+
+    _fake_status_item(monkeypatch)
+    monkeypatch.setattr(StatusBar, "_symbol", staticmethod(symbol))
+    bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None)
+    assert bar._cup is not None
+    assert asked.index("cup.and.heat.waves.fill") < asked.index("cup.and.saucer.fill")

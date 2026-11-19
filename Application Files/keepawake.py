@@ -70,22 +70,29 @@ _CLOCK = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 
 # ── settings ─────────────────────────────────────────────
 
-def minutes(clock):
-    """'09:30' → 570, or None if it isn't a valid 24-hour time."""
+END_OF_DAY = "24:00"  # an end only: midnight at the end of the day
+MIN_BLOCK = 30  # minutes: the page's bar snaps to half hours
+
+
+def minutes(clock, end=False):
+    """'09:30' → 570, or None if it isn't a valid 24-hour time. An `end` can also be '24:00'
+    (1440), the end of the day."""
+    if end and clock == END_OF_DAY:
+        return 24 * 60
     m = _CLOCK.match(clock) if isinstance(clock, str) else None
     return int(m.group(1)) * 60 + int(m.group(2)) if m else None
 
 
 def validate_hours(raw):
-    """Work hours: on/off, start and end as 'HH:MM' (the end after the start: no blocks past
-    midnight), and at least one weekday. Whatever is invalid falls back to its default; a start
-    and end that don't make a block both do."""
+    """Work hours: on/off, start and end as 'HH:MM' (the end after the start, up to '24:00': no
+    blocks past midnight), and at least one weekday. Whatever is invalid falls back to its
+    default; a start and end that don't make a block both do."""
     s = {**DEFAULT_HOURS, "days": list(DEFAULT_HOURS["days"])}
     if not isinstance(raw, dict):
         return s
     if isinstance(raw.get("on"), bool):
         s["on"] = raw["on"]
-    start, end = minutes(raw.get("start")), minutes(raw.get("end"))
+    start, end = minutes(raw.get("start")), minutes(raw.get("end"), end=True)
     if start is not None and end is not None and end > start:
         s["start"], s["end"] = raw["start"], raw["end"]
     days = raw.get("days")
@@ -104,6 +111,12 @@ def validate_battery(raw):
     if raw.get("level") in BATTERY_LEVELS and not isinstance(raw.get("level"), bool):
         s["level"] = raw["level"]
     return s
+
+
+def is_24_hour(template_format):
+    """Whether the Mac shows 24-hour time, from NSDateFormatter's format for the template 'j'
+    ('h a' on a 12-hour Mac, 'HH' on a 24-hour one)."""
+    return isinstance(template_format, str) and ("H" in template_format or "k" in template_format)
 
 
 def first_weekday(ns_first):
@@ -127,7 +140,7 @@ def block_end(hours, now):
     local = datetime.fromtimestamp(now)
     if local.weekday() not in hours["days"]:
         return None
-    start, end = minutes(hours["start"]), minutes(hours["end"])
+    start, end = minutes(hours["start"]), minutes(hours["end"], end=True)
     day = local.replace(hour=0, minute=0, second=0, microsecond=0)
     begins = (day + timedelta(minutes=start)).timestamp()
     ends = (day + timedelta(minutes=end)).timestamp()
@@ -184,6 +197,36 @@ class Status:
 def clock_24(t):
     """For app.log: '17:00'."""
     return datetime.fromtimestamp(t).strftime("%H:%M")
+
+
+def clock_label(t, format_time, h24, end=False):
+    """A time of day as the Mac shows it (`format_time`), except that a 12-hour Mac never says
+    12 AM or 12 PM: every 12 o'clock is Noon or Midnight. On a 24-hour Mac, midnight as an `end`
+    (the end of the day) is 24:00. The menu, the page and its bar all go through this."""
+    local = datetime.fromtimestamp(t)
+    if (local.hour, local.minute) == (0, 0):
+        if not h24:
+            return "Midnight"
+        if end:
+            return END_OF_DAY
+    elif (local.hour, local.minute) == (12, 0) and not h24:
+        return "Noon"
+    return format_time(t)
+
+
+def half_hour_labels(format_time, h24):
+    """Every half hour of a day, 0:00 to 24:00 (49 of them), for the page's bar: it can't ask
+    Python on each move of a drag."""
+    day = datetime(2001, 1, 1)  # a day with no daylight saving change, anywhere
+    return [clock_label((day + timedelta(minutes=30 * i)).timestamp(), format_time, h24, end=i == 48)
+            for i in range(49)]
+
+
+def bar_labels(format_time, h24):
+    """The bar's labels, every 3 hours from 0:00 to 24:00: Midnight · 3 AM · … · Noon · … ·
+    Midnight on a 12-hour Mac (whole hours without ':00'), the times themselves on a 24-hour one."""
+    labels = half_hour_labels(format_time, h24)[::6]
+    return labels if h24 else [label.replace(":00", "", 1) for label in labels]
 
 
 def duration_words(seconds):
@@ -337,7 +380,7 @@ class Model:
             return "Keep Awake on until the Mac sleeps"
         if status.kind == TIMER:
             return f"Keep Awake on for {TIMER_WORDS[self.pick]} (until {clock_24(status.until)})"
-        note = f"Keep Awake on until {clock_24(status.until)} (work hours)"
+        note = f"Keep Awake on until {clock_label(status.until, clock_24, True, end=True)} (work hours)"
         if self._picked and self.pick in TIMERS:  # a timer picked inside the block, which ends later
             note += f"; {TIMER_WORDS[self.pick]} chosen, until {clock_24(self.until)}"
         return note
@@ -434,19 +477,26 @@ def _lock_observer():
     return _lock_observer_class.alloc().init()
 
 
+def mac_uses_24_hour():
+    from Foundation import NSDateFormatter, NSLocale
+
+    return is_24_hour(str(NSDateFormatter.dateFormatFromTemplate_options_locale_("j", 0, NSLocale.autoupdatingCurrentLocale())))
+
+
 class KeepAwake:
     """Runs the Model: on each sample (`feed`), on picks (`choose`), on settings changes and on
     the notifications `start` observes. Holds or releases the assertion, logs, and calls
     `on_change` (any thread) when whether it holds the screen on changes."""
 
     def __init__(self, settings, data_dir, on_change=lambda holding: None, iokit=None, clock=time.time,
-                 format_time=None):
+                 format_time=None, h24=False):
         self._settings = settings
         self._handover_path = os.path.join(str(data_dir), HANDOVER_FILE)
         self._on_change = on_change
         self._iokit = iokit
         self._clock = clock
         self._format_time = format_time
+        self._h24 = h24  # the Mac shows 24-hour time: read at start and on each locale change
         self._model = Model()
         self._env = Env()
         self._lock = threading.RLock()
@@ -468,7 +518,7 @@ class KeepAwake:
         if self._iokit is None:
             self._iokit = _IOKit()
         if self._format_time is None:
-            self._format_time = mac_time_formatter()
+            self._locale_changed()
         self._take_over()
         self._env.screens_awake, (self._env.locked, self._env.away) = _screens_awake(), _locked()
         self._observe()
@@ -539,7 +589,13 @@ class KeepAwake:
 
     def _locale_changed(self):
         """The 12/24-hour setting (or the region) changed: the line follows without a relaunch."""
-        self._format_time = mac_time_formatter()
+        self._format_time, self._h24 = mac_time_formatter(), mac_uses_24_hour()
+
+    def clock(self):
+        """For the page's work-hours bar: whether the Mac shows 24-hour time, and every half hour's
+        label (clock_label), so it says the same as the menu."""
+        fmt = self._format_time or clock_24
+        return {"h24": self._h24, "labels": half_hour_labels(fmt, self._h24), "hours": bar_labels(fmt, self._h24)}
 
     def environment(self, **change):
         """A notification changed what Keep Awake can't decide itself. As the screens wake, whether
@@ -610,8 +666,9 @@ class KeepAwake:
         """For the menu and the page: what's lit, the line, and whether it holds the screen on."""
         with self._lock:
             s, now = self._status, self._clock()
+            fmt, h24 = self._format_time or clock_24, self._h24
             return {"choice": s.lit, "holding": s.holding,
-                    "line": sentence(s, now, self._format_time or clock_24)}
+                    "line": sentence(s, now, lambda t: clock_label(t, fmt, h24, end=True))}
 
     def hand_over(self):
         """The updater is relaunching into a new version: the pick and today's Off go to the new

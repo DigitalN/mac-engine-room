@@ -383,6 +383,7 @@ class Api:
 
         return {"keep_awake_choices": [[c, keepawake.CHOICE_NAMES[c]] for c in keepawake.CHOICES],
                 "keep_awake_battery_levels": keepawake.BATTERY_LEVELS, "first_weekday": _first_weekday(),
+                "clock": self._app._keep_awake.clock(),
                 "version": VERSION, "log_path": str(LOG_PATH), "sensor_hint": self._app._sensor_hint(),
                 "history_recording": self._app._settings.get()["record_history"],
                 "update_unavailable_reason": self._app._updater.unavailable_reason,

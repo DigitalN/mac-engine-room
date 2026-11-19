@@ -277,16 +277,33 @@ wake the Mac. The name everywhere is **Keep Awake** (never "Caffeine").
   hours and minutes past an hour, counting down while the menu is open), "Screen stays on until
   the Mac sleeps.", "Screen stays on until 5:00 PM (work hours)." (no tile lit), "Off for the
   rest of today's work hours.", "Paused because the battery is below 20%.", or no line, with
-  Off lit. Times follow the Mac's 12/24-hour setting. The sentence is built in one place
-  (`keepawake.sentence`) for the menu and the page.
-- **Menu bar:** while Keep Awake holds the screen on (work hours included), a
-  `cup.and.saucer.fill` follows the reading, with the charging bolt still in front:
+  Off lit. Times follow the Mac's 12/24-hour setting, except that a 12-hour Mac never says
+  12 AM or 12 PM: every 12 o'clock is **Noon** or **Midnight** ("Screen stays on until Noon
+  (work hours)."), and on a 24-hour Mac a block ending at midnight ends at 24:00. The sentence
+  is built in one place (`keepawake.sentence`, with `keepawake.clock_label` for the times) for
+  the menu and the page.
+- **Changed on 2026-11-19 after the maintainer tried it:** the steaming cup and the work-hours
+  bar below, in place of From/To time fields.
+- **Menu bar:** while Keep Awake holds the screen on (work hours included), a steaming cup
+  (`cup.and.heat.waves.fill`, macOS 14 and later; `cup.and.saucer.fill` before) follows the reading, with the charging bolt still in front:
   "⚡ 12.3 W ☕", or "12.3 W ☕".
 - **Page:** a **Keep Awake** tab between Thermals and Power, with three cards: the four
   choices (Off · 1 Hour · 2 Hours · Until Sleep) drawn like the Thermals page's fan profiles,
-  with the same sentence under them; Work hours (the switch, From and To, and seven day buttons
+  with the same sentence under them; Work hours (the switch, a 24-hour bar, and seven day buttons
   starting on the Mac's first weekday, editable while it's off); and Battery (hidden on a Mac
   with no battery). Nothing about it in Settings, and no Dashboard row.
+- **The work-hours bar:** a track as wide as the card, the block in the accent colour with a
+  handle at each end. Dragging an end resizes it, dragging the middle moves it at the same
+  length, and a click on the empty track takes the nearer end there. At least 30 minutes, from
+  0:00 to at most 24:00 (Midnight; `"24:00"` is allowed for the end only), never past
+  midnight. While dragging, the end follows the pointer exactly, a label above each moving end
+  shows the half hour it will land on, and the line above the bar shows the snapped times ("9:00
+  AM to 5:00 PM · 8 hours", or "9:00 to 17:00 · 8 hours" on a 24-hour Mac). On release the ends
+  snap to the nearest half hour with a 120 ms transition, and the settings are saved once. A tick
+  every hour, taller every 3 hours, labelled Midnight · 3 AM · 6 AM · 9 AM · Noon · 3 PM · 6 PM ·
+  9 PM · Midnight (the times themselves, 0:00 to 24:00, on a 24-hour Mac). The labels come from
+  Python (`half_hour_labels`, `bar_labels`) so they match the menu. Mouse only: no keyboard, by
+  the maintainer's decision. Polls never redraw the bar under the pointer.
 - **Cost:** no timers or wakeups of its own: it's evaluated on the sampler's ticks and on
   notifications. Holding the screen on doesn't raise the app's priority.
 

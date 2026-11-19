@@ -694,3 +694,72 @@ def test_lock_notifications_reach_keep_awake_through_their_observer():
     observer.screenUnlocked_(None)
     assert changes == [{"locked": True}, {"locked": False}]
     assert observer.respondsToSelector_("screenLocked:") and observer.respondsToSelector_("screenUnlocked:")
+
+
+# ── Noon, Midnight and 24:00 ─────────────────────────────
+
+TWELVE = lambda t: datetime.fromtimestamp(t).strftime("%-I:%M %p")
+TWENTY_FOUR = lambda t: datetime.fromtimestamp(t).strftime("%H:%M")
+
+
+def test_a_12_hour_mac_never_says_12_am_or_12_pm():
+    label = keepawake.clock_label
+    assert label(at("2026-11-19 12:00"), TWELVE, False) == "Noon"
+    assert label(at("2026-11-19 00:00"), TWELVE, False) == "Midnight"
+    assert label(at("2026-11-20 00:00"), TWELVE, False, end=True) == "Midnight"
+    assert label(at("2026-11-19 12:30"), TWELVE, False) == "12:30 PM"  # only the hour itself is Noon
+    assert label(at("2026-11-19 17:00"), TWELVE, False) == "5:00 PM"
+
+
+def test_a_24_hour_mac_ends_the_day_at_24_00():
+    label = keepawake.clock_label
+    assert label(at("2026-11-20 00:00"), TWENTY_FOUR, True, end=True) == "24:00"
+    assert label(at("2026-11-19 00:00"), TWENTY_FOUR, True) == "00:00"  # a start
+    assert label(at("2026-11-19 12:00"), TWENTY_FOUR, True) == "12:00"
+
+
+def test_the_bars_labels_come_from_the_same_helper():
+    twelve = keepawake.half_hour_labels(TWELVE, False)
+    assert len(twelve) == 49 and twelve[0] == "Midnight" and twelve[1] == "12:30 AM"
+    assert twelve[24] == "Noon" and twelve[48] == "Midnight" and twelve[34] == "5:00 PM"
+    assert keepawake.bar_labels(TWELVE, False) == ["Midnight", "3 AM", "6 AM", "9 AM", "Noon", "3 PM", "6 PM", "9 PM", "Midnight"]
+    assert keepawake.bar_labels(TWENTY_FOUR, True) == ["00:00", "03:00", "06:00", "09:00", "12:00", "15:00", "18:00", "21:00", "24:00"]
+
+
+def test_the_sentence_says_noon_and_midnight(tmp_path):
+    ka, iokit, clock, _ = controller(tmp_path, "2026-11-19 10:00", keep_awake_hours={**HOURS, "end": "12:00"})
+    ka._format_time = TWELVE
+    ka.evaluate()
+    assert ka.status()["line"] == "Screen stays on until Noon (work hours)."
+    ka._settings.values["keep_awake_hours"] = {**HOURS, "end": "24:00"}
+    ka.evaluate()
+    assert ka.status()["line"] == "Screen stays on until Midnight (work hours)."
+    ka._format_time, ka._h24 = TWENTY_FOUR, True
+    assert ka.status()["line"] == "Screen stays on until 24:00 (work hours)."
+    assert ka.clock()["hours"][-1] == "24:00"
+
+
+def test_which_clock_the_mac_uses():
+    assert not keepawake.is_24_hour("h a") and not keepawake.is_24_hour("h a")
+    assert keepawake.is_24_hour("HH") and keepawake.is_24_hour("H") and keepawake.is_24_hour("k")
+    assert not keepawake.is_24_hour(None)
+
+
+def test_work_hours_can_end_at_24_00_and_only_end_there():
+    assert validate_hours({"start": "18:00", "end": "24:00"})["end"] == "24:00"
+    assert validate_hours({"start": "24:00", "end": "24:00"})["start"] == "09:00"
+    assert validate_hours({"start": "00:00", "end": "24:01"})["end"] == "17:00"
+    late = {**HOURS, "start": "18:00", "end": "24:00"}
+    assert block_end(late, at("2026-11-19 23:59")) == at("2026-11-20 00:00")
+    assert block_end(late, at("2026-11-20 00:00")) is None  # Friday's block starts at 18:00
+    m = Model()
+    s, notes, _ = run(m, "2026-11-19 20:00", hours=late)
+    assert notes == ["Keep Awake on until 24:00 (work hours)"]
+
+
+def test_a_day_long_block_on_a_daylight_saving_day():
+    sunday = {**HOURS, "start": "00:00", "end": "24:00", "days": [6]}
+    assert block_end(sunday, at("2026-11-01 12:00")) == at("2026-11-02 00:00")
+    assert at("2026-11-02 00:00") - at("2026-11-01 00:00") == 25 * 3600  # clocks went back that night
+    assert block_end(sunday, at("2026-03-08 12:00")) == at("2026-03-09 00:00")
+    assert at("2026-03-09 00:00") - at("2026-03-08 00:00") == 23 * 3600

@@ -69,8 +69,9 @@ up`, `2 hours are up`, `the Mac is going to sleep`, `work hours are over`, `work
 off` or `work hours changed`, with `, for the rest of today's work hours` while Off for the rest
 of today's work hours holds (a pick after it ends, and Off is back); `Keep Awake paused (<why>)`: `the screen is locked` (switching to
 another user's session too), `the screens are asleep` (a dark wake, the display put to sleep) or
-`the battery is below 20%`; and `Keep Awake resumed`. Times there are 24-hour; the menu and page
-follow the Mac's setting. `Keep Awake carried over from the copy that updated itself` is the new
+`the battery is below 20%`; and `Keep Awake resumed`. Times there are 24-hour (a block ending at
+midnight says 24:00); the menu and page follow the Mac's setting, with Noon and Midnight for 12
+o'clock on a 12-hour Mac. `Keep Awake carried over from the copy that updated itself` is the new
 copy bringing back a pick or today's Off after the updater's relaunch. Over the relaunch's gap the
 old copy logs `Keep Awake left caffeinate holding the screen on for up to N s over the update (pid
 P)` (`pmset -g assertions` lists caffeinate's `PreventUserIdleDisplaySleep` until then), and the
@@ -198,8 +199,10 @@ To reproduce without touching the user's data, run with
 - **Keep Awake**: `Application Files/keepawake.py`. Holds the screen on with IOKit's
   `PreventUserIdleDisplaySleep` assertion (ctypes): Off, 1 Hour, 2 Hours, Until Sleep, work hours
   (`keep_awake_hours`) and the battery rule (`keep_awake_battery`), validated there for
-  `settings.py`. `Model` is the rules and `sentence()` the line the menu and the page both show,
-  pure and unit-tested; `KeepAwake` runs them on each sample (`feed`), on picks, on settings changes
+  `settings.py` (an end can be `"24:00"`). `Model` is the rules and `sentence()` the line the menu
+  and the page both show, with `clock_label()` for times (Noon and Midnight on a 12-hour Mac, never
+  12 AM or 12 PM; 24:00 for the end of the day on a 24-hour one) and `half_hour_labels()` /
+  `bar_labels()` for the page's work-hours bar, all pure and unit-tested; `KeepAwake` runs them on each sample (`feed`), on picks, on settings changes
   and on the screens' sleep/wake, lock/unlock, session and system sleep notifications, holds or
   releases the assertion, and declares user activity as it lets go while the Mac is in use. The lock
   notifications go through an observer with `NSNotificationSuspensionBehaviorDeliverImmediately`
@@ -212,8 +215,8 @@ To reproduce without touching the user's data, run with
   Thermals tiles and Power rows are custom views (NSTextField labels, NSBox tiles,
   NSSlider, SF Symbols), then the actions. Open Dashboard is first, then Thermals, Keep Awake (its
   four choices as tiles in two rows, and its line) and Power. While Keep Awake holds the screen on,
-  `cup.and.saucer.fill` follows the reading as an attachment in the title, which takes the
-  title's colour; the charging bolt stays the button's image. The profile buttons are the three chosen in
+  a steaming cup (`cup.and.heat.waves.fill`, or `cup.and.saucer.fill` before macOS 14) follows the
+  reading as an attachment in the title, which takes the title's colour; the charging bolt stays the button's image. The profile buttons are the three chosen in
   Settings, drawn as tiles like the temperatures' (a borderless NSButton over an NSBox), the
   chosen one in the accent colour: stock push buttons looked out of place there. Main
   thread only.
@@ -226,7 +229,9 @@ To reproduce without touching the user's data, run with
   in for the page.
 - **Frontend**: `Application Files/index.html`. A single page in vanilla JS with a
   hand-rolled canvas chart and no external resources. A **Dashboard | Thermals | Keep Awake | Power**
-  switcher (Keep Awake between Thermals and Power) and a shared Settings page. The window opens on the Dashboard, and **Open
+  switcher (Keep Awake between Thermals and Power) and a shared Settings page. Keep Awake's work
+  hours are a 24-hour bar (pointer events with `setPointerCapture`, mouse only), saved once on
+  release after a 120 ms snap to the half hour; its labels come from `Api.app_info`'s `clock`. The window opens on the Dashboard, and **Open
   Dashboard** in the menu switches to it (`EngineRoomApp._show_tab`); Power always opens on
   Now, with History beside it. The Dashboard and the Thermals page share the fan controls
   (`renderFanControls`): all four profiles and the status line; each fan's speed and gauge
@@ -539,7 +544,9 @@ Don't undo these without asking:
   whichever ends later, and Until Sleep carries past the end. Over the updater's relaunch,
   caffeinate holds the screen on until the new copy takes over.
   The battery rule is off by default. Locking pauses it. Its own tab, nothing in Settings, no
-  Dashboard row. Never called "Caffeine".
+  Dashboard row. Never called "Caffeine". Work hours are set on a 24-hour bar that snaps to half
+  hours, mouse only (no keyboard, decided). A 12-hour Mac sees Noon and Midnight, never 12 AM or
+  12 PM. The menu bar's cup steams.
 - Apple silicon only (the build is arm64, so Intel Macs can't open it). Desktops get the same
   sensor work as laptops: on a Mac with no battery, Power says "Desktop Mac" and shows System and
   Chip power, with no Battery or Adapter card, row, tile or chart line; fan control is offered
