@@ -247,6 +247,7 @@ def test_readings_stop_reaching_the_menu_bar_once_the_app_is_quitting(monkeypatc
     monkeypatch.setattr(AppHelper, "callAfter", lambda func, *args: posted.append(func))
     app = stand_in_app(_quitting=True, _live=SimpleNamespace(push=lambda s, t: None),
                        _recorder=SimpleNamespace(feed=lambda s: None), _fans=SimpleNamespace(feed=lambda t, s: None),
+                       _keep_awake=SimpleNamespace(feed=lambda s: None),
                        _statusbar=SimpleNamespace(update=lambda *reading: shown.append(reading)))
     EngineRoomApp._on_sample(app, {"t": 1})
     EngineRoomApp._show_sample(app, {"t": 1}, None, {})  # one sent before the quit began
@@ -366,3 +367,14 @@ def test_the_menus_and_app_delegate_the_app_takes_from_pywebview_are_still_there
     assert isinstance(members.get("AppDelegate"), ast.ClassDef)
     init = ast.get_source_segment(source, members["__init__"])
     assert "BrowserView.AppDelegate.alloc()" in init and "setDelegate_(self._appDelegate)" in init
+
+
+def test_only_the_updaters_relaunch_hands_keep_awake_over():
+    order = []
+    app = SimpleNamespace(_keep_awake=SimpleNamespace(hand_over=lambda: order.append("hand over")),
+                          quit=lambda: order.append("quit"))
+    EngineRoomApp._quit_for_update(app)
+    assert order == ["hand over", "quit"]
+    order.clear()
+    EngineRoomApp.quit(SimpleNamespace(_quitting=True))  # the menu's Quit goes nowhere near it
+    assert order == []

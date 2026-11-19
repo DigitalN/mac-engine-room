@@ -12,6 +12,7 @@ import threading
 from pathlib import Path
 
 import fans
+import keepawake
 
 log = logging.getLogger(__name__)
 
@@ -29,6 +30,8 @@ DEFAULTS = {
     "fan_profile": fans.MACOS,  # until a profile is chosen, the fans are macOS's
     "fan_tuning": {},  # {profile: {"start", "full", "top"}}, only what differs from its defaults
     "menu_fan_profiles": fans.MENU_PROFILES,  # three different profiles, in the menu's order
+    "keep_awake_hours": keepawake.DEFAULT_HOURS,  # work hours: off until turned on, Mon–Fri 9:00–17:00
+    "keep_awake_battery": keepawake.DEFAULT_BATTERY,  # "Stop when the battery is below 20%", off
 }
 
 
@@ -52,6 +55,8 @@ def validate(raw):
     shown = raw.get("menu_fan_profiles")
     valid = isinstance(shown, list) and len(shown) == 3 and len(set(shown)) == 3 and all(p in fans.PROFILE_IDS for p in shown)
     s["menu_fan_profiles"] = list(shown if valid else fans.MENU_PROFILES)
+    s["keep_awake_hours"] = keepawake.validate_hours(raw.get("keep_awake_hours"))
+    s["keep_awake_battery"] = keepawake.validate_battery(raw.get("keep_awake_battery"))
     return s
 
 

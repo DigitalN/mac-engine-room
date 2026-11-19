@@ -4,11 +4,13 @@ A plain NSStatusItem with a native NSMenu. The Rust app used a Tauri tray icon
 plus an NSPopover, and on macOS 27 AppKit swallowed the clicks so the panel
 never opened; a standard status-item menu has no such dependency.
 
-The menu's top rows are custom views: Thermals' fan profile buttons (the three chosen in
-Settings), then the temperatures as tiles with a small grey label above each value (fans in
-the last tile); then Power rows with an SF Symbol, a grey label and the
-value on the right, then the actions. They're only filled in while the menu is open, and
-only values that changed are passed to AppKit.
+Open Dashboard comes first. Then custom views: Thermals' fan profile buttons (the three chosen
+in Settings), then the temperatures as tiles with a small grey label above each value (fans in
+the last tile); Keep Awake's four choices as tiles in two rows, with a line under them; then
+Power rows with an SF Symbol, a grey label and the value on the right, then Check for Updates…
+and Quit. They're only filled in while the menu is open, and only values that changed are
+passed to AppKit. While Keep Awake holds the screen on, a steaming cup follows the menu bar's
+reading.
 
 Every method here must run on the main thread (main.py dispatches with
 AppHelper.callAfter).
@@ -26,6 +28,7 @@ from AppKit import (
 from Foundation import NSObject
 
 import fans as fan_control
+import keepawake
 
 log = logging.getLogger("pythonflow")
 
@@ -48,6 +51,10 @@ INSET = 14
 TILE_COLUMNS, TILE_GAP, TILE_HEIGHT = 3, 6, 42
 ROW_HEIGHT = 22
 PROFILE_HEIGHT = 24
+# Keep Awake's tiles, two to a row, in the menu's order.
+KEEP_AWAKE_ROWS = ((keepawake.HOUR, keepawake.TWO_HOURS), (keepawake.OFF, keepawake.UNTIL_SLEEP))
+# A cup with steam (macOS 14 and later), or a plain one before that.
+KEEP_AWAKE_SYMBOLS = ("cup.and.heat.waves.fill", "cup.and.saucer.fill")
 # Fan control states with the profile buttons available to click.
 PROFILES_USABLE = ("off", "holding", "override", "other", "approval", "error")
 
@@ -170,6 +177,9 @@ class _MenuTarget(NSObject):
     def allowFans_(self, sender):
         self.on_allow_fans()
 
+    def chooseKeepAwake_(self, sender):
+        self.on_keep_awake(keepawake.CHOICES[sender.tag()])
+
     def menuNeedsUpdate_(self, menu):
         self.on_menu_needs_update()
 
@@ -229,7 +239,8 @@ def _section_header(title):
 
 class StatusBar:
     def __init__(self, on_open, on_check_updates, on_quit, on_menu_open, fan_status=lambda: {},
-                 on_profile=lambda pid: None, on_allow_fans=lambda: None):
+                 on_profile=lambda pid: None, on_allow_fans=lambda: None, keep_awake_status=lambda: {},
+                 on_keep_awake=lambda choice: {}):
         self._item = NSStatusBar.systemStatusBar().statusItemWithLength_(NSVariableStatusItemLength)
         self._button = self._item.button()
         size = NSFont.menuBarFontOfSize_(0).pointSize()
@@ -241,6 +252,9 @@ class StatusBar:
 
         self._bolt = self._symbol("bolt.fill", size - 2, "Charging")
         self._showing_bolt = False
+        self._title_font = NSFont.monospacedDigitSystemFontOfSize_weight_(size, AppKit.NSFontWeightRegular)
+        self._cup = next(filter(None, (self._symbol(name, size - 2, "Keep Awake") for name in KEEP_AWAKE_SYMBOLS)), None)
+        self._showing_cup = False
 
         self._target = _MenuTarget.alloc().init()
         self._target.on_open = on_open
@@ -250,6 +264,9 @@ class StatusBar:
         self._target.on_menu_open = self._set_menu_open
         self._target.on_profile = self._choose_profile
         self._target.on_allow_fans = on_allow_fans
+        self._target.on_keep_awake = self._choose_keep_awake
+        self._keep_awake_status = keep_awake_status
+        self._on_keep_awake = on_keep_awake
         self._on_menu_open = on_menu_open
         self._fan_status = fan_status
         self._on_profile = on_profile
@@ -266,6 +283,8 @@ class StatusBar:
         menu = NSMenu.alloc().init()
         menu.setAutoenablesItems_(False)
         menu.setDelegate_(self._target)
+        menu.addItem_(self._action_item("Open Dashboard", "openDashboard:", "d"))
+        menu.addItem_(NSMenuItem.separatorItem())
         self._thermals_header = _section_header("Thermals")
         menu.addItem_(self._thermals_header)
         self._build_profiles(menu)
@@ -276,10 +295,10 @@ class StatusBar:
         self._fans_unavailable_item.setEnabled_(False)
         menu.addItem_(self._fans_unavailable_item)
         self._build_tiles(menu)
+        menu.addItem_(_section_header("Keep Awake"))
+        self._build_keep_awake(menu)
         menu.addItem_(_section_header("Power"))
         self._build_rows(menu)
-        menu.addItem_(NSMenuItem.separatorItem())
-        menu.addItem_(self._action_item("Open Dashboard", "openDashboard:", "d"))
         menu.addItem_(NSMenuItem.separatorItem())
         self._update_item = self._action_item("Check for Updates…", "checkForUpdates:", "")
         menu.addItem_(self._update_item)
@@ -375,6 +394,62 @@ class StatusBar:
             box.setFrame_(((x, 2), (tile_width, PROFILE_HEIGHT)))
             button.setFrame_(((x, 2), (tile_width, PROFILE_HEIGHT)))
 
+    def _build_keep_awake(self, menu):
+        """Keep Awake's four choices as tiles drawn like the fan profiles', two to a row (1 Hour,
+        2 Hours; Off, Until Sleep), the active one in the accent colour, then its line."""
+        rows = len(KEEP_AWAKE_ROWS)
+        self._keep_awake_item, self._keep_awake_view = _view_item(rows * (PROFILE_HEIGHT + TILE_GAP) + 2)
+        font = NSFont.systemFontOfSize_weight_(NSFont.smallSystemFontSize(), AppKit.NSFontWeightMedium)
+        self._keep_awake_tiles = {}
+        for row in KEEP_AWAKE_ROWS:
+            for choice in row:
+                box = _tile_box(self._tile_fill)
+                button = NSButton.buttonWithTitle_target_action_(keepawake.CHOICE_NAMES[choice], self._target, "chooseKeepAwake:")
+                button.setBordered_(False)
+                button.setButtonType_(AppKit.NSButtonTypeMomentaryChange)
+                button.setFont_(font)
+                button.setTag_(keepawake.CHOICES.index(choice))
+                for view in (box, button):
+                    self._keep_awake_view.addSubview_(view)
+                self._keep_awake_tiles[choice] = (box, button)
+        self._keep_awake_view.relayout = self._layout_keep_awake
+        self._layout_keep_awake()
+        menu.addItem_(self._keep_awake_item)
+
+        self._keep_awake_line_item, view = _view_item(ROW_HEIGHT)
+        self._keep_awake_line = NSTextField.wrappingLabelWithString_("")
+        self._keep_awake_line.setFont_(NSFont.menuFontOfSize_(NSFont.smallSystemFontSize()))
+        self._keep_awake_line.setTextColor_(NSColor.secondaryLabelColor())
+        view.addSubview_(self._keep_awake_line)
+        view.relayout = self._layout_keep_awake_line
+        self._keep_awake_line_item.setHidden_(True)
+        self._layout_keep_awake_line()
+        menu.addItem_(self._keep_awake_line_item)
+
+    def _layout_keep_awake(self):
+        width = self._keep_awake_view.frame().size.width
+        tile_width = (width - 2 * INSET - TILE_GAP) / 2
+        for r, row in enumerate(KEEP_AWAKE_ROWS):
+            for c, choice in enumerate(row):
+                frame = ((INSET + c * (tile_width + TILE_GAP), 2 + r * (PROFILE_HEIGHT + TILE_GAP)), (tile_width, PROFILE_HEIGHT))
+                for view in self._keep_awake_tiles[choice]:
+                    view.setFrame_(frame)
+
+    def _layout_keep_awake_line(self):
+        """The line wraps if it has to; its row is as tall as the text."""
+        view = self._keep_awake_line.superview()
+        width = view.frame().size.width - 2 * INSET
+        self._keep_awake_line.setPreferredMaxLayoutWidth_(width)
+        height = math.ceil(self._keep_awake_line.cell().cellSizeForBounds_(((0, 0), (width, 1000))).height)
+        self._keep_awake_line.setFrame_(((INSET, 1), (width, height)))
+        if abs(view.frame().size.height - (height + 5)) > 0.5:
+            view.setFrameSize_((view.frame().size.width, height + 5))
+
+    def _choose_keep_awake(self, choice):
+        status = self._on_keep_awake(choice)  # the new state, shown at once rather than at the next sample
+        self._fill_keep_awake(status)
+        self.set_keep_awake(bool(status and status.get("holding")))
+
     def _choose_profile(self, pid):
         self._fill_profiles(pid)  # at once, not at the next sample
         self._on_profile(pid)
@@ -445,16 +520,13 @@ class StatusBar:
         self._update_item.setTitle_(title)
         self._update_item.setEnabled_(enabled)
 
-    def update(self, sample, thermals, settings):
-        """Called for every sample, with `thermals` when temperatures were read for it. A new
-        title costs a redraw (about 0.9 ms, measured) and even setting the same one again
-        costs 0.2 ms, so only changes go through. The menu's rows are only filled in
-        while it's open."""
+    def update(self, sample, thermals, settings, keep_awake=False):
+        """Called for every sample, with `thermals` when temperatures were read for it, and
+        whether Keep Awake holds the screen on. A new title costs a redraw (about 0.9 ms,
+        measured) and even setting the same one again costs 0.2 ms, so only changes go
+        through. The menu's rows are only filled in while it's open."""
         charging_title = bool(settings.get("menu_bar_show_charging") and sample.get("is_charging"))
-        title = menu_bar_title(sample, thermals, settings)
-        if title != self._title:
-            self._button.setTitle_(title)
-            self._title = title
+        self._set_title(menu_bar_title(sample, thermals, settings), keep_awake)
         if charging_title != self._showing_bolt and self._bolt:
             self._button.setImage_(self._bolt if charging_title else None)
             self._showing_bolt = charging_title
@@ -465,6 +537,28 @@ class StatusBar:
             self._thermals = thermals
         if self.menu_open:
             self._fill()
+
+    def set_keep_awake(self, holding):
+        """Keep Awake started or stopped holding the screen on: the cup comes or goes now."""
+        self._set_title(self._title, holding)
+
+    def _set_title(self, title, cup):
+        """The reading, and the cup to its right while Keep Awake holds the screen on (the
+        charging bolt stays in front, as the button's image): an attachment in the title, which
+        takes the title's colour."""
+        cup = bool(cup and self._cup)
+        if (title, cup) == (self._title, self._showing_cup):
+            return
+        if cup:
+            text = AppKit.NSMutableAttributedString.alloc().initWithString_attributes_(
+                title + " ", {AppKit.NSFontAttributeName: self._title_font})
+            attachment = AppKit.NSTextAttachment.alloc().init()
+            attachment.setImage_(self._cup)
+            text.appendAttributedString_(AppKit.NSAttributedString.attributedStringWithAttachment_(attachment))
+            self._button.setAttributedTitle_(text)
+        else:
+            self._button.setTitle_(title)
+        self._title, self._showing_cup = title, cup
 
     def _menu_needs_update(self):
         """AppKit's first word that the menu is about to open."""
@@ -498,6 +592,7 @@ class StatusBar:
     def _fill(self):
         self._fill_profiles()
         self._fill_tiles()
+        self._fill_keep_awake()
         sample = self._sample
         if sample is None:
             return
@@ -537,6 +632,21 @@ class StatusBar:
             self._put(button, "setEnabled_", usable)
         self._put(self._allow_fans_item, "setHidden_", not (has_fans and state == "approval"))
         self._put(self._fans_unavailable_item, "setHidden_", not (has_fans and state == "unavailable"))
+
+    def _fill_keep_awake(self, status=None):
+        """The lit choice and the line (keepawake.sentence, shared with the page). Filled on each
+        sample while the menu is open; only changes reach AppKit."""
+        status = status or self._keep_awake_status() or {}
+        lit = status.get("choice", keepawake.OFF)
+        for choice, (box, button) in self._keep_awake_tiles.items():
+            on = choice == lit
+            self._put(box, "setFillColor_", NSColor.controlAccentColor() if on else self._tile_fill)
+            self._put(button, "setContentTintColor_", NSColor.whiteColor() if on else NSColor.labelColor())
+            self._put(button, "setAccessibilityValue_", "selected" if on else "")
+        line = status.get("line")
+        self._put(self._keep_awake_line_item, "setHidden_", not line)
+        if line and self._put(self._keep_awake_line, "setStringValue_", line):
+            self._layout_keep_awake_line()
 
     def _fill_tiles(self):
         thermals = self._thermals

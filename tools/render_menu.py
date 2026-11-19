@@ -3,7 +3,7 @@
     python3 tools/render_menu.py OUT [--state holding] [--profile balanced] [--fahrenheit] ...
 
 Writes OUT-light.png and OUT-dark.png, and prints the menu's items in order. The custom
-views (fan profiles, the temperature tiles, the Power rows) are statusbar.py's
+views (fan profiles, the temperature tiles, Keep Awake, the Power rows) are statusbar.py's
 own, filled in from made-up readings; the plain items (section headers, actions) are drawn
 as labels, so their fonts and spacing only approximate macOS's. The readings match
 tools/preview/stub.js. `--help` lists the options.
@@ -21,10 +21,22 @@ import AppKit  # noqa: E402
 from AppKit import NSAppearance, NSBox, NSColor, NSFont  # noqa: E402
 
 import fans  # noqa: E402
+import keepawake  # noqa: E402
 import settings as app_settings  # noqa: E402
 import statusbar  # noqa: E402
 
 STATES = ("off", "holding", "override", "approval", "unavailable", "other", "error")
+# Keep Awake's states, as keepawake.KeepAwake.status() gives them; the times as a Mac set to 12-hour shows them.
+KEEP_AWAKE = {
+    "off": {"choice": "off", "holding": False, "line": None},
+    "1h": {"choice": "1h", "holding": True, "line": "Keep Awake ends at 1:22 PM (59 minutes)"},
+    "2h": {"choice": "2h", "holding": True, "line": "Keep Awake ends at 3:22 PM (1 hour 59 minutes)"},
+    "sleep": {"choice": "sleep", "holding": True, "line": "Keep Awake ends when the Mac sleeps"},
+    "schedule": {"choice": None, "holding": True, "line": "Keep Awake ends at 5 PM (4 hours 38 minutes)"},
+    "allday": {"choice": None, "holding": True, "line": "Keep Awake ends at Midnight (23 hours 59 minutes)"},  # the longest
+    "offtoday": {"choice": "off", "holding": False, "line": None},  # no line
+    "battery": {"choice": "2h", "holding": False, "line": "Paused because the battery is below 20%"},
+}
 
 
 def options():
@@ -42,6 +54,7 @@ def options():
     a.add_argument("--gpuheld", action="store_true", help="the GPU parked for 3 minutes, showing its last reading")
     a.add_argument("--charging", action="store_true")
     a.add_argument("--hot", type=float, default=0, help="degrees added to every temperature")
+    a.add_argument("--keep-awake", choices=KEEP_AWAKE, default="off", help="Keep Awake's state (default off)")
     return a.parse_args()
 
 
@@ -88,12 +101,14 @@ def build_menu(o):
     """statusbar.StatusBar filled in as if its menu had just opened, with no status item."""
     status, sample, thermals, settings = readings(o)
     button = SimpleNamespace(**{n: (lambda *a: None) for n in
-                                ("setFont_", "setImagePosition_", "setTitle_", "setToolTip_", "setImage_")})
+                                ("setFont_", "setImagePosition_", "setTitle_", "setToolTip_", "setImage_",
+                                  "setAttributedTitle_")})
     item = SimpleNamespace(button=lambda: button, setMenu_=lambda m: None)
     statusbar.NSStatusBar = SimpleNamespace(systemStatusBar=lambda: SimpleNamespace(statusItemWithLength_=lambda l: item))
+    keep_awake = KEEP_AWAKE[o.keep_awake]
     bar = statusbar.StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None,
-                              fan_status=lambda: status)
-    bar.update(sample, thermals, settings)
+                              fan_status=lambda: status, keep_awake_status=lambda: keep_awake)
+    bar.update(sample, thermals, settings, keep_awake["holding"])
     bar._target.menuNeedsUpdate_(bar._menu)
     return bar
 
@@ -112,7 +127,8 @@ def label(item, width):
 
 def rows(bar, width):
     """(name, view) for each item showing, top to bottom."""
-    names = [(bar._profiles_item, "fan profiles"), (bar._tiles_item, "temperature tiles")] + [(item, f"{key} row") for key, item in bar._rows.items()]
+    names = [(bar._profiles_item, "fan profiles"), (bar._tiles_item, "temperature tiles"),
+             (bar._keep_awake_item, "Keep Awake tiles"), (bar._keep_awake_line_item, "Keep Awake line")] + [(item, f"{key} row") for key, item in bar._rows.items()]
     out = []
     for item in bar._menu.itemArray():
         if item.isHidden():

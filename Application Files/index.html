@@ -199,6 +199,38 @@ main { height: calc(100% - 53px); overflow-y: auto; padding: 18px 20px 28px; }
 .tool-link:hover, .tool-link:hover span { color: var(--accent); }
 .tile .v.word { font-size: 24px; line-height: 37px; color: var(--muted); }
 
+/* ── keep awake ──────────────────────────────── */
+.group .card.ka-now { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 14px 16px; }
+.ka-line { font-weight: 500; }
+.ka-now .hint { color: var(--muted); font-size: 12px; }
+/* Work hours: a 24-hour bar. Positions are percentages of the day; only the snap on release
+   animates (120 ms), never a drag or a poll. */
+.ka-hours { padding: 12px 0 10px; border-bottom: 1px solid var(--line); }
+.ka-hours-line { font-weight: 500; margin-bottom: 30px; }
+.ka-hours-area { margin: 0 10px; }
+.ka-bar { position: relative; height: 22px; touch-action: none; }
+.ka-track { position: absolute; left: 0; right: 0; top: 8px; height: 6px; border-radius: 3px; background: var(--seg-bg); box-shadow: inset 0 0 0 .5px var(--line-strong); }
+.ka-block { position: absolute; top: 6px; height: 10px; border-radius: 5px; background: var(--accent); }
+.ka-handle {
+  position: absolute; top: 1px; width: 20px; height: 20px; margin-left: -10px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3), 0 0 0 .5px rgba(0,0,0,.15);
+}
+.ka-tip {
+  position: absolute; bottom: 26px; left: 50%; transform: translateX(-50%); white-space: nowrap; display: none;
+  font-size: 11px; font-weight: 600; background: var(--text); color: var(--bg); padding: 2px 6px; border-radius: 5px;
+}
+.ka-bar.drag-start #ka-h-start .ka-tip, .ka-bar.drag-end #ka-h-end .ka-tip, .ka-bar.drag-move .ka-tip { display: block; }
+.ka-bar.snapping .ka-block, .ka-bar.snapping .ka-handle { transition: left .12s ease-out, width .12s ease-out; }
+.ka-scale { position: relative; height: 8px; margin-top: 2px; }
+.ka-scale i { position: absolute; top: 0; width: 1px; height: 4px; background: var(--faint); }
+.ka-scale i.major { height: 8px; }
+.ka-labels { position: relative; height: 16px; margin-top: 2px; font-size: 11px; color: var(--muted); }
+.ka-labels span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.ka-labels span:first-child { transform: none; }
+.ka-labels span:last-child { transform: translateX(-100%); }
+.ka-days button { min-width: 44px; padding: 2px 6px; }
+.srow .lbl select { margin: 0 4px; }
+
 /* ── details ─────────────────────────────────── */
 .cols-3 { grid-template-columns: repeat(3, 1fr); }
 .kv { display: grid; grid-template-columns: 1fr auto; row-gap: 7px; column-gap: 12px; }
@@ -308,6 +340,7 @@ dialog .actions { justify-content: flex-end; }
   <div class="seg" role="tablist" id="tools">
     <button role="tab" data-tab="dashboard" aria-selected="true">Dashboard</button>
     <button role="tab" data-tab="thermals" aria-selected="false">Thermals</button>
+    <button role="tab" data-tab="keepawake" aria-selected="false">Keep Awake</button>
     <button role="tab" data-tab="power" aria-selected="false">Power</button>
   </div>
   <div class="nav">
@@ -365,6 +398,55 @@ dialog .actions { justify-content: flex-end; }
           </span>
         </h2>
         <div class="chart-wrap"><canvas id="t-chart"></canvas><div class="tip" id="t-tip"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Keep Awake: the four choices, work hours, the battery rule ── -->
+  <section class="page" id="page-keepawake">
+    <div class="settings">
+      <div class="group">
+        <h3>Keep the screen on</h3>
+        <div class="card ka-now">
+          <div class="seg small" id="ka-choices"></div>
+          <div class="ka-line" id="ka-line"></div>
+          <div class="hint">While the screen stays on, the Mac doesn't sleep, start the screen saver or lock. Closing the lid or choosing Sleep still puts it to sleep.</div>
+        </div>
+      </div>
+      <div class="group">
+        <h3>Work hours</h3>
+        <div class="card">
+          <div class="srow">
+            <div class="lbl">Keep the screen on during work hours<div class="hint">Whenever the Mac is awake during these hours. It never wakes the Mac.</div></div>
+            <label class="switch"><input type="checkbox" id="ka-hours-on"><span></span></label>
+          </div>
+          <div class="ka-hours">
+            <div class="ka-hours-line num" id="ka-hours-line"></div>
+            <div class="ka-hours-area">
+              <div class="ka-bar" id="ka-bar">
+                <div class="ka-track" id="ka-track"></div>
+                <div class="ka-block" id="ka-block"></div>
+                <div class="ka-handle" id="ka-h-start"><span class="ka-tip num" id="ka-tip-start"></span></div>
+                <div class="ka-handle" id="ka-h-end"><span class="ka-tip num" id="ka-tip-end"></span></div>
+              </div>
+              <div class="ka-scale" id="ka-scale"></div>
+              <div class="ka-labels" id="ka-labels"></div>
+            </div>
+          </div>
+          <div class="srow">
+            <div class="lbl">Days</div>
+            <div class="seg small ka-days" id="ka-days"></div>
+          </div>
+        </div>
+      </div>
+      <div class="group" id="ka-battery-group">
+        <h3>Battery</h3>
+        <div class="card">
+          <div class="srow">
+            <div class="lbl">Stop when the battery is below<select id="ka-level"></select><div class="hint">Only on battery. Plugging in brings it back if its time hasn't run out.</div></div>
+            <label class="switch"><input type="checkbox" id="ka-battery-on"><span></span></label>
+          </div>
+        </div>
       </div>
     </div>
   </section>
@@ -1188,6 +1270,135 @@ function renderDashboard() {
   renderTiles('dash-power', power);
 }
 
+// ── Keep Awake ──────────────────────────────────────────
+// The choices and the line come from keepawake.py (the same sentence as the menu's); work hours
+// and the battery rule are settings, validated there too. Renders only while its tab is showing.
+let keepAwake = null, kaChoices = [], kaLevels = [], firstWeekday = 0;
+// From Python (keepawake.half_hour_labels): every half hour's label, as the menu writes times
+// (Noon and Midnight on a 12-hour Mac, 24:00 for the end of the day on a 24-hour one).
+let kaClock = { h24: false, labels: [], hours: [] };
+const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];  // Python's weekdays: Monday is 0
+const clockMinutes = v => /^\d\d:\d\d$/.test(v || '') ? +v.slice(0, 2) * 60 + +v.slice(3) : null;
+function setChecked(el, on) { if (el.checked !== on) el.checked = on; }
+function setSelected(el, on) { on = String(on); if (el.getAttribute('aria-selected') !== on) el.setAttribute('aria-selected', on); }
+function renderKeepAwake() {
+  if (activeTab !== 'keepawake' || !settings) return;
+  const ka = keepAwake || { choice: 'off', line: null };
+  put('ka-choices', 'html', kaChoices.map(([id, name]) => `<button data-choice="${id}">${esc(name)}</button>`).join(''));
+  for (const b of $('ka-choices').children) setSelected(b, b.dataset.choice === ka.choice);
+  put('ka-line', 'text', ka.line || '');
+  put('ka-line', 'display', ka.line ? '' : 'none');
+  const h = settings.keep_awake_hours;
+  setChecked($('ka-hours-on'), h.on);
+  if (!kaDrag) renderBar();  // never redrawn from a poll under the pointer
+  const order = Array.from({ length: 7 }, (_, i) => (firstWeekday + i) % 7);
+  put('ka-days', 'html', order.map(d => `<button data-day="${d}">${DAY_NAMES[d]}</button>`).join(''));
+  for (const b of $('ka-days').children) setSelected(b, h.days.includes(+b.dataset.day));
+  const b = settings.keep_awake_battery;
+  put('ka-battery-group', 'display', latest?.has_battery === false ? 'none' : '');  // hidden on a Mac with no battery
+  put('ka-level', 'html', kaLevels.map(l => `<option value="${l}">${l}%</option>`).join(''));
+  if (document.activeElement !== $('ka-level') && $('ka-level').value !== String(b.level)) $('ka-level').value = String(b.level);
+  setChecked($('ka-battery-on'), b.on);
+}
+$('ka-choices').addEventListener('click', async e => {
+  const b = e.target.closest('button[data-choice]'); if (!b) return;
+  keepAwake = await call('keep_awake', b.dataset.choice);
+  renderKeepAwake();
+});
+const saveHours = changes => save({ keep_awake_hours: { ...settings.keep_awake_hours, ...changes } });
+$('ka-hours-on').onchange = e => saveHours({ on: e.target.checked });
+// ── the work-hours bar ──
+// Mouse only (no keyboard, as decided). The end being dragged follows the pointer exactly; the
+// label above it and the line show the half hour it will land on. On release both ends snap to
+// half hours with a short transition, and the settings are saved once.
+let kaDrag = null;  // { mode: 'start' | 'end' | 'move', start, end (minutes, not snapped), … }
+const DAY = 1440, MIN_BLOCK = 30;
+const snap30 = m => Math.round(m / 30) * 30;
+const toClock = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;  // 1440 is '24:00'
+const kaLabel = m => kaClock.labels[Math.round(m / 30)] ?? '';
+function kaDuration(mins) {
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return [h && `${h} hour${h === 1 ? '' : 's'}`, m && `${m} minutes`].filter(Boolean).join(' ');
+}
+function kaBlock() {  // the block shown: the drag's while dragging, else the saved one
+  if (kaDrag) return kaDrag;
+  const h = settings.keep_awake_hours;
+  return { start: clockMinutes(h.start), end: clockMinutes(h.end) };
+}
+function kaSnapped(d) {  // where a block lands: moving keeps its length (a multiple of 30 minutes)
+  const start = snap30(d.start);
+  return { start, end: d.mode === 'move' ? start + (d.end - d.start) : snap30(d.end) };
+}
+function renderBar() {
+  if (!settings || !kaClock.labels.length) return;
+  const pct = m => `${(m / DAY * 100).toFixed(3)}%`;
+  put('ka-scale', 'html', Array.from({ length: 25 }, (_, h) => `<i class="${h % 3 ? '' : 'major'}" style="left:${pct(h * 60)}"></i>`).join(''));
+  put('ka-labels', 'html', Array.from({ length: 9 }, (_, i) => `<span style="left:${pct(i * 180)}">${esc(kaClock.hours[i])}</span>`).join(''));
+  const b = kaBlock(), s = kaDrag ? kaSnapped(kaDrag) : b;
+  put('ka-block', 'left', pct(b.start));
+  put('ka-block', 'width', pct(b.end - b.start));
+  put('ka-h-start', 'left', pct(b.start));
+  put('ka-h-end', 'left', pct(b.end));
+  put('ka-tip-start', 'text', kaLabel(s.start));
+  put('ka-tip-end', 'text', kaLabel(s.end));
+  put('ka-hours-line', 'text', `${kaLabel(s.start)} to ${kaLabel(s.end)} · ${kaDuration(s.end - s.start)}`);
+}
+function kaMinutesAt(x) {
+  const r = $('ka-track').getBoundingClientRect();
+  return Math.min(DAY, Math.max(0, (x - r.left) / r.width * DAY));
+}
+function kaMove(m) {
+  const d = kaDrag;
+  if (d.mode === 'start') d.start = Math.min(Math.max(m - d.offset, 0), d.end - MIN_BLOCK);
+  else if (d.mode === 'end') d.end = Math.max(Math.min(m - d.offset, DAY), d.start + MIN_BLOCK);
+  else {
+    const length = d.end - d.start;
+    d.start = Math.min(Math.max(d.from.start + m - d.from.m, 0), DAY - length);
+    d.end = d.start + length;
+  }
+  renderBar();
+}
+$('ka-bar').addEventListener('pointerdown', e => {
+  if (e.button !== 0 || !settings || kaDrag) return;
+  const { start, end } = kaBlock(), m = kaMinutesAt(e.clientX);
+  const nearer = Math.abs(m - start) <= Math.abs(m - end) ? 'start' : 'end';
+  const onHandle = e.target.closest('.ka-handle'), onBlock = e.target.closest('#ka-block');
+  // A handle drags its end (the nearer one, where they overlap), the block moves, and a click on the
+  // empty track takes the nearer end there.
+  const mode = onHandle ? nearer : onBlock ? 'move' : nearer;
+  const offset = onHandle ? m - (mode === 'start' ? start : end) : 0;
+  kaDrag = { mode, start, end, offset, from: { m, start } };
+  try { $('ka-bar').setPointerCapture(e.pointerId); } catch (_) { /* not a live pointer */ }
+  put('ka-bar', 'class', `ka-bar drag-${mode}`);
+  e.preventDefault();
+  kaMove(m);
+});
+$('ka-bar').addEventListener('pointermove', e => { if (kaDrag) kaMove(kaMinutesAt(e.clientX)); });
+function kaDrop() {
+  if (!kaDrag) return;
+  const { start, end } = kaSnapped(kaDrag), h = settings.keep_awake_hours;
+  kaDrag = null;
+  const changed = toClock(start) !== h.start || toClock(end) !== h.end;
+  // Shown at once; save() brings back what Python kept.
+  settings.keep_awake_hours = { ...h, start: toClock(start), end: toClock(end) };
+  put('ka-bar', 'class', 'ka-bar snapping');
+  renderBar();
+  setTimeout(() => put('ka-bar', 'class', 'ka-bar'), 150);
+  if (changed) saveHours({});
+}
+$('ka-bar').addEventListener('pointerup', kaDrop);
+$('ka-bar').addEventListener('pointercancel', kaDrop);
+$('ka-days').addEventListener('click', e => {
+  const b = e.target.closest('button[data-day]'); if (!b) return;
+  const d = +b.dataset.day, days = settings.keep_awake_hours.days;
+  const next = days.includes(d) ? days.filter(x => x !== d) : [...days, d].sort((a, b) => a - b);
+  if (!next.length) return toast('Work hours need at least one day.');
+  saveHours({ days: next });
+});
+const saveBattery = changes => save({ keep_awake_battery: { ...settings.keep_awake_battery, ...changes } });
+$('ka-battery-on').onchange = e => saveBattery({ on: e.target.checked });
+$('ka-level').onchange = e => saveBattery({ level: +e.target.value });
+
 // ── polling ─────────────────────────────────────────────
 const POLL_MS = 1000;  // main.py samples at this rate while the page is polling
 let polling = false;
@@ -1216,6 +1427,7 @@ async function poll() {
       append(tpoints, r.thermal_points || [], thermalFields.indexOf('t'), newest);
       seq = r.seq;
       if (r.fan_control) fanControl = r.fan_control;
+      if (r.keep_awake) { keepAwake = r.keep_awake; renderKeepAwake(); }
       if (r.thermals) {
         const changed = !thermals || thermals.available.join() !== r.thermals.available.join();
         thermals = r.thermals;
@@ -1235,7 +1447,7 @@ async function poll() {
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') poll(); });
 window.addEventListener('resize', () => { renderLiveChart(); renderThermalChart(); if (activeTab === 'history') renderDetailCharts(); });
 
-// ── tabs: Dashboard | Thermals | Power (Now, History), and the shared Settings ──
+// ── tabs: Dashboard | Thermals | Keep Awake | Power (Now, History), and the shared Settings ──
 function showTab(tab) {
   if (tab === 'power') tab = 'now';  // Power always opens on Now
   const isPower = tab === 'now' || tab === 'history';
@@ -1249,6 +1461,7 @@ function showTab(tab) {
   $('main').scrollTop = 0;
   if (tab === 'dashboard') { renderDashboard(); poll(); }  // poll now: fans start being read
   if (tab === 'thermals') { renderThermals(); renderThermalChart(); poll(); }
+  if (tab === 'keepawake') renderKeepAwake();
   if (tab === 'now') { renderNow(); renderLiveChart(); }
   if (tab === 'history') loadSessions();
   if (tab === 'settings') renderSettings();
@@ -1363,6 +1576,7 @@ function applySettings() {
   else document.documentElement.setAttribute('data-theme', t);
   unitF = settings?.temperature_unit === 'fahrenheit';
   renderDashboard(); renderThermals(); renderLiveChart(); renderThermalChart(); renderDetailCharts(); renderFanTuning();
+  renderKeepAwake();
 }
 
 async function renderSettings() {
@@ -1526,6 +1740,8 @@ window.addEventListener('pywebviewready', async () => {
   settings = await call('get_settings');
   const info = await call('app_info');
   fanProfiles = info.fan_profiles; tuningLimits = info.fan_tuning_limits;
+  kaChoices = info.keep_awake_choices; kaLevels = info.keep_awake_battery_levels; firstWeekday = info.first_weekday;
+  kaClock = info.clock || kaClock;
   applySettings(); renderToggles(); renderThermalToggles();
   await poll();  // measure the page with data in it, so the window opens at its final height
   reportContentSize();

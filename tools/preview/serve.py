@@ -4,7 +4,7 @@
 
 Then open http://127.0.0.1:8765/ (the `page-preview` entry in .claude/launch.json does both
 in Claude's browser pane). The page is rebuilt from Application Files/index.html, stub.js,
-fans.py and settings.py on every load, so a reload shows the latest edit. Query options are
+fans.py, keepawake.py and settings.py on every load, so a reload shows the latest edit. Query options are
 listed at the top of stub.js.
 
 The profiles, their limits, the default settings and the version come from the app's own
@@ -24,18 +24,35 @@ APP_DIR = HERE.parent.parent / "Application Files"
 sys.path.insert(0, str(APP_DIR))
 
 import fans  # noqa: E402  (pure: no AppKit or SMC)
+import keepawake  # noqa: E402  (pure until KeepAwake starts)
 import settings  # noqa: E402
 
 MARKER = "<script>\n'use strict';"
 
 
+def _strftime(t, fmt):
+    from datetime import datetime
+
+    return datetime.fromtimestamp(t).strftime(fmt)
+
+
+def _clock(fmt, h24):
+    return {"h24": h24, "labels": keepawake.half_hour_labels(fmt, h24), "hours": keepawake.bar_labels(fmt, h24)}
+
+
 def app_facts():
     importlib.reload(fans)  # an edit to them shows on the next load, like one to the page
+    importlib.reload(keepawake)
     importlib.reload(settings)
     version = re.search(r'^VERSION = "([^"]+)"', (APP_DIR / "main.py").read_text(encoding="utf-8"), re.M)
     return {"version": version.group(1) if version else "0", "settings": settings.DEFAULTS,
             "fan_profiles": fans.page_profiles(), "fan_tuning_limits": fans.TUNING_LIMITS,
-            "fan_names": fans.PROFILE_NAMES}
+            "fan_names": fans.PROFILE_NAMES,
+            "keep_awake_choices": [[c, keepawake.CHOICE_NAMES[c]] for c in keepawake.CHOICES],
+            "keep_awake_battery_levels": keepawake.BATTERY_LEVELS,
+            # The bar's labels, through the app's own helper, as a 12-hour and a 24-hour Mac show them.
+            "clock12": _clock(lambda t: _strftime(t, "%-I:%M %p"), False),
+            "clock24": _clock(lambda t: _strftime(t, "%H:%M"), True)}
 
 
 def build():

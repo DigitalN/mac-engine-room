@@ -7,6 +7,27 @@ from PyObjCTools import AppHelper
 from main import CHARGING_SETTINGS_URL, LOG_PATH, Api, LiveState
 
 
+_KEEP_AWAKE = SimpleNamespace(status=lambda: {"choice": "1h", "holding": True, "line": "Keep Awake ends at 1:07 PM (45 minutes)"})
+
+
+def test_keep_awake_buttons_choose_and_return_what_to_show():
+    chosen = []
+    app = SimpleNamespace(_keep_awake=SimpleNamespace(choose=lambda c: chosen.append(c) or {"choice": c}))
+    assert Api(app=app).keep_awake("sleep") == {"choice": "sleep"}
+    assert chosen == ["sleep"]
+
+
+def test_app_info_gives_the_page_keep_awakes_choices_and_the_first_weekday():
+    app = SimpleNamespace(_sensor_hint=lambda: False, _settings=SimpleNamespace(get=lambda: {"record_history": True}),
+                          _updater=SimpleNamespace(unavailable_reason=None),
+                          _keep_awake=SimpleNamespace(clock=lambda: {"h24": False, "labels": ["Midnight"], "hours": []}))
+    info = Api(app=app).app_info()
+    assert info["clock"]["labels"] == ["Midnight"]
+    assert info["keep_awake_choices"] == [["off", "Off"], ["1h", "1 Hour"], ["2h", "2 Hours"], ["sleep", "Until Sleep"]]
+    assert info["keep_awake_battery_levels"] == (10, 20, 30, 40, 50)
+    assert info["first_weekday"] in range(7)
+
+
 def test_log_file_button_shows_the_log_file(monkeypatch):
     calls = []
     monkeypatch.setattr(AppHelper, "callAfter", lambda func, *args: calls.append((func, args)))
@@ -38,9 +59,11 @@ def test_check_for_updates_button_does_what_the_menu_item_does(monkeypatch):
 def test_live_data_carries_the_update_status_for_settings():
     app = SimpleNamespace(_updater=SimpleNamespace(status="downloading", version="1.2.5"),
                           _sampler=SimpleNamespace(dashboard_polled=lambda fans: None), _live=LiveState(),
-                          _fans=SimpleNamespace(status={"profile": "balanced", "state": "holding", "targets": [1499, 1499]}))
+                          _fans=SimpleNamespace(status={"profile": "balanced", "state": "holding", "targets": [1499, 1499]}),
+                          _keep_awake=_KEEP_AWAKE)
     live = Api(app=app).get_live(0)
     assert live["update"] == ["downloading", "1.2.5"]
+    assert live["keep_awake"] == {"choice": "1h", "holding": True, "line": "Keep Awake ends at 1:07 PM (45 minutes)"}
     assert live["fan_control"] == {"profile": "balanced", "state": "holding", "targets": [1499, 1499]}
 
 
@@ -48,7 +71,7 @@ def test_fans_are_read_while_the_dashboard_or_thermals_is_showing():
     polls = []
     app = SimpleNamespace(_updater=SimpleNamespace(status="idle", version=None),
                           _sampler=SimpleNamespace(dashboard_polled=lambda fans: polls.append(fans)),
-                          _live=LiveState(), _fans=SimpleNamespace(status={}))
+                          _live=LiveState(), _fans=SimpleNamespace(status={}), _keep_awake=_KEEP_AWAKE)
     for page in ("dashboard", "thermals", "now", "settings"):
         Api(app=app).get_live(0, page)
     assert polls == [True, True, False, False]
@@ -76,7 +99,7 @@ def test_live_data_tells_the_page_which_power_sensors_this_mac_has():
 
     app = SimpleNamespace(_updater=SimpleNamespace(status="idle", version=None),
                           _sampler=SimpleNamespace(dashboard_polled=lambda fans: None),
-                          _live=LiveState(), _fans=SimpleNamespace(status={}))
+                          _live=LiveState(), _fans=SimpleNamespace(status={}), _keep_awake=_KEEP_AWAKE)
     for smc, screen, chip in [({"PSTR": 9.0, "PDBR": 2.3, "PHPC": 1.8}, True, True),
                               ({"PSTR": 9.0, "PBLR": 0.01, "PHPC": 0.01}, False, False)]:  # the M4 Air's
         app._live.push(power.normalize(None, smc, now=1.0))

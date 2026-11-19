@@ -32,6 +32,9 @@ Each is the usual +0.0.1 with the whole release checklist in DEVELOPMENT.md.
    (profile tiles and three in the menu, the compact Fan profiles settings, the Dashboard's
    fan controls) were merged as DigitalN/mac-engine-room#26 and released as 1.2.9 on
    2026-11-02.
+4. **Keep Awake** (see Keep Awake), designed with the maintainer on 2026-11-19 in three
+   grilling rounds. To ship as **1.4.0** through the release checklist once its pull request
+   is merged.
 
 ## Name and identity
 
@@ -197,6 +200,9 @@ This M1 Pro (MacBookPro18,1), lightly loaded on 2026-11-02, has 2,181 SMC keys:
 
 ## Menu
 
+- **Changed on 2026-11-19 for 1.4.0:** **Open Dashboard** (⌘D) moved to the very top. Then
+  Thermals, then Keep Awake (see Keep Awake), then Power; Check for Updates… and Quit stay at
+  the bottom.
 - One native menu with custom row views, Thermals first: profile buttons (3 × 2), the Manual
   slider only when Manual is chosen, then temperatures as tiles with fans in the last tile.
   **Changed on 2026-11-02 after trying 1.2.8:** one row of three profile buttons, drawn as
@@ -213,6 +219,107 @@ This M1 Pro (MacBookPro18,1), lightly loaded on 2026-11-02, has 2,181 SMC keys:
   the item doesn't jump as digits change (ThermalForge #51).
 - The menu bar still shows one value. Temperature choices (hottest CPU, hottest overall) join
   "Menu bar shows"; watts stays the default.
+
+## Keep Awake
+
+Agreed on 2026-11-19, for 1.4.0. The maintainer keeps the screen on and unlocked at work with
+Caffeine and keeps forgetting to turn it off, so it's built in, with work hours that never
+wake the Mac. The name everywhere is **Keep Awake** (never "Caffeine").
+
+- **What it holds:** IOKit's `PreventUserIdleDisplaySleep` assertion, as Caffeine does. The
+  screen stays on, so the Mac doesn't idle-sleep, the screen saver doesn't start and it
+  doesn't lock. Closing the lid, Apple menu › Sleep, locking by hand and macOS's near-empty
+  battery sleep still work. No "Mac awake but screen may sleep" option.
+- **The choices:** Off · 1 Hour · 2 Hours · Until Sleep. Fixed: no setting, no "forever".
+  Every pick counts from now: the same timed pick again restarts it, and the last pick wins
+  even when it's shorter; Until Sleep replaces a timer and the other way round. 1 Hour and
+  2 Hours run on the wall clock (absolute end times), so sleep neither ends nor pauses them.
+  Until Sleep ends at the next system sleep, however it's caused; clamshell on an external
+  display isn't sleep, so it carries on.
+- **Work hours:** one block on chosen weekdays: on/off, From, To, days. Off until turned on;
+  Mon–Fri 9:00–17:00 by default. Local time wherever the Mac is, worked out on each tick, so
+  time zone and daylight saving changes just work. The end after the start (no blocks past
+  midnight), at least one day; no per-day hours, no second block. It never wakes the Mac (no
+  scheduled wakes): it takes effect when the Mac is awake with its screens on, as the lid
+  opens, at login, after a restart, or when it's turned on inside the block, and not in a
+  dark wake (Power Nap). **Anything picked in the menu or on the page (Off, 1 Hour, 2 Hours,
+  Until Sleep) on a workday, before or during that day's block, takes over from the work hours
+  for the rest of that day**, across sleeps, back by itself the next workday. The pick holds on
+  its own terms: 2 Hours at 8:00 ends at 10:00 and the screen goes back to normal, 1 Hour at
+  10:00 ends at 11:00, 2 Hours at 16:30 runs to 18:30, Until Sleep ends at the next sleep, and
+  Off at 8:00 means no work hours that day. Then there's no line, Off lit. A pick after the
+  day's block has ended, on a day that isn't a workday, or while work hours are off changes
+  nothing about them, and turning work hours on inside the block takes effect at once.
+  (Settled in the maintainer's hands-on check on 2026-11-19, in two steps: first for picks made
+  during the block, since a 1 Hour pick that changed nothing looked like the click did nothing,
+  then for picks made before it. It replaces "whichever ends later", which now only applies to
+  a pick from an earlier day, such as Until Sleep left running overnight, which carries past the
+  block's end, or a timer from before midnight; no tile is lit while the block holds the screen
+  on. `keepawake.skips_todays_hours` is the one place that decides.) Sleeping at lunch doesn't
+  end the block.
+- **Battery rule:** a switch, "Stop when the battery is below [20%]" (10, 20, 30, 40 or 50%),
+  off by default. Only on battery: below the level, Keep Awake lets go (a pick or work hours
+  alike) and says "Paused because the battery is below 20%". Plugging in brings it back if its
+  time hasn't run out (timers keep counting); on the adapter it holds even below the level.
+  Hidden on Macs with no battery. It uses the battery reading the sampler already takes.
+- **Pauses and endings:** locking the screen, or switching to another user's session, pauses
+  it; unlocking resumes it if time remains. The lock notifications are delivered at once even
+  while the app isn't active, and whether the screen is locked is read again as the Mac or its
+  screens wake. Whenever it lets go while the Mac is in use (a
+  timer runs out, the block ends, the battery rule), it declares user activity first, so the
+  screen gets macOS's full display-sleep time from then instead of dimming and locking at
+  once.
+- **The updater's relaunch** (it installs after 10 s idle, so it can come mid-day): a running
+  pick and today's Off come back in the new copy with the same end times, and the relaunch never
+  lets the screen go dark. The old copy declares user activity, but that ends with the old
+  process (it's a `UserIsActive` assertion of its own), so while it holds the screen on it also
+  starts `/usr/bin/caffeinate -d -t N` on its own, N being until whatever holds the screen would
+  end, at most 10 minutes. The new copy ends it (only if that pid is still caffeinate) once it
+  holds the screen on itself; if it never starts, caffeinate ends by itself. Only that path
+  writes a handover file (`keep-awake-handover.json` in the data folder), and only with a pick,
+  today's Off or caffeinate to pass on. The new copy reads it once and deletes it, ignoring one
+  older than 10 minutes (the copy an update starts has never run, and one sat at exec for 224 s
+  once). A quit by the user, a restart or a logout brings back nothing but work hours.
+- **Menu:** a section header, then the choices as tiles drawn like the fan profile buttons, in
+  two rows (**1 Hour · 2 Hours**, then **Off · Until Sleep**), the active one in the accent
+  colour, and one line under them, with no full stop (the maintainer's wording, 2026-11-19):
+  "Keep Awake ends at 1:22 PM (59 minutes)" (a timer, with the time left: "N hours N minutes",
+  zero parts left out, rounded up so it never says 0; it counts down as the menu and the page
+  refresh), "Keep Awake ends at 5 PM (4 hours 38 minutes)" (work hours, no tile lit),
+  "Keep Awake ends when the Mac sleeps", "Paused because the battery is below 20%", or no line
+  while nothing holds the screen on, Off for the rest of today's work hours included (Off lit).
+  Times follow the Mac's 12/24-hour setting, except that on a 12-hour Mac whole hours drop
+  ":00" ("1 PM", "5 PM"), as the bar's labels do, and 12 o'clock is always **Noon** or
+  **Midnight**, never 12 AM or 12 PM; other times keep their minutes ("1:07 PM"). On a 24-hour
+  Mac it's the Mac's own format, and a block ending at midnight ends at 24:00. The line is
+  built in one place (`keepawake.sentence`, with `keepawake.short_clock` and `clock_label` for
+  the times, `keepawake.time_left` for the time left) for the menu and the page. It replaced
+  the first wording ("Screen stays on for 42 more minutes.") after the hands-on check, and the
+  time left was added after the maintainer checked the next build.
+- **Changed on 2026-11-19 after the maintainer tried it:** the steaming cup and the work-hours
+  bar below, in place of From/To time fields.
+- **Menu bar:** while Keep Awake holds the screen on (work hours included), a steaming cup
+  (`cup.and.heat.waves.fill`, macOS 14 and later; `cup.and.saucer.fill` before) follows the reading, with the charging bolt still in front:
+  "⚡ 12.3 W ☕", or "12.3 W ☕".
+- **Page:** a **Keep Awake** tab between Thermals and Power, with three cards: the four
+  choices (Off · 1 Hour · 2 Hours · Until Sleep) drawn like the Thermals page's fan profiles,
+  with the same sentence under them; Work hours (the switch, a 24-hour bar, and seven day buttons
+  starting on the Mac's first weekday, editable while it's off); and Battery (hidden on a Mac
+  with no battery). Nothing about it in Settings, and no Dashboard row.
+- **The work-hours bar:** a track as wide as the card, the block in the accent colour with a
+  handle at each end. Dragging an end resizes it, dragging the middle moves it at the same
+  length, and a click on the empty track takes the nearer end there. At least 30 minutes, from
+  0:00 to at most 24:00 (Midnight; `"24:00"` is allowed for the end only), never past
+  midnight. While dragging, the end follows the pointer exactly, a label above each moving end
+  shows the half hour it will land on, and the line above the bar shows the snapped times ("9:00
+  AM to 5:00 PM · 8 hours", or "9:00 to 17:00 · 8 hours" on a 24-hour Mac). On release the ends
+  snap to the nearest half hour with a 120 ms transition, and the settings are saved once. A tick
+  every hour, taller every 3 hours, labelled Midnight · 3 AM · 6 AM · 9 AM · Noon · 3 PM · 6 PM ·
+  9 PM · Midnight (the times themselves, 0:00 to 24:00, on a 24-hour Mac). The labels come from
+  Python (`half_hour_labels`, `bar_labels`) so they match the menu. Mouse only: no keyboard, by
+  the maintainer's decision. Polls never redraw the bar under the pointer.
+- **Cost:** no timers or wakeups of its own: it's evaluated on the sampler's ticks and on
+  notifications. Holding the screen on doesn't raise the app's priority.
 
 ## Fan control
 
