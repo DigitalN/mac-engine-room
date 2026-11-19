@@ -32,7 +32,13 @@ DEFAULTS = {
     "menu_fan_profiles": fans.MENU_PROFILES,  # three different profiles, in the menu's order
     "keep_awake_hours": keepawake.DEFAULT_HOURS,  # work hours: off until turned on, Mon–Fri 9:00–17:00
     "keep_awake_battery": keepawake.DEFAULT_BATTERY,  # "Stop when the battery is below 20%", off
+    # The Displays tab (displays.py): its Brightness and volume keys switch, off until turned on (no
+    # event tap while it's off), and the built-in XDR display's boost past 100%, 1.0 (none) to 1.6.
+    "display_keys": False,
+    "display_boost": 1.0,
 }
+
+BOOST_RANGE = (1.0, 1.6)  # display_boost: 100% to 160%
 
 
 def validate(raw):
@@ -46,7 +52,7 @@ def validate(raw):
         s["theme"] = raw["theme"]
     if raw.get("temperature_unit") in TEMPERATURE_UNITS:
         s["temperature_unit"] = raw["temperature_unit"]
-    for key in ("menu_bar_show_charging", "record_history", "update_automatically"):
+    for key in ("menu_bar_show_charging", "record_history", "update_automatically", "display_keys"):
         if isinstance(raw.get(key), bool):
             s[key] = raw[key]
     if raw.get("fan_profile") in fans.PROFILE_IDS:  # Smart and Manual, gone in 1.2.11, become macOS default
@@ -57,6 +63,9 @@ def validate(raw):
     s["menu_fan_profiles"] = list(shown if valid else fans.MENU_PROFILES)
     s["keep_awake_hours"] = keepawake.validate_hours(raw.get("keep_awake_hours"))
     s["keep_awake_battery"] = keepawake.validate_battery(raw.get("keep_awake_battery"))
+    boost = raw.get("display_boost")
+    if isinstance(boost, (int, float)) and not isinstance(boost, bool) and BOOST_RANGE[0] <= boost <= BOOST_RANGE[1]:
+        s["display_boost"] = round(float(boost), 4)
     return s
 
 

@@ -7,8 +7,9 @@ never opened; a standard status-item menu has no such dependency.
 Open Dashboard comes first. Then custom views: Thermals' fan profile buttons (the three chosen
 in Settings), then the temperatures as tiles with a small grey label above each value (fans in
 the last tile); Keep Awake's four choices as tiles in two rows, with a line under them; then
-Power rows with an SF Symbol, a grey label and the value on the right, then Check for Updates…
-and Quit. They're only filled in while the menu is open, and only values that changed are
+Power rows with an SF Symbol, a grey label and the value on the right; then Displays, a brightness
+slider for each display that can be adjusted (the built-in one to 160%, with a tick at 100%); then
+Check for Updates… and Quit. They're only filled in while the menu is open, and only values that changed are
 passed to AppKit. While Keep Awake holds the screen on, a steaming cup follows the menu bar's
 reading.
 
@@ -27,6 +28,7 @@ from AppKit import (
 )
 from Foundation import NSObject
 
+import displays as display_tool
 import fans as fan_control
 import keepawake
 
@@ -55,6 +57,8 @@ PROFILE_HEIGHT = 24
 KEEP_AWAKE_ROWS = ((keepawake.HOUR, keepawake.TWO_HOURS), (keepawake.OFF, keepawake.UNTIL_SLEEP))
 # A cup with steam (macOS 14 and later), or a plain one before that.
 KEEP_AWAKE_SYMBOLS = ("cup.and.heat.waves.fill", "cup.and.saucer.fill")
+DISPLAY_LABEL_HEIGHT, DISPLAY_SLIDER_HEIGHT = 18, 24  # a display's name and percent, then its slider
+TICK_SIZE = (1, 5)  # the built-in display's mark at 100%, under its slider
 # Fan control states with the profile buttons available to click.
 PROFILES_USABLE = ("off", "holding", "override", "other", "approval", "error")
 
@@ -180,6 +184,9 @@ class _MenuTarget(NSObject):
     def chooseKeepAwake_(self, sender):
         self.on_keep_awake(keepawake.CHOICES[sender.tag()])
 
+    def slideDisplay_(self, sender):
+        self.on_display(sender.tag(), sender.doubleValue())
+
     def menuNeedsUpdate_(self, menu):
         self.on_menu_needs_update()
 
@@ -240,7 +247,7 @@ def _section_header(title):
 class StatusBar:
     def __init__(self, on_open, on_check_updates, on_quit, on_menu_open, fan_status=lambda: {},
                  on_profile=lambda pid: None, on_allow_fans=lambda: None, keep_awake_status=lambda: {},
-                 on_keep_awake=lambda choice: {}):
+                 on_keep_awake=lambda choice: {}, displays=lambda: [], on_display_brightness=lambda display, percent: None):
         self._item = NSStatusBar.systemStatusBar().statusItemWithLength_(NSVariableStatusItemLength)
         self._button = self._item.button()
         size = NSFont.menuBarFontOfSize_(0).pointSize()
@@ -265,6 +272,11 @@ class StatusBar:
         self._target.on_profile = self._choose_profile
         self._target.on_allow_fans = on_allow_fans
         self._target.on_keep_awake = self._choose_keep_awake
+        self._target.on_display = self._slide_display
+        self._displays = displays
+        self._on_display_brightness = on_display_brightness
+        self._display_items = []  # (item, display id, (name label, percent label, slider)) in the menu's order
+        self._display_shape = None  # the (id, name, top) of each display shown, to know when to rebuild
         self._keep_awake_status = keep_awake_status
         self._on_keep_awake = on_keep_awake
         self._on_menu_open = on_menu_open
@@ -299,6 +311,9 @@ class StatusBar:
         self._build_keep_awake(menu)
         menu.addItem_(_section_header("Power"))
         self._build_rows(menu)
+        self._displays_header = _section_header("Displays")
+        self._displays_header.setHidden_(True)
+        menu.addItem_(self._displays_header)
         menu.addItem_(NSMenuItem.separatorItem())
         self._update_item = self._action_item("Check for Updates…", "checkForUpdates:", "")
         menu.addItem_(self._update_item)
@@ -477,6 +492,52 @@ class StatusBar:
             self._set_symbol(key, ROW_SYMBOLS.get(key, "battery.100percent"))
             self._layout_row(key)
 
+    def _build_display(self, display, tag):
+        """A display's name and percent on one line, its slider under them; the built-in display's
+        runs to 160% with a mark at 100%."""
+        item, view = _view_item(DISPLAY_LABEL_HEIGHT + DISPLAY_SLIDER_HEIGHT)
+        font = NSFont.menuFontOfSize_(0)
+        name = _label(font, NSColor.secondaryLabelColor())
+        name.setStringValue_(display["name"])
+        percent = _label(NSFont.monospacedDigitSystemFontOfSize_weight_(font.pointSize(), AppKit.NSFontWeightRegular),
+                         NSColor.labelColor())
+        percent.setAlignment_(AppKit.NSTextAlignmentRight)
+        slider = AppKit.NSSlider.sliderWithValue_minValue_maxValue_target_action_(
+            display.get("percent") or 0, 0, display.get("top", 100), self._target, "slideDisplay:")
+        slider.setContinuous_(True)
+        slider.setTag_(tag)
+        slider.setControlSize_(AppKit.NSControlSizeSmall)
+        slider.setAccessibilityLabel_(f"{display['name']} brightness")
+        tick = None
+        if display.get("top", 100) > 100:
+            tick = NSBox.alloc().init()
+            tick.setBoxType_(AppKit.NSBoxCustom)
+            tick.setBorderWidth_(0)
+            tick.setFillColor_(NSColor.tertiaryLabelColor())
+            tick.setTitlePosition_(AppKit.NSNoTitle)
+        for v in (name, percent, slider, tick):
+            if v is not None:
+                view.addSubview_(v)
+        view.relayout = lambda: self._layout_display(view, name, percent, slider, tick)
+        self._layout_display(view, name, percent, slider, tick)
+        return item, (name, percent, slider)
+
+    @staticmethod
+    def _layout_display(view, name, percent, slider, tick):
+        width = view.frame().size.width
+        height = math.ceil(name.fittingSize().height)
+        value_width = 56
+        percent.setFrame_(((width - INSET - value_width, 2), (value_width, height)))
+        name.setFrame_(((INSET, 2), (width - 2 * INSET - value_width - 8, height)))
+        slider.setFrame_(((INSET - 2, DISPLAY_LABEL_HEIGHT + 1), (width - 2 * INSET + 4, 19)))
+        if tick is not None:
+            # Under the track where 100% is: the knob's centre travels between half its width from each end.
+            cell = slider.cell()
+            knob = cell.knobRectFlipped_(slider.isFlipped()).size.width if hasattr(cell, "knobRectFlipped_") else 14
+            track = slider.frame()
+            x = track.origin.x + knob / 2 + (track.size.width - knob) * 100 / slider.maxValue()
+            tick.setFrame_(((round(x) - TICK_SIZE[0] / 2, track.origin.y + track.size.height / 2 + 4), TICK_SIZE))
+
     def _layout_row(self, key):
         """The value gets the width it needs; the label (an adapter's name can be long) the rest."""
         view, icon, label, value = self._row_views[key]
@@ -593,6 +654,7 @@ class StatusBar:
         self._fill_profiles()
         self._fill_tiles()
         self._fill_keep_awake()
+        self._fill_displays()
         sample = self._sample
         if sample is None:
             return
@@ -647,6 +709,49 @@ class StatusBar:
         self._put(self._keep_awake_line_item, "setHidden_", not line)
         if line and self._put(self._keep_awake_line, "setStringValue_", line):
             self._layout_keep_awake_line()
+
+    def set_displays(self, displays):
+        """A display changed (a key press, DDC answering, the boost ending): shown now if the menu is open."""
+        if self.menu_open:
+            self._fill_displays(displays)
+
+    def _fill_displays(self, displays=None):
+        """A slider for each display that can be adjusted, in macOS's order. The items are made again only
+        when the displays themselves change; otherwise only changed values reach AppKit."""
+        shown = [d for d in (self._displays() if displays is None else displays) if d.get("adjustable")]
+        shape = [(d["id"], d["name"], d.get("top", 100)) for d in shown]
+        if shape != self._display_shape:
+            self._display_shape = shape
+            for item, _, views in self._display_items:
+                self._menu.removeItem_(item)
+                gone = {id(v) for v in views}  # their ids may be reused by the new views
+                self._shown = {k: v for k, v in self._shown.items() if k[0] not in gone}
+            self._display_items = []
+            at = self._menu.indexOfItem_(self._displays_header) + 1
+            for i, d in enumerate(shown):
+                item, views = self._build_display(d, i)
+                self._menu.insertItem_atIndex_(item, at + i)
+                self._display_items.append((item, d["id"], views))
+        self._put(self._displays_header, "setHidden_", not shown)
+        for (item, _, (name, percent, slider)), d in zip(self._display_items, shown):
+            self._put(percent, "setStringValue_", display_tool.menu_label(d))
+            if d.get("percent") is not None and not self._dragging(slider):
+                self._put(slider, "setDoubleValue_", float(d["percent"]))
+
+    @staticmethod
+    def _dragging(slider):
+        """The user is moving this slider: its knob is theirs until they let go."""
+        event = AppKit.NSApp.currentEvent()
+        return event is not None and event.type() == AppKit.NSEventTypeLeftMouseDragged and slider.window() == event.window()
+
+    def _slide_display(self, tag, value):
+        """A slider moved: whole percents, the label at once, the display through displays.py."""
+        if tag >= len(self._display_items):
+            return
+        _, display, (_, percent, _) = self._display_items[tag]
+        value = float(round(value))
+        self._put(percent, "setStringValue_", display_tool.menu_label({"percent": value}))
+        self._on_display_brightness(display, value)
 
     def _fill_tiles(self):
         thermals = self._thermals

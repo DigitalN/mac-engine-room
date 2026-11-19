@@ -231,6 +231,32 @@ main { height: calc(100% - 53px); overflow-y: auto; padding: 18px 20px 28px; }
 .ka-days button { min-width: 44px; padding: 2px 6px; }
 .srow .lbl select { margin: 0 4px; }
 
+/* ── displays ────────────────────────────────── */
+/* A slider row: its label, the slider, the value (and the built-in display's nits under it). Nothing
+   animates: the fill follows the knob as it's moved, and polls leave a slider alone while it's held. */
+.srow.d-row .lbl { flex: none; width: 96px; }
+#d-list .group:last-child { margin-bottom: 18px; }
+.d-slider { position: relative; flex: 1; height: 22px; --thumb: 18px; }
+input.range {
+  -webkit-appearance: none; appearance: none; display: block; width: 100%; height: 22px; margin: 0; background: transparent;
+  --fill: 0;
+}
+input.range::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 2px; box-shadow: inset 0 0 0 .5px var(--line-strong);
+  background: linear-gradient(to right, var(--accent) calc(9px + (100% - 18px) * var(--fill)), var(--seg-bg) 0);
+}
+input.range::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 18px; height: 18px; margin-top: -7px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3), 0 0 0 .5px rgba(0,0,0,.15);
+}
+input.range:focus-visible { outline: none; }
+input.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent), 0 1px 3px rgba(0,0,0,.3); }
+/* The built-in display's 100%, where macOS's own maximum ends and the boost begins. */
+.d-tick { position: absolute; top: 17px; width: 1px; height: 5px; background: var(--faint); left: calc(9px + (100% - 18px) * .625); }
+.d-value { flex: none; width: 64px; text-align: right; line-height: 1.2; }
+.d-value .sub { display: block; color: var(--muted); font-size: 11px; }
+.d-note { padding: 0 0 11px; color: var(--muted); font-size: 12px; }
+
 /* ── details ─────────────────────────────────── */
 .cols-3 { grid-template-columns: repeat(3, 1fr); }
 .kv { display: grid; grid-template-columns: 1fr auto; row-gap: 7px; column-gap: 12px; }
@@ -342,6 +368,7 @@ dialog .actions { justify-content: flex-end; }
     <button role="tab" data-tab="thermals" aria-selected="false">Thermals</button>
     <button role="tab" data-tab="keepawake" aria-selected="false">Keep Awake</button>
     <button role="tab" data-tab="power" aria-selected="false">Power</button>
+    <button role="tab" data-tab="displays" aria-selected="false">Displays</button>
   </div>
   <div class="nav">
     <div class="seg small" role="tablist" id="power-tabs" hidden>
@@ -445,6 +472,29 @@ dialog .actions { justify-content: flex-end; }
           <div class="srow">
             <div class="lbl">Stop when the battery is below<select id="ka-level"></select><div class="hint">Only on battery. Plugging in brings it back if its time hasn't run out.</div></div>
             <label class="switch"><input type="checkbox" id="ka-battery-on"><span></span></label>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Displays: a card for each display, then the keys switch and Accessibility ── -->
+  <section class="page" id="page-displays">
+    <div class="settings">
+      <div class="group" id="d-unavailable" style="display: none">
+        <div class="card"><div class="srow"><div class="lbl">Not available in this copy of Mac Engine Room<div class="hint">It was built without a Swift compiler, which Displays needs.</div></div></div></div>
+      </div>
+      <div id="d-list"></div>
+      <div class="group" id="d-keys-group">
+        <h3>Keys</h3>
+        <div class="card">
+          <div class="srow">
+            <div class="lbl">Brightness and volume keys<div class="hint">Brightness keys change the display the pointer is on, past 100% on the built-in XDR screen; ⌥⇧ takes quarter steps. Volume and mute reach a display's speakers when it's the sound output and answers DDC.</div></div>
+            <label class="switch"><input type="checkbox" id="d-keys"><span></span></label>
+          </div>
+          <div class="srow">
+            <div class="lbl"><span id="d-access"></span><div class="hint" id="d-access-hint"></div></div>
+            <button class="btn" id="d-access-open">Open Privacy &amp; Security</button>
           </div>
         </div>
       </div>
@@ -1399,6 +1449,98 @@ const saveBattery = changes => save({ keep_awake_battery: { ...settings.keep_awa
 $('ka-battery-on').onchange = e => saveBattery({ on: e.target.checked });
 $('ka-level').onchange = e => saveBattery({ level: +e.target.value });
 
+// ── Displays ────────────────────────────────────────────
+// What each display can do comes with each poll while this tab shows (displays.Displays.status()); the
+// sliders and the keys switch go back through the API and settings. Cards are made again only when
+// the displays themselves change, and a slider being moved is left alone by the polls.
+let displaysState = null;  // { available, displays: [{ id, name, builtin, adjustable, answered, percent, top, nits, volume, muted }], allowed, running }
+const heldSliders = new Set();
+const fmtPercent = p => !isNum(p) ? '—' : (Math.round(p * 10) / 10 === Math.round(p) ? `${Math.round(p)}%` : `${p.toFixed(1)}%`);
+function displayNote(d) {
+  if (d.builtin) return "macOS doesn't let apps change this display's brightness right now.";
+  if (d.answered === null) return 'Asking the display over DDC…';
+  return "It doesn't answer DDC, so its brightness is set with its own buttons or remote.";
+}
+function sliderRow(d, kind) {
+  const top = kind === 'b' ? d.top : 100;
+  return `<div class="srow d-row"><div class="lbl">${kind === 'b' ? 'Brightness' : 'Volume'}</div>
+    <div class="d-slider"><input type="range" class="range" id="d-${kind}-${d.id}" data-id="${d.id}" data-kind="${kind}" min="0" max="${top}" step="1"
+      aria-label="${esc(d.name)} ${kind === 'b' ? 'brightness' : 'volume'}">${kind === 'b' && top > 100 ? '<i class="d-tick"></i>' : ''}</div>
+    <div class="d-value num" id="d-${kind}v-${d.id}"></div></div>`;
+}
+function displayCard(d) {
+  let body;
+  if (d.adjustable) {
+    body = sliderRow(d, 'b') + (d.top > 100 ? '<div class="d-note">Past 100%, the XDR screen uses its HDR headroom, up to 1,600 nits. Lowering macOS\'s own brightness ends it.</div>' : '')
+      + (isNum(d.volume) ? sliderRow(d, 'v') : '');
+  } else {
+    body = `<div class="srow"><div class="lbl muted">${esc(displayNote(d))}</div></div>`;
+  }
+  return `<div class="group"><h3>${esc(d.name)}</h3><div class="card">${body}</div></div>`;
+}
+function showSlider(el, value) {
+  if (!isNum(value)) return;
+  if (+el.value !== value) el.value = value;
+  el.style.setProperty('--fill', String(value / +el.max));
+}
+const sendTimers = new Map(), sendLatest = new Map();
+function sendSlider(el) {  // at most every 60 ms while moving, and always the last value
+  const key = el.id;
+  sendLatest.set(key, +el.value);
+  if (sendTimers.has(key)) return;
+  const send = () => {
+    const value = sendLatest.get(key);
+    call(el.dataset.kind === 'b' ? 'set_display_brightness' : 'set_display_volume', +el.dataset.id, value);
+    sendTimers.set(key, setTimeout(() => { sendTimers.delete(key); if (sendLatest.get(key) !== value) sendSlider(el); }, 60));
+  };
+  send();
+}
+function bindSliders() {
+  for (const el of document.querySelectorAll('#d-list input.range')) {
+    el.oninput = () => {
+      showSlider(el, +el.value);
+      put(`d-${el.dataset.kind}v-${el.dataset.id}`, 'html', esc(fmtPercent(+el.value)));
+      sendSlider(el);
+    };
+    el.onpointerdown = () => heldSliders.add(el);
+    el.onpointerup = el.onpointercancel = el.onchange = () => heldSliders.delete(el);
+  }
+}
+function renderDisplays() {
+  if (activeTab !== 'displays' || !settings) return;
+  const s = displaysState || { available: true, displays: [], allowed: true, running: false };
+  put('d-unavailable', 'display', s.available ? 'none' : '');
+  put('d-keys-group', 'display', s.available ? '' : 'none');
+  const list = $('d-list');
+  const shape = s.displays.map(d => [d.id, d.name, d.top, d.adjustable, d.answered, isNum(d.volume)].join()).join('|');
+  if (list.dataset.shape !== shape) {
+    list.dataset.shape = shape;
+    heldSliders.clear();
+    list.innerHTML = s.displays.map(displayCard).join('');
+    bindSliders();
+  }
+  for (const d of s.displays) {
+    if (!d.adjustable) continue;
+    for (const [kind, value] of [['b', d.percent], ['v', d.volume]]) {
+      const el = $(`d-${kind}-${d.id}`);
+      if (!el || heldSliders.has(el) || sendTimers.has(el.id)) continue;
+      showSlider(el, value);
+      const sub = kind === 'b' && isNum(d.nits) ? `<span class="sub">${Math.round(d.nits).toLocaleString('en-US')} nits</span>`
+        : kind === 'v' && d.muted ? '<span class="sub">Muted</span>' : '';
+      put(`d-${kind}v-${d.id}`, 'html', esc(fmtPercent(value)) + sub);
+    }
+  }
+  setChecked($('d-keys'), settings.display_keys);
+  put('d-access', 'text', s.allowed ? 'Accessibility allowed' : 'Accessibility not allowed');
+  put('d-access-hint', 'text', s.allowed
+    ? 'Mac Engine Room can take the brightness and volume keys.'
+    : settings.display_keys ? 'The keys take effect once Mac Engine Room is allowed in Privacy & Security › Accessibility.'
+      : 'Turning on the keys asks for it. Mac Engine Room needs it to take the brightness and volume keys.');
+  put('d-access-open', 'display', s.allowed ? 'none' : '');
+}
+$('d-keys').onchange = e => save({ display_keys: e.target.checked });
+$('d-access-open').onclick = () => call('open_accessibility_settings');
+
 // ── polling ─────────────────────────────────────────────
 const POLL_MS = 1000;  // main.py samples at this rate while the page is polling
 let polling = false;
@@ -1428,6 +1570,7 @@ async function poll() {
       seq = r.seq;
       if (r.fan_control) fanControl = r.fan_control;
       if (r.keep_awake) { keepAwake = r.keep_awake; renderKeepAwake(); }
+      if (r.displays) { displaysState = r.displays; renderDisplays(); }
       if (r.thermals) {
         const changed = !thermals || thermals.available.join() !== r.thermals.available.join();
         thermals = r.thermals;
@@ -1447,7 +1590,7 @@ async function poll() {
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') poll(); });
 window.addEventListener('resize', () => { renderLiveChart(); renderThermalChart(); if (activeTab === 'history') renderDetailCharts(); });
 
-// ── tabs: Dashboard | Thermals | Keep Awake | Power (Now, History), and the shared Settings ──
+// ── tabs: Dashboard | Thermals | Keep Awake | Power (Now, History) | Displays, and the shared Settings ──
 function showTab(tab) {
   if (tab === 'power') tab = 'now';  // Power always opens on Now
   const isPower = tab === 'now' || tab === 'history';
@@ -1462,6 +1605,7 @@ function showTab(tab) {
   if (tab === 'dashboard') { renderDashboard(); poll(); }  // poll now: fans start being read
   if (tab === 'thermals') { renderThermals(); renderThermalChart(); poll(); }
   if (tab === 'keepawake') renderKeepAwake();
+  if (tab === 'displays') { renderDisplays(); call('refresh_displays').catch(() => {}); poll(); }  // DDC only now, or on a change
   if (tab === 'now') { renderNow(); renderLiveChart(); }
   if (tab === 'history') loadSessions();
   if (tab === 'settings') renderSettings();
@@ -1576,7 +1720,7 @@ function applySettings() {
   else document.documentElement.setAttribute('data-theme', t);
   unitF = settings?.temperature_unit === 'fahrenheit';
   renderDashboard(); renderThermals(); renderLiveChart(); renderThermalChart(); renderDetailCharts(); renderFanTuning();
-  renderKeepAwake();
+  renderKeepAwake(); renderDisplays();
 }
 
 async function renderSettings() {

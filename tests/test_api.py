@@ -153,3 +153,28 @@ def test_settings_asks_for_a_report_only_when_the_app_guessed(monkeypatch):
     assert hint() is False
     app._thermals.guessing = ("gpu",)
     assert hint() is True
+
+
+def test_the_displays_tab_gets_its_status_only_while_it_shows():
+    status = {"available": True, "displays": [], "allowed": False, "running": False}
+    app = SimpleNamespace(_updater=SimpleNamespace(status="idle", version=None),
+                          _sampler=SimpleNamespace(dashboard_polled=lambda fans: None), _live=LiveState(),
+                          _fans=SimpleNamespace(status={}), _keep_awake=_KEEP_AWAKE,
+                          _displays=SimpleNamespace(status=lambda: status))
+    assert Api(app=app).get_live(0, "displays")["displays"] == status
+    assert "displays" not in Api(app=app).get_live(0, "dashboard")
+
+
+def test_the_displays_tabs_sliders_go_to_the_main_thread(monkeypatch):
+    import accessibility
+
+    calls = []
+    monkeypatch.setattr(AppHelper, "callAfter", lambda func, *args: calls.append((func, args)))
+    tool = SimpleNamespace(set_brightness=object(), set_volume=object(), refresh=object())
+    api = Api(app=SimpleNamespace(_displays=tool))
+    api.set_display_brightness("1", 130)
+    api.set_display_volume(5, "40")
+    api.refresh_displays()
+    api.open_accessibility_settings()
+    assert calls == [(tool.set_brightness, (1, 130.0)), (tool.set_volume, (5, 40.0)), (tool.refresh, ()),
+                     (accessibility.open_settings, ())]

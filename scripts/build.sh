@@ -55,8 +55,21 @@ if xcrun --find swiftc >/dev/null 2>&1; then
     fi
     mkdir -p "$APP/Contents/Library/LaunchDaemons"
     cp "Fan Helper/com.pythonflow.monitor.fans.plist" "$APP/Contents/Library/LaunchDaemons/"
+    # Each tool's event tap ("Native/<Tool>/*.swift"), loaded by the app with ctypes from
+    # Contents/Frameworks/lib<tool>.dylib. Without them, the switches that need them are hidden.
+    for dir in Native/*/; do
+        tool=$(basename "$dir")
+        lib="$APP/Contents/Frameworks/lib$(echo "$tool" | tr '[:upper:]' '[:lower:]').dylib"
+        echo "Building $tool…" >&2
+        if ! xcrun swiftc -O -target arm64-apple-macos13.0 -emit-library -module-name "$tool" \
+            "$dir"*.swift -o "$lib" >>"$LOG" 2>&1; then
+            tail -20 "$LOG" >&2
+            echo "Building $tool failed; full log: $LOG" >&2
+            exit 1
+        fi
+    done
 else
-    echo "No Swift compiler (xcode-select --install adds one), so this build has no fan control." >&2
+    echo "No Swift compiler (xcode-select --install adds one), so this build has no fan control, and no Mouse or Displays switches." >&2
 fi
 
 xattr -cr "$APP"
