@@ -5,8 +5,10 @@
 //   fan control: off (default) holding max override approval unavailable other error
 //   this Mac:    fanless onefan noscreen nochip ioreport hot charging desktop gpuheld (GPU parked 3 min) hint
 //                (noscreen,fanless,ioreport is the 13" M4 Air)
+//   keep awake:  ka1h ka2h kasleep kaschedule kaofftoday kabattery (paused by the battery rule)
+//                kahours (work hours on) karule (battery rule on) sunday (the week starts on Sunday)
 //   settings:    fahrenheit dark light
-//   tab:         dashboard (default) thermals power history settings
+//   tab:         dashboard (default) thermals keepawake power history settings
 // Change window.__state while it runs to try anything else; the next poll picks it up.
 // window.__state.size is what the page last asked the window to be (the app sizes its
 // window to it), and window.__state.calls every API call the page made. Page errors that
@@ -31,6 +33,8 @@
     sensorHint: false,  // Settings asks for a sensor report
     fans: [{ min: 1499, max: 4296 }, { min: 1499, max: 4744 }],
     fanRpm: null,  // [rpm, …] to show; null follows fan control (0 while macOS has them cool)
+    keepAwake: { choice: 'off', holding: false, line: null },  // keepawake.KeepAwake.status()
+    firstWeekday: 0,  // Python's weekday the Mac's calendar starts on: 0 Monday, 6 Sunday
     sessions: [],
     update: ['idle', null],
     updateUnavailable: null,
@@ -64,6 +68,15 @@
       is_charging: true, external_connected: true, time_remaining_min: 64, adapter_power: 52.3,
       adapter: { name: '96W USB-C Power Adapter', watts: 96 }, amperage: 2.4,
     }),
+    ka1h: () => { state.keepAwake = keepAwake('1h'); },
+    ka2h: () => { state.keepAwake = { choice: '2h', holding: true, line: 'Screen stays on for 1 more hour and 12 minutes.' }; },
+    kasleep: () => { state.keepAwake = keepAwake('sleep'); },
+    kaschedule: () => { state.keepAwake = { choice: null, holding: true, line: 'Screen stays on until 5:00 PM (work hours).' }; },
+    kaofftoday: () => { state.keepAwake = { choice: 'off', holding: false, line: "Off for the rest of today's work hours." }; },
+    kabattery: () => { state.keepAwake = { choice: '2h', holding: false, line: 'Paused because the battery is below 20%.' }; },
+    kahours: () => { state.settings.keep_awake_hours = { ...state.settings.keep_awake_hours, on: true }; },
+    karule: () => { state.settings.keep_awake_battery = { ...state.settings.keep_awake_battery, on: true }; },
+    sunday: () => { state.firstWeekday = 6; },
     fahrenheit: () => { state.settings.temperature_unit = 'fahrenheit'; },
     dark: () => { state.settings.theme = 'dark'; },
     light: () => { state.settings.theme = 'light'; },
@@ -75,6 +88,16 @@
     if (!state.fans.length) state.fanControl = { profile: pid, state: 'nofans' };
     else if (pid === 'macos') state.fanControl = { profile: pid, state: 'off' };
     else state.fanControl = { profile: pid, state: 'holding', targets: state.fans.map(f => pid === 'max' ? f.max : f.min) };
+  }
+
+  // What keepawake.py would say right after a pick (the preview doesn't run work hours or count down).
+  function keepAwake(choice) {
+    return {
+      off: { choice: 'off', holding: false, line: null },
+      '1h': { choice: '1h', holding: true, line: 'Screen stays on for 1 more hour.' },
+      '2h': { choice: '2h', holding: true, line: 'Screen stays on for 2 more hours.' },
+      sleep: { choice: 'sleep', holding: true, line: 'Screen stays on until the Mac sleeps.' },
+    }[choice];
   }
 
   function reading(t) {
@@ -117,13 +140,14 @@
       seq, latest: r.power, point_fields: ['t', 'system_load', 'system_in', 'battery_power', 'screen_power', 'chip_power'],
       points, thermals: { ...r.thermals },  // a plain object, as the bridge sends
       thermal_fields: ['t', 'cpu', 'gpu', 'memory', 'ssd', 'ambient'], thermal_points: tpoints,
-      update: state.update, fan_control: state.fanControl,
+      update: state.update, fan_control: state.fanControl, keep_awake: state.keepAwake,
     };
   }
 
   const handlers = {
     get_live: getLive,
     get_settings: () => state.settings,
+    keep_awake: choice => (state.keepAwake = keepAwake(choice) || state.keepAwake),
     save_settings: changes => {
       const before = state.settings.fan_profile;
       Object.assign(state.settings, changes);
@@ -134,6 +158,8 @@
       version: app.version, log_path: '/Users/you/Library/Logs/Mac Engine Room/app.log',
       history_recording: state.settings.record_history, update_unavailable_reason: state.updateUnavailable,
       fan_profiles: app.fan_profiles, fan_tuning_limits: app.fan_tuning_limits, sensor_hint: state.sensorHint,
+      keep_awake_choices: app.keep_awake_choices, keep_awake_battery_levels: app.keep_awake_battery_levels,
+      first_weekday: state.firstWeekday,
     }),
     copy_sensor_report: () => new Promise(done => setTimeout(() => done(true), 300)),
     report_problem: () => null,

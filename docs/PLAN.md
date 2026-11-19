@@ -32,6 +32,9 @@ Each is the usual +0.0.1 with the whole release checklist in DEVELOPMENT.md.
    (profile tiles and three in the menu, the compact Fan profiles settings, the Dashboard's
    fan controls) were merged as DigitalN/mac-engine-room#26 and released as 1.2.9 on
    2026-11-02.
+4. **Keep Awake** (see Keep Awake), designed with the maintainer on 2026-11-19 in three
+   grilling rounds. To ship as **1.4.0** through the release checklist once its pull request
+   is merged.
 
 ## Name and identity
 
@@ -197,6 +200,9 @@ This M1 Pro (MacBookPro18,1), lightly loaded on 2026-11-02, has 2,181 SMC keys:
 
 ## Menu
 
+- **Changed on 2026-11-19 for 1.4.0:** **Open Dashboard** (⌘D) moved to the very top. Then
+  Thermals, then Keep Awake (see Keep Awake), then Power; Check for Updates… and Quit stay at
+  the bottom.
 - One native menu with custom row views, Thermals first: profile buttons (3 × 2), the Manual
   slider only when Manual is chosen, then temperatures as tiles with fans in the last tile.
   **Changed on 2026-11-02 after trying 1.2.8:** one row of three profile buttons, drawn as
@@ -213,6 +219,67 @@ This M1 Pro (MacBookPro18,1), lightly loaded on 2026-11-02, has 2,181 SMC keys:
   the item doesn't jump as digits change (ThermalForge #51).
 - The menu bar still shows one value. Temperature choices (hottest CPU, hottest overall) join
   "Menu bar shows"; watts stays the default.
+
+## Keep Awake
+
+Agreed on 2026-11-19, for 1.4.0. The maintainer keeps the screen on and unlocked at work with
+Caffeine and keeps forgetting to turn it off, so it's built in, with work hours that never
+wake the Mac. The name everywhere is **Keep Awake** (never "Caffeine").
+
+- **What it holds:** IOKit's `PreventUserIdleDisplaySleep` assertion, as Caffeine does. The
+  screen stays on, so the Mac doesn't idle-sleep, the screen saver doesn't start and it
+  doesn't lock. Closing the lid, Apple menu › Sleep, locking by hand and macOS's near-empty
+  battery sleep still work. No "Mac awake but screen may sleep" option.
+- **The choices:** Off · 1 Hour · 2 Hours · Until Sleep. Fixed: no setting, no "forever".
+  Every pick counts from now: the same timed pick again restarts it, and the last pick wins
+  even when it's shorter; Until Sleep replaces a timer and the other way round. 1 Hour and
+  2 Hours run on the wall clock (absolute end times), so sleep neither ends nor pauses them.
+  Until Sleep ends at the next system sleep, however it's caused; clamshell on an external
+  display isn't sleep, so it carries on.
+- **Work hours:** one block on chosen weekdays: on/off, From, To, days. Off until turned on;
+  Mon–Fri 9:00–17:00 by default. Local time wherever the Mac is, worked out on each tick, so
+  time zone and daylight saving changes just work. The end after the start (no blocks past
+  midnight), at least one day; no per-day hours, no second block. It never wakes the Mac (no
+  scheduled wakes): it takes effect when the Mac is awake with its screens on, as the lid
+  opens, at login, after a restart, or when it's turned on inside the block, and not in a
+  dark wake (Power Nap). Inside the block, **Off** is off for the rest of that day's block,
+  across sleeps, back by itself the next workday; **1 or 2 Hours** hold until whichever ends
+  later, the timer or the block (1 Hour at 16:30 holds until 17:30); **Until Sleep** carries
+  past the block's end until the next sleep. Sleeping at lunch doesn't end the block.
+- **Battery rule:** a switch, "Stop when the battery is below [20%]" (10, 20, 30, 40 or 50%),
+  off by default. Only on battery: below the level, Keep Awake lets go (a pick or work hours
+  alike) and says "Paused because the battery is below 20%." Plugging in brings it back if its
+  time hasn't run out (timers keep counting); on the adapter it holds even below the level.
+  Hidden on Macs with no battery. It uses the battery reading the sampler already takes.
+- **Pauses and endings:** locking the screen, or switching to another user's session, pauses
+  it; unlocking resumes it if time remains. Whenever it lets go while the Mac is in use (a
+  timer runs out, the block ends, the battery rule), it declares user activity first, so the
+  screen gets macOS's full display-sleep time from then instead of dimming and locking at
+  once.
+- **The updater's relaunch** (it installs after 10 s idle, so it can come mid-day): a running
+  pick and today's Off come back in the new copy with the same end times, and the old copy
+  declares user activity before quitting. Only that path writes a handover file
+  (`keep-awake-handover.json` in the data folder), and the new copy reads it once and deletes
+  it, ignoring one older than 2 minutes. A quit by the user, a restart or a logout brings back
+  nothing but work hours.
+- **Menu:** a section header, then the choices as tiles drawn like the fan profile buttons, in
+  two rows (**1 Hour · 2 Hours**, then **Off · Until Sleep**), the active one in the accent
+  colour, and one line under them: "Screen stays on for 42 more minutes." (a whole sentence,
+  hours and minutes past an hour, counting down while the menu is open), "Screen stays on until
+  the Mac sleeps.", "Screen stays on until 5:00 PM (work hours)." (no tile lit), "Off for the
+  rest of today's work hours.", "Paused because the battery is below 20%.", or no line, with
+  Off lit. Times follow the Mac's 12/24-hour setting. The sentence is built in one place
+  (`keepawake.sentence`) for the menu and the page.
+- **Menu bar:** while Keep Awake holds the screen on (work hours included), a
+  `cup.and.saucer.fill` follows the reading, with the charging bolt still in front:
+  "⚡ 12.3 W ☕", or "12.3 W ☕".
+- **Page:** a **Keep Awake** tab between Thermals and Power, with three cards: the four
+  choices (Off · 1 Hour · 2 Hours · Until Sleep) drawn like the Thermals page's fan profiles,
+  with the same sentence under them; Work hours (the switch, From and To, and seven day buttons
+  starting on the Mac's first weekday, editable while it's off); and Battery (hidden on a Mac
+  with no battery). Nothing about it in Settings, and no Dashboard row.
+- **Cost:** no timers or wakeups of its own: it's evaluated on the sampler's ticks and on
+  notifications. Holding the screen on doesn't raise the app's priority.
 
 ## Fan control
 

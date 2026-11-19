@@ -327,3 +327,64 @@ def test_quitting_takes_the_item_out_of_the_menu_bar(monkeypatch):
     bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None)
     bar.remove()
     assert removed == [item]
+
+
+class _TitleButton(_FakeButton):
+    def __init__(self):
+        super().__init__()
+        self.attributed = []
+
+    def setAttributedTitle_(self, text):
+        self.attributed.append(text.string())
+
+
+def test_menu_order_open_dashboard_thermals_keep_awake_power(monkeypatch):
+    _fake_status_item(monkeypatch)
+    bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None)
+    titles = [i.title() if i.view() is None else "[view]" for i in bar._menu.itemArray() if not i.isSeparatorItem()]
+    assert titles[0] == "Open Dashboard"
+    assert titles.index("Thermals") < titles.index("Keep Awake") < titles.index("Power")
+    assert titles[-2:] == ["Check for Updates…", "Quit Mac Engine Room"]
+    assert bar._menu.itemArray()[0].keyEquivalent() == "d"
+
+
+def test_keep_awake_section_lights_the_choice_and_shows_the_line(monkeypatch):
+    _fake_status_item(monkeypatch)
+    status = {"choice": "off", "holding": False, "line": None}
+    chosen = []
+
+    def choose(choice):
+        chosen.append(choice)
+        status.update(choice=choice, holding=True, line="Screen stays on until the Mac sleeps.")
+        return dict(status)
+
+    bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None,
+                    keep_awake_status=lambda: dict(status), on_keep_awake=choose)
+    bar.update({}, None, {})
+    bar._target.menuNeedsUpdate_(bar._menu)
+    lit = lambda: [c for c, (box, _) in bar._keep_awake_tiles.items() if box.fillColor() == AppKit.NSColor.controlAccentColor()]
+    assert lit() == ["off"] and bar._keep_awake_line_item.isHidden()
+    button = bar._keep_awake_tiles["sleep"][1]
+    bar._target.chooseKeepAwake_(button)
+    assert chosen == ["sleep"] and lit() == ["sleep"]
+    assert not bar._keep_awake_line_item.isHidden()
+    assert bar._keep_awake_line.stringValue() == "Screen stays on until the Mac sleeps."
+    status.update(choice=None, line="Screen stays on until 5:00 PM (work hours).")
+    bar._target.menuNeedsUpdate_(bar._menu)
+    assert lit() == [] and bar._keep_awake_line.stringValue() == "Screen stays on until 5:00 PM (work hours)."
+
+
+def test_cup_follows_the_reading_only_while_keep_awake_holds(monkeypatch):
+    button = _TitleButton()
+    item = SimpleNamespace(button=lambda: button, setMenu_=lambda menu: None)
+    monkeypatch.setattr(statusbar, "NSStatusBar", SimpleNamespace(
+        systemStatusBar=lambda: SimpleNamespace(statusItemWithLength_=lambda length: item)))
+    bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None)
+    sample = {"system_load": 12.3}
+    bar.update(sample, None, {}, keep_awake=True)
+    bar.update(sample, None, {}, keep_awake=True)  # nothing new for AppKit
+    assert button.attributed == [f"12.3 W ￼"]  # the reading, a space, the cup's attachment
+    bar.set_keep_awake(False)
+    assert button.titles[-1] == "12.3 W"
+    bar.set_keep_awake(False)
+    assert button.titles.count("12.3 W") == 1

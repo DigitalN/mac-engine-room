@@ -61,6 +61,18 @@ were still at the speeds the helper set`), and a hand-back (the app asking, disc
 sleep) logs the first line too. Fans at any other speed are left alone, and a helper that has
 restarted knows no speeds of its own, so it leaves manual fans alone too.
 
+Keep Awake logs `Keep Awake on for 1 hour (until 15:42)`, `Keep Awake on until the Mac sleeps`
+and `Keep Awake on until 17:00 (work hours)` (with `; 1 hour chosen, until 11:00` for a timer
+picked inside work hours that ends sooner), each time what holds the screen on changes; `Keep
+Awake off (<why>)`: `Off chosen` (`, for the rest of today's work hours` inside them), `1 hour is
+up`, `2 hours are up`, `the Mac is going to sleep`, `work hours are over`, `work hours turned
+off` or `work hours changed`; `Keep Awake paused (<why>)`: `the screen is locked` (switching to
+another user's session too), `the screens are asleep` (a dark wake, the display put to sleep) or
+`the battery is below 20%`; and `Keep Awake resumed`. Times there are 24-hour; the menu and page
+follow the Mac's setting. `Keep Awake carried over from the copy that updated itself` is the new
+copy taking over after the updater's relaunch. `pmset -g assertions` lists
+`PreventUserIdleDisplaySleep named: "Mac Engine Room Keep Awake"` while it holds the screen on.
+
 `Menu took 1.8 s to open` is timed from the click to the open, filled menu (only logged above
 0.3 s). `Mac busy: running at full priority` and `Mac quiet again` are each switch of the app's
 threads between user-interactive and background, with what the app saw in brackets: `(a wait
@@ -178,10 +190,22 @@ To reproduce without touching the user's data, run with
   the app disconnects, after 10 s without a word, and before sleep. `main.swift` is the
   server; `Fans.swift` holds and hands back the fans, and `tests/test_fan_helper.py` runs it
   against a simulated SMC (`tests/fan_helper/FakeSMC.swift`) behaving like an M4 or the M1 Pro.
+- **Keep Awake**: `Application Files/keepawake.py`. Holds the screen on with IOKit's
+  `PreventUserIdleDisplaySleep` assertion (ctypes): Off, 1 Hour, 2 Hours, Until Sleep, work hours
+  (`keep_awake_hours`) and the battery rule (`keep_awake_battery`), validated there for
+  `settings.py`. `Model` is the rules and `sentence()` the line the menu and the page both show,
+  pure and unit-tested; `KeepAwake` runs them on each sample (`feed`), on picks, on settings changes
+  and on the screens' sleep/wake, lock/unlock, session and system sleep notifications, holds or
+  releases the assertion, and declares user activity as it lets go while the Mac is in use. Only
+  the updater's relaunch (`EngineRoomApp._quit_for_update`) writes `keep-awake-handover.json`,
+  which the new copy reads once and deletes.
 - **Menu bar**: `Application Files/statusbar.py`. Native `NSStatusItem` and `NSMenu`
   (PyObjC). The title shows watts or a temperature; the menu's fan profile buttons,
   Thermals tiles and Power rows are custom views (NSTextField labels, NSBox tiles,
-  NSSlider, SF Symbols), then the actions. The profile buttons are the three chosen in
+  NSSlider, SF Symbols), then the actions. Open Dashboard is first, then Thermals, Keep Awake (its
+  four choices as tiles in two rows, and its line) and Power. While Keep Awake holds the screen on,
+  `cup.and.saucer.fill` follows the reading as an attachment in the title, which takes the
+  title's colour; the charging bolt stays the button's image. The profile buttons are the three chosen in
   Settings, drawn as tiles like the temperatures' (a borderless NSButton over an NSBox), the
   chosen one in the accent colour: stock push buttons looked out of place there. Main
   thread only.
@@ -193,8 +217,8 @@ To reproduce without touching the user's data, run with
   save. Open at login isn't in it: it lives in ServiceManagement, and `Api` merges it
   in for the page.
 - **Frontend**: `Application Files/index.html`. A single page in vanilla JS with a
-  hand-rolled canvas chart and no external resources. A **Dashboard | Thermals | Power**
-  switcher and a shared Settings page. The window opens on the Dashboard, and **Open
+  hand-rolled canvas chart and no external resources. A **Dashboard | Thermals | Keep Awake | Power**
+  switcher (Keep Awake between Thermals and Power) and a shared Settings page. The window opens on the Dashboard, and **Open
   Dashboard** in the menu switches to it (`EngineRoomApp._show_tab`); Power always opens on
   Now, with History beside it. The Dashboard and the Thermals page share the fan controls
   (`renderFanControls`): all four profiles and the status line; each fan's speed and gauge
@@ -498,6 +522,14 @@ Don't undo these without asking:
   Reading them only while shown left a gap whenever the page was covered or another tab
   showed.
 - Choosing Power always opens Now, not the last Power page.
+- **Keep Awake** (1.4.0), designed with the maintainer on 2026-11-19; the whole design is in
+  `docs/PLAN.md`. The screen stays on (no "Mac awake but screen may sleep" option); the choices
+  are fixed at Off · 1 Hour · 2 Hours · Until Sleep (no "forever"); every pick counts from now and
+  the last one wins; timers run on the wall clock. Work hours are one block on chosen weekdays,
+  never past midnight, off until turned on, and never wake the Mac. Inside them Off is off for the
+  rest of the day, a timer holds until whichever ends later, and Until Sleep carries past the end.
+  The battery rule is off by default. Locking pauses it. Its own tab, nothing in Settings, no
+  Dashboard row. Never called "Caffeine".
 - Apple silicon only (the build is arm64, so Intel Macs can't open it). Desktops get the same
   sensor work as laptops: on a Mac with no battery, Power says "Desktop Mac" and shows System and
   Chip power, with no Battery or Adapter card, row, tile or chart line; fan control is offered

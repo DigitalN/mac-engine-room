@@ -277,7 +277,12 @@ class Api:
         # Settings' Check for Updates button follows a check through these polls.
         live["update"] = [self._app._updater.status, self._app._updater.version]
         live["fan_control"] = self._app._fans.status
+        live["keep_awake"] = self._app._keep_awake.status()
         return live
+
+    def keep_awake(self, choice):
+        """The Keep Awake tab's buttons: Off, 1 Hour, 2 Hours or Until Sleep. Returns what to show."""
+        return self._app._keep_awake.choose(str(choice))
 
     def open_fan_approval(self):
         """Login Items & Extensions, where the user allows the fan helper."""
@@ -374,8 +379,11 @@ class Api:
 
     def app_info(self):
         import fans
+        import keepawake
 
-        return {"version": VERSION, "log_path": str(LOG_PATH), "sensor_hint": self._app._sensor_hint(),
+        return {"keep_awake_choices": [[c, keepawake.CHOICE_NAMES[c]] for c in keepawake.CHOICES],
+                "keep_awake_battery_levels": keepawake.BATTERY_LEVELS, "first_weekday": _first_weekday(),
+                "version": VERSION, "log_path": str(LOG_PATH), "sensor_hint": self._app._sensor_hint(),
                 "history_recording": self._app._settings.get()["record_history"],
                 "update_unavailable_reason": self._app._updater.unavailable_reason,
                 "fan_profiles": fans.page_profiles(), "fan_tuning_limits": fans.TUNING_LIMITS}
@@ -392,6 +400,14 @@ class Api:
         log.warning("Dashboard error: %s", str(message)[:1000])
 
 
+def _first_weekday():
+    """The weekday the Mac's calendar starts its week on (Python's: 0 is Monday)."""
+    import keepawake
+    from Foundation import NSCalendar
+
+    return keepawake.first_weekday(int(NSCalendar.currentCalendar().firstWeekday()))
+
+
 def _copy_to_clipboard(text):
     from AppKit import NSPasteboard, NSPasteboardTypeString
 
@@ -405,6 +421,7 @@ class EngineRoomApp:
         import launch
         from fans import FanControl, Helper
         from history import ChargingRecorder, HistoryStore
+        from keepawake import KeepAwake
         from power import PowerReader
         from priority import Priority
         from settings import Settings
@@ -424,10 +441,11 @@ class EngineRoomApp:
                                 thermals.fan_limits, priority=self._priority)
         self._sampler = Sampler(self._reader, self._on_sample, thermals, self._thermal_parts,
                                 fans_running=lambda: self._fans.running, priority=self._priority)
+        self._keep_awake = KeepAwake(self._settings, DATA_DIR, on_change=self._on_keep_awake_change)
         self._login_item = launch.LoginItem(self._app_path, DATA_DIR)
         self._updater = Updater(
             self._app_path, VERSION, settings=self._settings, data_dir=DATA_DIR,
-            is_busy=self._busy_for_update, on_status=self._on_update_status, quit_app=self.quit)
+            is_busy=self._busy_for_update, on_status=self._on_update_status, quit_app=self._quit_for_update)
         self._window = None  # the dashboard's, made the first time it opens (_make_window)
         self._html = None
         self._opening_since = None  # when the dashboard began to open, until its page has loaded for the first time
@@ -449,6 +467,7 @@ class EngineRoomApp:
         self._live.push(sample, thermals)
         self._recorder.feed(sample)
         self._fans.feed(thermals, sample)
+        self._keep_awake.feed(sample)  # its battery rule, its timers and work hours: no timers of its own
         if self._statusbar is not None and not self._quitting:
             # One trip to the main thread per sample: each one wakes it. When it was read goes
             # along for the first reading's line in app.log.
@@ -484,6 +503,7 @@ class EngineRoomApp:
 
         self._recorder.enabled = values["record_history"]
         self._fans.nudge()  # a profile chosen or tuned: act on it now
+        self._keep_awake.settings_changed(values)  # work hours or the battery rule changed
         AppHelper.callAfter(self._apply_theme, values["theme"])
 
     # ── window lifecycle (main thread) ──
@@ -492,7 +512,8 @@ class EngineRoomApp:
         """`read_at`: when the sampler read it (time.monotonic())."""
         if self._quitting:
             return  # the menu bar item has gone
-        self._statusbar.update(sample, thermals, settings)
+        # Whether Keep Awake holds the screen on as of now, not as of the sample: a pick may have come since.
+        self._statusbar.update(sample, thermals, settings, self._keep_awake.holding)
         if not self._first_reading_seen:
             self._first_reading_seen = True
             age = _seconds_since_launch()
@@ -715,6 +736,26 @@ class EngineRoomApp:
         self._priority.refresh()  # it isn't opening any more
         return False
 
+    def _on_keep_awake_change(self, holding):
+        """Any thread: Keep Awake started or stopped holding the screen on. The menu bar's cup
+        follows at once, not at the next sample."""
+        from PyObjCTools import AppHelper
+
+        AppHelper.callAfter(self._show_keep_awake, holding)
+
+    def _show_keep_awake(self, holding):
+        if self._statusbar is not None and not self._quitting:
+            self._statusbar.set_keep_awake(holding)
+
+    def _quit_for_update(self):
+        """The updater's relaunch into a new version: Keep Awake's pick and today's Off go to the new
+        copy (only on this path, so a quit by the user brings back nothing but the work hours)."""
+        try:
+            self._keep_awake.hand_over()
+        except Exception:
+            log.exception("Couldn't hand Keep Awake over")
+        self.quit()
+
     def quit(self):
         """The menu's Quit and the updater's relaunch. ⌘Q goes to `_should_terminate` directly."""
         import AppKit
@@ -853,7 +894,9 @@ class EngineRoomApp:
             on_open=self.show_dashboard, on_check_updates=self._updater.check_now, on_quit=self.quit,
             on_menu_open=self._on_menu_open, fan_status=lambda: self._fans.status,
             on_profile=lambda pid: self._settings.update({"fan_profile": pid}),
-            on_allow_fans=self._fans.open_login_items)
+            on_allow_fans=self._fans.open_login_items,
+            keep_awake_status=self._keep_awake.status, on_keep_awake=self._keep_awake.choose)
+        self._keep_awake.start()  # before the first sample, which feeds it
         self._sampler.start()
         self._fans.start()
         self._wake_observer = AppKit.NSWorkspace.sharedWorkspace().notificationCenter().addObserverForName_object_queue_usingBlock_(

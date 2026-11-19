@@ -20,7 +20,8 @@ macOS 27 and is no longer maintained.
 
 - **Menu bar reading**: the CPU's temperature, the hottest temperature, or system,
   screen or chip power, or the charger's input while charging. Click it for the fan
-  profiles and a quick summary of temperatures, fans and power.
+  profiles, Keep Awake and a quick summary of temperatures, fans and power. A cup
+  follows the reading while Keep Awake holds the screen on.
 - **Dashboard**: the window opens on a short page with a row of readings per tool:
   CPU, GPU and each fan's speed, with the fan profiles, then system power, battery and
   charger.
@@ -32,6 +33,9 @@ macOS 27 and is no longer maintained.
 - **Fan control**: leave the fans to macOS, or choose a profile that keeps them running
   and speeds them up sooner (see [Fan profiles](#fan-profiles)). You can change Balanced's
   and Performance's numbers in Settings, and choose which three profiles are in the menu.
+- **Keep Awake**: keep the screen on, so the Mac doesn't sleep, start the screen saver or
+  lock, for 1 hour, 2 hours or until the Mac sleeps (see [Keep Awake](#keep-awake)). Or
+  during your work hours on the days you choose, without ever waking the Mac.
 - **Power flow** from charger to Mac to battery, with the charger's conversion loss and
   where the Mac's power goes.
 - **Live power chart** of the last 1, 5 or 15 minutes.
@@ -114,6 +118,22 @@ in Settings. All four are on the Dashboard and the Thermals page.
 
 Whatever the profile, the fans go to full speed if macOS reports serious thermal pressure,
 or the chip, a sensor inside the Mac or the battery gets too hot.
+
+## Keep Awake
+
+Choose **1 Hour**, **2 Hours** or **Until Sleep** in the menu or on the Keep Awake tab, and
+the screen stays on: the Mac doesn't idle-sleep, start the screen saver or lock. Closing the
+lid, choosing Sleep or locking the screen yourself still work. Each choice counts from when you
+make it; the timers keep counting while the Mac sleeps, and Until Sleep ends when it next
+sleeps.
+
+**Work hours** keep the screen on during one block of time on the days you choose (Monday to
+Friday, 9 to 5, once you turn them on). They never wake the Mac: they take effect whenever it's
+awake during those hours. Choosing **Off** inside them turns it off for the rest of the day.
+
+With **Stop when the battery is below** on, Keep Awake pauses on battery below the level you
+choose, and comes back when you plug in. Locking the screen pauses it too. When it lets go, the
+screen still gets your usual time before it dims.
 
 ## A reading wrong or missing?
 
