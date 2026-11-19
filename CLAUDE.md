@@ -64,13 +64,18 @@ restarted knows no speeds of its own, so it leaves manual fans alone too.
 Keep Awake logs `Keep Awake on for 1 hour (until 15:42)`, `Keep Awake on until the Mac sleeps`
 and `Keep Awake on until 17:00 (work hours)` (with `; 1 hour chosen, until 11:00` for a timer
 picked inside work hours that ends sooner), each time what holds the screen on changes; `Keep
-Awake off (<why>)`: `Off chosen` (`, for the rest of today's work hours` inside them), `1 hour is
+Awake off (<why>)`: `Off chosen`, `1 hour is
 up`, `2 hours are up`, `the Mac is going to sleep`, `work hours are over`, `work hours turned
-off` or `work hours changed`; `Keep Awake paused (<why>)`: `the screen is locked` (switching to
+off` or `work hours changed`, with `, for the rest of today's work hours` while Off for the rest
+of today's work hours holds (a pick after it ends, and Off is back); `Keep Awake paused (<why>)`: `the screen is locked` (switching to
 another user's session too), `the screens are asleep` (a dark wake, the display put to sleep) or
 `the battery is below 20%`; and `Keep Awake resumed`. Times there are 24-hour; the menu and page
 follow the Mac's setting. `Keep Awake carried over from the copy that updated itself` is the new
-copy taking over after the updater's relaunch. `pmset -g assertions` lists
+copy bringing back a pick or today's Off after the updater's relaunch. Over the relaunch's gap the
+old copy logs `Keep Awake left caffeinate holding the screen on for up to N s over the update (pid
+P)` (`pmset -g assertions` lists caffeinate's `PreventUserIdleDisplaySleep` until then), and the
+new copy `Keep Awake ended the caffeinate that held the screen on over the update (pid P)`. `Keep
+Awake couldn't hold the screen on (IOKit error 0x…)` is logged once until it holds again. `pmset -g assertions` lists
 `PreventUserIdleDisplaySleep named: "Mac Engine Room Keep Awake"` while it holds the screen on.
 
 `Menu took 1.8 s to open` is timed from the click to the open, filled menu (only logged above
@@ -196,9 +201,12 @@ To reproduce without touching the user's data, run with
   `settings.py`. `Model` is the rules and `sentence()` the line the menu and the page both show,
   pure and unit-tested; `KeepAwake` runs them on each sample (`feed`), on picks, on settings changes
   and on the screens' sleep/wake, lock/unlock, session and system sleep notifications, holds or
-  releases the assertion, and declares user activity as it lets go while the Mac is in use. Only
-  the updater's relaunch (`EngineRoomApp._quit_for_update`) writes `keep-awake-handover.json`,
-  which the new copy reads once and deletes.
+  releases the assertion, and declares user activity as it lets go while the Mac is in use. The lock
+  notifications go through an observer with `NSNotificationSuspensionBehaviorDeliverImmediately`
+  (AppKit holds distributed notifications back from an app that isn't active), and the lock is read
+  again at each wake. Only the updater's relaunch (`EngineRoomApp._quit_for_update`) writes
+  `keep-awake-handover.json` (a pick, today's Off, and the pid of the `caffeinate` it leaves holding
+  the screen on over the gap), which the new copy reads once and deletes, ending that caffeinate.
 - **Menu bar**: `Application Files/statusbar.py`. Native `NSStatusItem` and `NSMenu`
   (PyObjC). The title shows watts or a temperature; the menu's fan profile buttons,
   Thermals tiles and Power rows are custom views (NSTextField labels, NSBox tiles,
@@ -527,7 +535,9 @@ Don't undo these without asking:
   are fixed at Off · 1 Hour · 2 Hours · Until Sleep (no "forever"); every pick counts from now and
   the last one wins; timers run on the wall clock. Work hours are one block on chosen weekdays,
   never past midnight, off until turned on, and never wake the Mac. Inside them Off is off for the
-  rest of the day, a timer holds until whichever ends later, and Until Sleep carries past the end.
+  rest of the day (a later pick holds on its own terms, then Off is back), a timer holds until
+  whichever ends later, and Until Sleep carries past the end. Over the updater's relaunch,
+  caffeinate holds the screen on until the new copy takes over.
   The battery rule is off by default. Locking pauses it. Its own tab, nothing in Settings, no
   Dashboard row. Never called "Caffeine".
 - Apple silicon only (the build is arm64, so Intel Macs can't open it). Desktops get the same

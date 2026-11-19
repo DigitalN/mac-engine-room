@@ -741,11 +741,13 @@ class EngineRoomApp:
         follows at once, not at the next sample."""
         from PyObjCTools import AppHelper
 
-        AppHelper.callAfter(self._show_keep_awake, holding)
+        AppHelper.callAfter(self._show_keep_awake)
 
-    def _show_keep_awake(self, holding):
+    def _show_keep_awake(self):
+        """Whether it holds the screen on as of now: changes from two threads can arrive here in
+        either order."""
         if self._statusbar is not None and not self._quitting:
-            self._statusbar.set_keep_awake(holding)
+            self._statusbar.set_keep_awake(self._keep_awake.holding)
 
     def _quit_for_update(self):
         """The updater's relaunch into a new version: Keep Awake's pick and today's Off go to the new

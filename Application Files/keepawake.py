@@ -9,7 +9,8 @@ one wins. The timers run on the wall clock (absolute end times), so sleep neithe
 pauses them; Until Sleep ends at the next system sleep. Work hours are one block on chosen
 weekdays, in local time. They never wake the Mac: they take effect whenever the Mac is awake
 with its screens on during the block. Inside the block, Off is off for the rest of that day's
-block, a timer holds until whichever ends later, and Until Sleep carries past the block's end.
+block (a later pick holds on its own terms, and Off is back when it ends), a timer holds until
+whichever ends later, and Until Sleep carries past the block's end.
 
 It holds only while the screens are awake (not in a Power Nap dark wake) and the screen is
 unlocked, and with the battery rule on, not on battery below the chosen level. Letting go while
@@ -29,6 +30,8 @@ import logging
 import math
 import os
 import re
+import signal
+import subprocess
 import threading
 import time
 from datetime import datetime, timedelta
@@ -45,10 +48,14 @@ BATTERY_LEVELS = (10, 20, 30, 40, 50)
 DEFAULT_HOURS = {"on": False, "start": "09:00", "end": "17:00", "days": [0, 1, 2, 3, 4]}
 DEFAULT_BATTERY = {"on": False, "level": 20}
 # Seconds a handover from the updater's relaunch stays good: the relaunch waits up to 60 s for the
-# old copy to quit, then opens the new one (launch.RELAUNCH_SCRIPT). An older one is from a
+# old copy to quit, then opens the new one (launch.RELAUNCH_SCRIPT), a copy that has never run, and
+# one such copy sat at exec for 224 s once (probably macOS's security scan). An older one is from a
 # relaunch that never started the new copy, and a later launch by hand brings back nothing.
-HANDOVER_FOR = 120.0
+HANDOVER_FOR = 600.0
 HANDOVER_FILE = "keep-awake-handover.json"
+# The relaunch's gap: the old copy's declared user activity ends with it, so while it holds the
+# screen on it leaves caffeinate holding it for the new copy, which ends it once it's running.
+CAFFEINATE = "/usr/bin/caffeinate"
 
 # What the winner is: a timer pick, Until Sleep, or the work hours.
 TIMER, SLEEP, SCHEDULE = "timer", "sleep", "schedule"
@@ -204,6 +211,22 @@ def sentence(status, now, format_time=clock_24):
     return f"Screen stays on until {format_time(status.until)} (work hours)."
 
 
+def fresh(data, now):
+    """A handover written in the last HANDOVER_FOR seconds."""
+    return (isinstance(data, dict) and isinstance(data.get("written"), (int, float))
+            and not isinstance(data.get("written"), bool) and 0 <= now - data["written"] <= HANDOVER_FOR)
+
+
+def bridge_seconds(status, now):
+    """How long caffeinate holds the screen on over the updater's relaunch, or None when nothing
+    holds it now: until whatever holds it ends, at most HANDOVER_FOR (all of it for Until Sleep)."""
+    if not status.holding:
+        return None
+    if status.kind == SLEEP or status.until is None:
+        return int(HANDOVER_FOR)
+    return max(1, min(int(HANDOVER_FOR), math.ceil(status.until - now)))
+
+
 class Model:
     """Keep Awake's rules. `choose`, `slept` and `evaluate` change it; `evaluate` returns the
     Status and the lines for app.log, and says when letting go should declare user activity."""
@@ -226,7 +249,9 @@ class Model:
             # Inside the block, Off is off for the rest of it, back by itself the next workday.
             self.off_day = today(now) if block_end(hours, now) is not None else None
             return
-        self.pick, self.off_day, self._picked = choice, None, True
+        # The last pick wins, and holds on its own terms: Off for the rest of today's work hours
+        # stays, so when the pick ends, Off is back until the next workday.
+        self.pick, self._picked = choice, True
         self.until = now + TIMERS[choice] if choice in TIMERS else None
 
     def slept(self):
@@ -238,24 +263,25 @@ class Model:
 
     def hand_over(self, now):
         """What the updater's relaunch passes to the new copy: the pick and today's Off, with the
-        same end times."""
+        same end times. None when there's neither."""
+        if self.pick is None and self.off_day is None:
+            return None
         return {"written": now, "pick": self.pick, "until": self.until, "off_day": self.off_day}
 
     def take_over(self, data, now):
         """Picks up a handover from the copy that relaunched into this one. Returns whether it
-        did: only a fresh one counts (HANDOVER_FOR)."""
-        if not isinstance(data, dict) or not isinstance(data.get("written"), (int, float)):
-            return False
-        if not 0 <= now - data["written"] <= HANDOVER_FOR:
+        brought anything back: only a fresh one counts (HANDOVER_FOR)."""
+        if not fresh(data, now):
             return False
         pick, until, off_day = data.get("pick"), data.get("until"), data.get("off_day")
+        restored = False
         if pick in TIMERS and isinstance(until, (int, float)):
-            self.pick, self.until = pick, float(until)
+            self.pick, self.until, restored = pick, float(until), True
         elif pick == UNTIL_SLEEP:
-            self.pick, self.until = pick, None
+            self.pick, self.until, restored = pick, None, True
         if isinstance(off_day, str):
-            self.off_day = off_day
-        return True
+            self.off_day, restored = off_day, True
+        return restored
 
     def evaluate(self, now, hours, battery_rule, env):
         """Returns (status, notes, declare): notes are the lines for app.log, and `declare` says
@@ -351,13 +377,10 @@ class _IOKit:
         self._activity = ctypes.c_uint32(0)  # reused for each declaration, as IOKit allows
 
     def hold(self):
-        """The assertion's id, or None if IOKit refused."""
+        """(the assertion's id, None), or (None, IOKit's error) if it refused."""
         aid = ctypes.c_uint32(0)
         result = self._io.IOPMAssertionCreateWithName(self._type, _K_IOPM_ASSERTION_LEVEL_ON, self._name, ctypes.byref(aid))
-        if result != 0:
-            log.warning("Keep Awake couldn't hold the screen on (IOKit error 0x%x)", result & 0xFFFFFFFF)
-            return None
-        return aid.value
+        return (aid.value, None) if result == 0 else (None, result & 0xFFFFFFFF)
 
     def release(self, aid):
         self._io.IOPMAssertionRelease(aid)
@@ -388,6 +411,29 @@ def mac_time_formatter():
     return format_time
 
 
+_lock_observer_class = None
+
+
+def _lock_observer():
+    """An observer for the screen locking and unlocking. Their distributed notifications have to be
+    delivered at once: by default AppKit holds them back while the app isn't active (after the
+    dashboard has been open and another app is in front), and locking wouldn't pause Keep Awake.
+    The class is made the first time, so importing this module needs no AppKit."""
+    global _lock_observer_class
+    if _lock_observer_class is None:
+        from Foundation import NSObject
+
+        class KeepAwakeLockObserver(NSObject):
+            def screenLocked_(self, notification):
+                self.on_change(locked=True)
+
+            def screenUnlocked_(self, notification):
+                self.on_change(locked=False)
+
+        _lock_observer_class = KeepAwakeLockObserver
+    return _lock_observer_class.alloc().init()
+
+
 class KeepAwake:
     """Runs the Model: on each sample (`feed`), on picks (`choose`), on settings changes and on
     the notifications `start` observes. Holds or releases the assertion, logs, and calls
@@ -405,8 +451,11 @@ class KeepAwake:
         self._env = Env()
         self._lock = threading.RLock()
         self._assertion = None
+        self._refused = False  # IOKit refused the assertion: said once in app.log, until it holds again
         self._status = Status()
         self._observers = []
+        self._lock_observer = None
+        self._bridge = None  # the pid of the caffeinate the old copy left holding the screen on over the relaunch
 
     @property
     def holding(self):
@@ -414,7 +463,8 @@ class KeepAwake:
 
     def start(self):
         """Main thread, at launch: picks up a handover from the updater's relaunch, reads whether
-        the screens are awake and the screen is locked, and observes their changes and sleep."""
+        the screens are awake and the screen is locked, and observes their changes and sleep. Then,
+        holding the screen on itself (or with nothing to hold), it ends the old copy's caffeinate."""
         if self._iokit is None:
             self._iokit = _IOKit()
         if self._format_time is None:
@@ -423,6 +473,7 @@ class KeepAwake:
         self._env.screens_awake, (self._env.locked, self._env.away) = _screens_awake(), _locked()
         self._observe()
         self.evaluate()
+        self._end_bridge()
 
     def _take_over(self):
         """The handover is consumed once: read and deleted, so a quit by the user, a restart or a
@@ -438,40 +489,75 @@ class KeepAwake:
             except OSError:
                 pass
         with self._lock:
-            if self._model.take_over(data, self._clock()):
+            now = self._clock()
+            if fresh(data, now):
+                pid = data.get("caffeinate")
+                self._bridge = pid if isinstance(pid, int) and not isinstance(pid, bool) and pid > 1 else None
+            if self._model.take_over(data, now):
                 log.info("Keep Awake carried over from the copy that updated itself")
+
+    def _end_bridge(self):
+        """Ends the caffeinate the old copy left, once this copy holds the screen on itself. Only if
+        that pid is still caffeinate: a pid can be reused, and caffeinate ends by itself anyway."""
+        pid, self._bridge = self._bridge, None
+        if pid is None:
+            return
+        if _process_path(pid) != CAFFEINATE:
+            return
+        try:
+            os.kill(pid, signal.SIGTERM)
+            log.info("Keep Awake ended the caffeinate that held the screen on over the update (pid %d)", pid)
+        except OSError:
+            pass
 
     def _observe(self):
         import AppKit
-        from Foundation import NSDistributedNotificationCenter
+        from Foundation import (NSCurrentLocaleDidChangeNotification, NSDistributedNotificationCenter,
+                                NSNotificationCenter, NSNotificationSuspensionBehaviorDeliverImmediately)
 
         workspace = AppKit.NSWorkspace.sharedWorkspace().notificationCenter()
-        distributed = NSDistributedNotificationCenter.defaultCenter()
-        for center, name, change in (
-                (workspace, AppKit.NSWorkspaceScreensDidSleepNotification, {"screens_awake": False}),
-                (workspace, AppKit.NSWorkspaceScreensDidWakeNotification, {"screens_awake": True}),
-                (workspace, AppKit.NSWorkspaceSessionDidResignActiveNotification, {"away": True}),
-                (workspace, AppKit.NSWorkspaceSessionDidBecomeActiveNotification, {"away": False}),
-                (distributed, "com.apple.screenIsLocked", {"locked": True}),
-                (distributed, "com.apple.screenIsUnlocked", {"locked": False})):
-            self._observers.append((center, center.addObserverForName_object_queue_usingBlock_(
+        for name, change in (
+                (AppKit.NSWorkspaceScreensDidSleepNotification, {"screens_awake": False}),
+                (AppKit.NSWorkspaceScreensDidWakeNotification, {"screens_awake": True}),
+                (AppKit.NSWorkspaceSessionDidResignActiveNotification, {"away": True}),
+                (AppKit.NSWorkspaceSessionDidBecomeActiveNotification, {"away": False})):
+            self._observers.append((workspace, workspace.addObserverForName_object_queue_usingBlock_(
                 name, None, None, lambda notification, change=change: self.environment(**change))))
         self._observers.append((workspace, workspace.addObserverForName_object_queue_usingBlock_(
             AppKit.NSWorkspaceWillSleepNotification, None, None, lambda notification: self.will_sleep())))
         self._observers.append((workspace, workspace.addObserverForName_object_queue_usingBlock_(
             AppKit.NSWorkspaceDidWakeNotification, None, None, lambda notification: self.will_sleep(woke=True))))
+        self._lock_observer = _lock_observer()
+        self._lock_observer.on_change = self.environment
+        distributed = NSDistributedNotificationCenter.defaultCenter()
+        for selector, name in (("screenLocked:", "com.apple.screenIsLocked"), ("screenUnlocked:", "com.apple.screenIsUnlocked")):
+            distributed.addObserver_selector_name_object_suspensionBehavior_(
+                self._lock_observer, selector, name, None, NSNotificationSuspensionBehaviorDeliverImmediately)
+        local = NSNotificationCenter.defaultCenter()
+        self._observers.append((local, local.addObserverForName_object_queue_usingBlock_(
+            NSCurrentLocaleDidChangeNotification, None, None, lambda notification: self._locale_changed())))
+
+    def _locale_changed(self):
+        """The 12/24-hour setting (or the region) changed: the line follows without a relaunch."""
+        self._format_time = mac_time_formatter()
 
     def environment(self, **change):
+        """A notification changed what Keep Awake can't decide itself. As the screens wake, whether
+        the screen is locked is read again, in case its notification was missed."""
         with self._lock:
+            if change.get("screens_awake"):
+                self._env.locked, self._env.away = _locked()
             for key, value in change.items():
                 setattr(self._env, key, value)
             self.evaluate()
 
     def will_sleep(self, woke=False):
         """Until Sleep ends at the next sleep. A wake ends one picked before the sleep too, in case
-        the sleep came without its notification."""
+        the sleep came without its notification, and reads again whether the screen is locked."""
         with self._lock:
             self._model.slept()
+            if woke:
+                self._env.locked, self._env.away = _locked()
             self.evaluate()
 
     def feed(self, sample):
@@ -508,7 +594,10 @@ class KeepAwake:
                 log.info(note)
             if self._iokit is not None:
                 if status.holding and self._assertion is None:
-                    self._assertion = self._iokit.hold()
+                    self._assertion, error = self._iokit.hold()
+                    if error is not None and not self._refused:
+                        log.warning("Keep Awake couldn't hold the screen on (IOKit error 0x%x)", error)
+                    self._refused = error is not None
                 elif not status.holding and self._assertion is not None:
                     if declare:
                         self._iokit.declare_activity()  # before letting go, so the screen doesn't go dark at once
@@ -526,19 +615,50 @@ class KeepAwake:
 
     def hand_over(self):
         """The updater is relaunching into a new version: the pick and today's Off go to the new
-        copy with the same end times, and user activity is declared so the screen gets its full
-        display-sleep time over the gap. Main thread."""
+        copy with the same end times. While it holds the screen on, user activity is declared and
+        caffeinate holds the screen on over the gap (the declaration ends with this process), until
+        whatever holds it would have ended, at most HANDOVER_FOR. Main thread."""
         with self._lock:
-            data = self._model.hand_over(self._clock())
-            try:
-                tmp = self._handover_path + ".tmp"
-                with open(tmp, "w", encoding="utf-8") as f:
-                    json.dump(data, f)
-                os.replace(tmp, self._handover_path)
-            except OSError as e:
-                log.warning("Couldn't hand Keep Awake over to the new version: %s", e)
+            now = self._clock()
+            data = self._model.hand_over(now)
+            seconds = bridge_seconds(self._status, now)
+            if seconds is not None:
+                pid = _spawn_caffeinate(seconds)
+                if pid is not None:
+                    data = {**(data or {"written": now}), "caffeinate": pid}
+                    log.info("Keep Awake left caffeinate holding the screen on for up to %d s over the update (pid %d)",
+                             seconds, pid)
+            if data is not None:
+                try:
+                    tmp = self._handover_path + ".tmp"
+                    with open(tmp, "w", encoding="utf-8") as f:
+                        json.dump(data, f)
+                    os.replace(tmp, self._handover_path)
+                except OSError as e:
+                    log.warning("Couldn't hand Keep Awake over to the new version: %s", e)
             if self._assertion is not None and self._iokit is not None:
                 self._iokit.declare_activity()
+
+
+def _spawn_caffeinate(seconds):
+    """caffeinate holding the screen on for `seconds`, on its own, outliving this process. Its pid,
+    or None."""
+    try:
+        return subprocess.Popen([CAFFEINATE, "-d", "-t", str(int(seconds))], stdin=subprocess.DEVNULL,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True).pid
+    except OSError as e:
+        log.warning("Couldn't start caffeinate for the update: %s", e)
+        return None
+
+
+def _process_path(pid):
+    """The executable a running process was started from, or None."""
+    path = ctypes.create_string_buffer(4096)
+    try:
+        found = ctypes.CDLL("/usr/lib/libproc.dylib").proc_pidpath(int(pid), path, len(path)) > 0
+    except (OSError, ValueError):
+        return None
+    return path.value.decode("utf-8", "replace") if found else None
 
 
 def _screens_awake():
@@ -552,7 +672,8 @@ def _screens_awake():
 
 
 def _locked():
-    """(locked, away) at launch: the screen is locked, another user's session is showing."""
+    """(locked, away): the screen is locked, another user's session is showing. Read at launch and
+    as the Mac or its screens wake; the notifications say in between."""
     try:
         import Quartz
 

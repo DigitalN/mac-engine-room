@@ -243,7 +243,9 @@ wake the Mac. The name everywhere is **Keep Awake** (never "Caffeine").
   scheduled wakes): it takes effect when the Mac is awake with its screens on, as the lid
   opens, at login, after a restart, or when it's turned on inside the block, and not in a
   dark wake (Power Nap). Inside the block, **Off** is off for the rest of that day's block,
-  across sleeps, back by itself the next workday; **1 or 2 Hours** hold until whichever ends
+  across sleeps, back by itself the next workday; a pick after it holds on its own terms (1 Hour
+  for an hour, not until the block's end), and Off for the rest of the day is back when it ends
+  (settled in review on 2026-11-19); **1 or 2 Hours** hold until whichever ends
   later, the timer or the block (1 Hour at 16:30 holds until 17:30); **Until Sleep** carries
   past the block's end until the next sleep. Sleeping at lunch doesn't end the block.
 - **Battery rule:** a switch, "Stop when the battery is below [20%]" (10, 20, 30, 40 or 50%),
@@ -252,16 +254,23 @@ wake the Mac. The name everywhere is **Keep Awake** (never "Caffeine").
   time hasn't run out (timers keep counting); on the adapter it holds even below the level.
   Hidden on Macs with no battery. It uses the battery reading the sampler already takes.
 - **Pauses and endings:** locking the screen, or switching to another user's session, pauses
-  it; unlocking resumes it if time remains. Whenever it lets go while the Mac is in use (a
+  it; unlocking resumes it if time remains. The lock notifications are delivered at once even
+  while the app isn't active, and whether the screen is locked is read again as the Mac or its
+  screens wake. Whenever it lets go while the Mac is in use (a
   timer runs out, the block ends, the battery rule), it declares user activity first, so the
   screen gets macOS's full display-sleep time from then instead of dimming and locking at
   once.
 - **The updater's relaunch** (it installs after 10 s idle, so it can come mid-day): a running
-  pick and today's Off come back in the new copy with the same end times, and the old copy
-  declares user activity before quitting. Only that path writes a handover file
-  (`keep-awake-handover.json` in the data folder), and the new copy reads it once and deletes
-  it, ignoring one older than 2 minutes. A quit by the user, a restart or a logout brings back
-  nothing but work hours.
+  pick and today's Off come back in the new copy with the same end times, and the relaunch never
+  lets the screen go dark. The old copy declares user activity, but that ends with the old
+  process (it's a `UserIsActive` assertion of its own), so while it holds the screen on it also
+  starts `/usr/bin/caffeinate -d -t N` on its own, N being until whatever holds the screen would
+  end, at most 10 minutes. The new copy ends it (only if that pid is still caffeinate) once it
+  holds the screen on itself; if it never starts, caffeinate ends by itself. Only that path
+  writes a handover file (`keep-awake-handover.json` in the data folder), and only with a pick,
+  today's Off or caffeinate to pass on. The new copy reads it once and deletes it, ignoring one
+  older than 10 minutes (the copy an update starts has never run, and one sat at exec for 224 s
+  once). A quit by the user, a restart or a logout brings back nothing but work hours.
 - **Menu:** a section header, then the choices as tiles drawn like the fan profile buttons, in
   two rows (**1 Hour · 2 Hours**, then **Off · Until Sleep**), the active one in the accent
   colour, and one line under them: "Screen stays on for 42 more minutes." (a whole sentence,

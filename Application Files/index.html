@@ -1280,18 +1280,25 @@ $('ka-choices').addEventListener('click', async e => {
 });
 const saveHours = changes => save({ keep_awake_hours: { ...settings.keep_awake_hours, ...changes } });
 $('ka-hours-on').onchange = e => saveHours({ on: e.target.checked });
+// WebKit's time field can send `change` on each keystroke, so a value that doesn't make a block yet
+// (18:00 typed as an end passes through 01:00) is left alone while the field has focus: only a
+// valid pair is saved. Leaving the field with one that doesn't make a block puts the saved one back.
+function hoursPair(id, value) {
+  const h = settings.keep_awake_hours;
+  const start = id === 'ka-start' ? value : h.start, end = id === 'ka-end' ? value : h.end;
+  const s = clockMinutes(start), en = clockMinutes(end);
+  return s !== null && en !== null && en > s ? { start, end } : null;  // no blocks past midnight
+}
 for (const id of ['ka-start', 'ka-end']) {
   $(id).addEventListener('change', e => {
+    const pair = hoursPair(id, e.target.value);
     const h = settings.keep_awake_hours;
-    const start = id === 'ka-start' ? e.target.value : h.start, end = id === 'ka-end' ? e.target.value : h.end;
-    const s = clockMinutes(start), en = clockMinutes(end);
-    if (s === null || en === null) return;  // still being typed
-    if (en <= s) {  // no blocks past midnight
-      toast('Work hours have to end after they start.');
-      e.target.value = id === 'ka-start' ? h.start : h.end;
-      return;
-    }
-    saveHours({ start, end });
+    if (pair && (pair.start !== h.start || pair.end !== h.end)) saveHours(pair);
+  });
+  $(id).addEventListener('blur', e => {
+    if (hoursPair(id, e.target.value)) return;
+    toast('Work hours have to end after they start.');
+    e.target.value = id === 'ka-start' ? settings.keep_awake_hours.start : settings.keep_awake_hours.end;
   });
 }
 $('ka-days').addEventListener('click', e => {

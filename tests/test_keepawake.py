@@ -308,13 +308,36 @@ def test_off_for_today_comes_back_after_a_weekend():
     assert status(m, "2026-11-23 09:00").holding  # Monday, the Mac asleep all weekend
 
 
-def test_a_pick_after_off_for_today_counts():
+def test_a_pick_after_off_for_today_holds_on_its_own_terms_then_off_is_back():
+    m = Model()
+    run(m, "2026-11-19 09:00")
+    m.choose(OFF, at("2026-11-19 09:30"), HOURS)
+    run(m, "2026-11-19 09:30")
+    m.choose(HOUR, at("2026-11-19 10:00"), HOURS)
+    s, notes, _ = run(m, "2026-11-19 10:00")
+    assert (s.holding, s.kind, s.until, s.lit) == (True, TIMER, at("2026-11-19 11:00"), HOUR)  # not until 17:00
+    assert notes == ["Keep Awake on for 1 hour (until 11:00)"]
+    assert sentence(s, at("2026-11-19 10:00")) == "Screen stays on for 1 more hour."
+    s, notes, declare = run(m, "2026-11-19 11:05")
+    assert (s.holding, s.lit, s.off_today) == (False, OFF, True)
+    assert notes == ["Keep Awake off (1 hour is up, for the rest of today's work hours)"] and declare
+    assert sentence(s, at("2026-11-19 11:05")) == "Off for the rest of today's work hours."
+    assert status(m, "2026-11-20 09:00").kind == SCHEDULE  # back the next workday
+
+
+def test_until_sleep_after_off_for_today_ends_at_sleep_and_off_is_back_at_wake():
     m = Model()
     m.choose(OFF, at("2026-11-19 10:00"), HOURS)
     run(m, "2026-11-19 10:00")
-    m.choose(HOUR, at("2026-11-19 11:00"), HOURS)
-    s = status(m, "2026-11-19 11:00")
-    assert s.holding and not s.off_today and s.until == at("2026-11-19 17:00")  # the later of the two
+    m.choose(UNTIL_SLEEP, at("2026-11-19 11:00"), HOURS)
+    assert status(m, "2026-11-19 11:00").kind == SLEEP
+    m.slept()
+    s, notes, declare = run(m, "2026-11-19 12:00", env=Env(screens_awake=False))
+    assert not s.holding and s.off_today and not declare
+    assert notes == ["Keep Awake off (the Mac is going to sleep, for the rest of today's work hours)"]
+    s, notes, _ = run(m, "2026-11-19 13:30")  # woke the same day
+    assert (s.holding, s.lit, notes) == (False, OFF, [])
+    assert sentence(s, at("2026-11-19 13:30")) == "Off for the rest of today's work hours."
 
 
 def test_sleeping_at_lunch_doesnt_end_work_hours():
@@ -457,12 +480,39 @@ def test_a_stale_or_broken_handover_brings_back_nothing():
     old = Model()
     old.choose(UNTIL_SLEEP, at("2026-11-21 13:00"), HOURS)
     data = old.hand_over(at("2026-11-21 13:00"))
+    assert Model().take_over(data, at("2026-11-21 13:09"))  # a slow first launch of the new copy still counts
     for when in (at("2026-11-21 13:00") + keepawake.HANDOVER_FOR + 1, at("2026-11-21 12:59")):
         new = Model()
         assert not new.take_over(data, when)
         assert not status(new, "2026-11-21 13:10").holding
-    for junk in (None, [], {}, {"written": "now"}):
+    for junk in (None, [], {}, {"written": "now"}, {"written": True}):
         assert not Model().take_over(junk, at("2026-11-21 13:00"))
+
+
+def test_nothing_to_hand_over_without_a_pick_or_off_for_today():
+    m = Model()
+    run(m, "2026-11-19 10:00")  # work hours alone come back by themselves
+    assert m.hand_over(at("2026-11-19 10:00")) is None
+    assert not Model().take_over({"written": at("2026-11-19 10:00"), "caffeinate": 123}, at("2026-11-19 10:00"))
+
+
+def test_handover_fields():
+    m = Model()
+    m.choose(OFF, at("2026-11-19 10:00"), HOURS)
+    m.choose(HOUR, at("2026-11-19 10:30"), HOURS)
+    assert m.hand_over(at("2026-11-19 10:40")) == {
+        "written": at("2026-11-19 10:40"), "pick": HOUR, "until": at("2026-11-19 11:30"), "off_day": "2026-11-19"}
+
+
+def test_caffeinate_bridges_the_relaunch_until_whatever_holds_the_screen_would_end():
+    now = at("2026-11-19 16:58")
+    assert keepawake.bridge_seconds(Status(TIMER, now + 125, HOUR), now) == 125
+    assert keepawake.bridge_seconds(Status(TIMER, now + 0.2, HOUR), now) == 1
+    assert keepawake.bridge_seconds(Status(TIMER, now + 7200, TWO_HOURS), now) == 600
+    assert keepawake.bridge_seconds(Status(SCHEDULE, at("2026-11-19 17:00")), now) == 120
+    assert keepawake.bridge_seconds(Status(SLEEP, None, UNTIL_SLEEP), now) == 600
+    assert keepawake.bridge_seconds(Status(), now) is None  # nothing holds the screen on
+    assert keepawake.bridge_seconds(Status(SLEEP, None, UNTIL_SLEEP, "locked"), now) is None  # paused
 
 
 # ── the controller, with a stand-in for IOKit ────────────
@@ -472,11 +522,15 @@ class FakeIOKit:
         self.calls = []
         self.held = set()
 
+    refuse = None  # an IOKit error to refuse the assertion with
+
     def hold(self):
         aid = len(self.calls) + 1
         self.calls.append(("hold", aid))
+        if self.refuse:
+            return None, self.refuse
         self.held.add(aid)
-        return aid
+        return aid, None
 
     def release(self, aid):
         self.calls.append(("release", aid))
@@ -533,25 +587,74 @@ def test_controller_pauses_on_lock_without_declaring_activity(tmp_path):
     assert iokit.calls[-1][0] == "release" and not iokit.held and ("declare",) not in iokit.calls
 
 
-def test_controller_hands_over_only_on_the_updaters_relaunch(tmp_path):
+def test_controller_hands_over_only_on_the_updaters_relaunch(tmp_path, monkeypatch):
+    spawned, killed = [], []
+    monkeypatch.setattr(keepawake, "_spawn_caffeinate", lambda seconds: spawned.append(seconds) or 4321)
+    monkeypatch.setattr(keepawake, "_process_path", lambda pid: keepawake.CAFFEINATE if pid == 4321 else None)
+    monkeypatch.setattr(keepawake.os, "kill", lambda pid, sig: killed.append((pid, sig)))
     ka, iokit, clock, _ = controller(tmp_path)
     ka.choose(TWO_HOURS)
     ka.hand_over()
-    assert iokit.calls[-1] == ("declare",)  # the gap never lets the screen go dark
+    assert iokit.calls[-1] == ("declare",)
+    assert spawned == [600]  # caffeinate holds the screen on over the gap, at most 10 minutes
     path = tmp_path / keepawake.HANDOVER_FILE
-    assert json.loads(path.read_text())["pick"] == TWO_HOURS
+    data = json.loads(path.read_text())
+    assert (data["pick"], data["caffeinate"]) == (TWO_HOURS, 4321)
 
     new, new_iokit, new_clock, _ = controller(tmp_path)
-    new_clock.now = clock.now + 10
+    new_clock.now = clock.now + 300  # a slow first launch
     new._take_over()
     new.evaluate()
+    new._end_bridge()
     assert new.status()["choice"] == TWO_HOURS and new_iokit.held
+    assert killed == [(4321, keepawake.signal.SIGTERM)]
     assert not path.exists()  # consumed once: a later launch by hand brings back nothing
 
     again, again_iokit, _, _ = controller(tmp_path)
     again._take_over()
     again.evaluate()
-    assert again.status()["choice"] == OFF and not again_iokit.held
+    again._end_bridge()
+    assert again.status()["choice"] == OFF and not again_iokit.held and len(killed) == 1
+
+
+def test_a_reused_pid_is_never_ended(tmp_path, monkeypatch):
+    killed = []
+    monkeypatch.setattr(keepawake, "_process_path", lambda pid: "/Applications/Something.app/Contents/MacOS/Something")
+    monkeypatch.setattr(keepawake.os, "kill", lambda pid, sig: killed.append(pid))
+    clock = Clock("2026-11-21 10:00")
+    (tmp_path / keepawake.HANDOVER_FILE).write_text(json.dumps({"written": clock.now, "caffeinate": 4321}))
+    ka = KeepAwake(FakeSettings(), tmp_path, iokit=FakeIOKit(), clock=clock, format_time=keepawake.clock_24)
+    ka._take_over()
+    ka._end_bridge()
+    assert killed == []
+
+
+def test_handing_over_writes_nothing_with_nothing_to_carry(tmp_path, monkeypatch):
+    spawned = []
+    monkeypatch.setattr(keepawake, "_spawn_caffeinate", lambda seconds: spawned.append(seconds) or 99)
+    ka, iokit, clock, _ = controller(tmp_path)
+    ka.evaluate()
+    ka.hand_over()
+    assert not (tmp_path / keepawake.HANDOVER_FILE).exists() and spawned == []
+    # Work hours holding with no pick: only caffeinate's pid goes over, for the gap.
+    ka, iokit, clock, _ = controller(tmp_path, "2026-11-19 16:50", keep_awake_hours=HOURS)
+    ka.evaluate()
+    ka.hand_over()
+    data = json.loads((tmp_path / keepawake.HANDOVER_FILE).read_text())
+    assert spawned == [600] and data == {"written": clock.now, "caffeinate": 99}
+
+
+def test_a_refused_assertion_is_logged_once(tmp_path, caplog):
+    ka, iokit, clock, _ = controller(tmp_path)
+    iokit.refuse = 0xE00002C2
+    with caplog.at_level("WARNING", logger="pythonflow"):
+        ka.choose(UNTIL_SLEEP)
+        for _ in range(5):
+            ka.evaluate()
+    assert [r.getMessage() for r in caplog.records] == ["Keep Awake couldn't hold the screen on (IOKit error 0xe00002c2)"]
+    iokit.refuse = None
+    ka.evaluate()
+    assert iokit.held
 
 
 def test_controller_follows_the_settings(tmp_path):
@@ -568,3 +671,26 @@ def test_no_choice_or_line_reaches_the_page_before_launch(tmp_path):
     ka = KeepAwake(FakeSettings(), tmp_path)
     assert ka.status() == {"choice": OFF, "holding": False, "line": None}
     assert not os.path.exists(tmp_path / keepawake.HANDOVER_FILE)
+
+
+def test_whether_the_screen_is_locked_is_read_again_as_the_mac_or_its_screens_wake(tmp_path, monkeypatch):
+    """In case the lock's notification never came: waking to the lock screen mustn't keep it lit."""
+    ka, iokit, clock, _ = controller(tmp_path)
+    ka.choose(UNTIL_SLEEP)
+    ka.environment(screens_awake=False)
+    monkeypatch.setattr(keepawake, "_locked", lambda: (True, False))
+    ka.environment(screens_awake=True)
+    assert not ka.holding and ka._status.paused == "locked"
+    monkeypatch.setattr(keepawake, "_locked", lambda: (False, False))
+    ka.will_sleep(woke=True)  # Until Sleep is over by now anyway; nothing reads as locked
+    assert not ka._env.locked
+
+
+def test_lock_notifications_reach_keep_awake_through_their_observer():
+    changes = []
+    observer = keepawake._lock_observer()
+    observer.on_change = lambda **change: changes.append(change)
+    observer.screenLocked_(None)
+    observer.screenUnlocked_(None)
+    assert changes == [{"locked": True}, {"locked": False}]
+    assert observer.respondsToSelector_("screenLocked:") and observer.respondsToSelector_("screenUnlocked:")
