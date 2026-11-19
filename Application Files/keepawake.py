@@ -8,10 +8,11 @@ The choices are Off, 1 Hour, 2 Hours and Until Sleep. Every pick counts from now
 one wins. The timers run on the wall clock (absolute end times), so sleep neither ends nor
 pauses them; Until Sleep ends at the next system sleep. Work hours are one block on chosen
 weekdays, in local time. They never wake the Mac: they take effect whenever the Mac is awake
-with its screens on during the block. A pick made inside the block, Off or any other, leaves the
-rest of that day's block off: the pick holds on its own terms, and the block is back by itself the
-next workday. A timer picked before the block holds until whichever ends later, and Until Sleep
-picked before it carries past the block's end.
+with its screens on during the block. Any pick (Off or any other) made on a workday before the
+block ends, before or during it, takes over from that day's work hours: the pick holds on its own
+terms, and the block is back by itself the next workday. Only a pick from an earlier day (Until
+Sleep left running overnight) still meets the block: a timer holds until whichever ends later, and
+Until Sleep carries past the block's end.
 
 It holds only while the screens are awake (not in a Power Nap dark wake) and the screen is
 unlocked, and with the battery rule on, not on battery below the chosen level. Letting go while
@@ -132,10 +133,10 @@ def week(first):
 
 # ── the rules ────────────────────────────────────────────
 
-def block_end(hours, now):
-    """When today's work-hours block ends (seconds since the epoch), if `now` is inside it, else
-    None. Local time, worked out afresh each time, so a time zone or daylight saving change just
-    works."""
+def todays_block(hours, now):
+    """Today's work-hours block as (begins, ends) in seconds since the epoch, or None when work
+    hours are off or today isn't one of their days. Local time, worked out afresh each time, so a
+    time zone or daylight saving change just works."""
     if not hours.get("on"):
         return None
     local = datetime.fromtimestamp(now)
@@ -143,9 +144,13 @@ def block_end(hours, now):
         return None
     start, end = minutes(hours["start"]), minutes(hours["end"], end=True)
     day = local.replace(hour=0, minute=0, second=0, microsecond=0)
-    begins = (day + timedelta(minutes=start)).timestamp()
-    ends = (day + timedelta(minutes=end)).timestamp()
-    return ends if begins <= now < ends else None
+    return (day + timedelta(minutes=start)).timestamp(), (day + timedelta(minutes=end)).timestamp()
+
+
+def block_end(hours, now):
+    """When today's work-hours block ends, if `now` is inside it, else None."""
+    block = todays_block(hours, now)
+    return block[1] if block and block[0] <= now < block[1] else None
 
 
 def today(now):
@@ -153,11 +158,12 @@ def today(now):
 
 
 def skips_todays_hours(hours, now):
-    """Whether a pick made now leaves the rest of today's work hours off: one made during them
-    does, whichever it is (Off, a timer or Until Sleep), and holds on its own terms. The one place
-    that says so: a pick made before work hours (which then hold until whichever ends later) would
-    be a change here."""
-    return block_end(hours, now) is not None
+    """Whether a pick made now takes over from today's work hours for the rest of the day: any
+    pick (Off, a timer or Until Sleep) made on one of their days before their block ends, before
+    or during it. The pick holds on its own terms; the work hours are back the next workday. One
+    made after the block has ended, or on another day, changes nothing about work hours."""
+    block = todays_block(hours, now)
+    return block is not None and now < block[1]
 
 
 class Env:
@@ -285,7 +291,8 @@ class Model:
     def __init__(self):
         self.pick = None  # HOUR, TWO_HOURS or UNTIL_SLEEP while one lasts
         self.until = None  # a timer's end, seconds since the epoch
-        self.off_day = None  # the day ('2026-11-19') whose work hours Off was chosen in
+        self.off_day = None  # the day ('2026-11-19') whose work hours a pick took over from
+        self._hours_on = None  # whether work hours were on at the last evaluate
         self._why = None  # why it ended, when an event (Off, sleep) ended it
         self._picked = False  # a pick since the last evaluate, for its line in app.log
         self._last = Status()
@@ -345,8 +352,13 @@ class Model:
             why = why or f"{TIMER_WORDS[self.pick]} {'is' if self.pick == HOUR else 'are'} up"
             self.pick = self.until = None
         ends = block_end(hours, now)
-        if self.off_day is not None and (ends is None or self.off_day != today(now)):
-            self.off_day = None  # that day's block is over
+        if self.off_day is not None and self.off_day != today(now):
+            self.off_day = None  # a new day: its work hours count again
+        if hours.get("on") and self._hours_on is False:
+            self.off_day = None  # work hours turned on: they take effect now, as agreed
+        self._hours_on = bool(hours.get("on"))
+        block = todays_block(hours, now)
+        skipped = self.off_day is not None and block is not None and now < block[1]
         schedule = ends is not None and self.off_day is None
 
         kind = until = None
@@ -361,7 +373,7 @@ class Model:
         paused = None
         if kind is not None:
             paused = LOCKED if env.locked or env.away else SCREENS if not env.screens_awake else BATTERY if low else None
-        status = Status(kind, until, self.pick, paused, off_today=self.off_day is not None and ends is not None,
+        status = Status(kind, until, self.pick, paused, off_today=skipped,
                         battery_low=low and kind is not None, level=battery_rule.get("level"), pick_until=self.until)
 
         last = self._last

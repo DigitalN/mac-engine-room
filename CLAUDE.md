@@ -65,8 +65,9 @@ Keep Awake logs `Keep Awake on for 1 hour (until 15:42)`, `Keep Awake on until t
 and `Keep Awake on until 17:00 (work hours)`, each time what holds the screen on changes; `Keep
 Awake off (<why>)`: `Off chosen`, `1 hour is
 up`, `2 hours are up`, `the Mac is going to sleep`, `work hours are over`, `work hours turned
-off` or `work hours changed`, with `, for the rest of today's work hours` while Off for the rest
-of today's work hours holds (a pick after it ends, and Off is back); `Keep Awake paused (<why>)`: `the screen is locked` (switching to
+off` or `work hours changed`, with `, for the rest of today's work hours` when what ends is a
+pick that took over from today's work hours (made that workday before they ended, so they don't
+come back until the next one); `Keep Awake paused (<why>)`: `the screen is locked` (switching to
 another user's session too), `the screens are asleep` (a dark wake, the display put to sleep) or
 `the battery is below 20%`; and `Keep Awake resumed`. Times there are 24-hour (a block ending at
 midnight says 24:00); the menu and page follow the Mac's setting, with Noon and Midnight for 12
@@ -540,11 +541,11 @@ Don't undo these without asking:
   `docs/PLAN.md`. The screen stays on (no "Mac awake but screen may sleep" option); the choices
   are fixed at Off · 1 Hour · 2 Hours · Until Sleep (no "forever"); every pick counts from now and
   the last one wins; timers run on the wall clock. Work hours are one block on chosen weekdays,
-  never past midnight, off until turned on, and never wake the Mac. Any pick made inside them (Off,
-  a timer, Until Sleep) leaves the rest of that day's off, and holds on its own terms (settled in the
-  hands-on check, 2026-11-19; `skips_todays_hours` is the one place that says so). A timer picked
-  before them holds until whichever ends later, with no tile lit while work hours hold the screen
-  on, and Until Sleep picked before them carries past their end. Over the updater's relaunch,
+  never past midnight, off until turned on, and never wake the Mac. Any pick (Off, a timer, Until
+  Sleep) made on a workday before its block ends, before or during it, takes over from that day's
+  work hours and holds on its own terms; they're back the next workday (settled in the hands-on
+  check, 2026-11-19; `skips_todays_hours` decides). Only a pick from an earlier day meets the block
+  under "whichever ends later", with no tile lit while work hours hold the screen on. Over the updater's relaunch,
   caffeinate holds the screen on until the new copy takes over.
   The battery rule is off by default. Locking pauses it. Its own tab, nothing in Settings, no
   Dashboard row. Never called "Caffeine". Work hours are set on a 24-hour bar that snaps to half

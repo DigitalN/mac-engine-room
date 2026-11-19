@@ -242,17 +242,21 @@ wake the Mac. The name everywhere is **Keep Awake** (never "Caffeine").
   midnight), at least one day; no per-day hours, no second block. It never wakes the Mac (no
   scheduled wakes): it takes effect when the Mac is awake with its screens on, as the lid
   opens, at login, after a restart, or when it's turned on inside the block, and not in a
-  dark wake (Power Nap). **A pick made inside the block, Off, 1 Hour, 2 Hours or Until Sleep,
-  leaves the rest of that day's block off**, across sleeps, back by itself the next workday: the
-  pick holds on its own terms (1 Hour at 10:00 ends at 11:00, 2 Hours at 16:30 runs to 18:30,
-  Until Sleep ends at the next sleep), and then there's no line, Off lit. (Settled in the maintainer's hands-on check on 2026-11-19, replacing "whichever ends
-  later" for picks made during work hours: a 1 Hour pick that changed nothing looked like the
-  click did nothing.) **A pick made before the block** keeps the agreed rule: a timer still
-  running when the block starts holds until whichever ends later, the timer or the block, with
-  no tile lit while the block holds the screen on; Until Sleep carries past the block's end
-  until the next sleep. Whether a pick made before should also skip the day is open
-  (`keepawake.skips_todays_hours` is the one place to change). Sleeping at lunch doesn't end the
-  block.
+  dark wake (Power Nap). **Anything picked in the menu or on the page (Off, 1 Hour, 2 Hours,
+  Until Sleep) on a workday, before or during that day's block, takes over from the work hours
+  for the rest of that day**, across sleeps, back by itself the next workday. The pick holds on
+  its own terms: 2 Hours at 8:00 ends at 10:00 and the screen goes back to normal, 1 Hour at
+  10:00 ends at 11:00, 2 Hours at 16:30 runs to 18:30, Until Sleep ends at the next sleep, and
+  Off at 8:00 means no work hours that day. Then there's no line, Off lit. A pick after the
+  day's block has ended, on a day that isn't a workday, or while work hours are off changes
+  nothing about them, and turning work hours on inside the block takes effect at once.
+  (Settled in the maintainer's hands-on check on 2026-11-19, in two steps: first for picks made
+  during the block, since a 1 Hour pick that changed nothing looked like the click did nothing,
+  then for picks made before it. It replaces "whichever ends later", which now only applies to
+  a pick from an earlier day, such as Until Sleep left running overnight, which carries past the
+  block's end, or a timer from before midnight; no tile is lit while the block holds the screen
+  on. `keepawake.skips_todays_hours` is the one place that decides.) Sleeping at lunch doesn't
+  end the block.
 - **Battery rule:** a switch, "Stop when the battery is below [20%]" (10, 20, 30, 40 or 50%),
   off by default. Only on battery: below the level, Keep Awake lets go (a pick or work hours
   alike) and says "Paused because the battery is below 20%". Plugging in brings it back if its
