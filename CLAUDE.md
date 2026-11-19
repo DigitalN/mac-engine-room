@@ -546,9 +546,7 @@ Don't undo these without asking:
   The battery rule is off by default. Locking pauses it. Its own tab, nothing in Settings, no
   Dashboard row. Never called "Caffeine". Work hours are set on a 24-hour bar that snaps to half
   hours, mouse only (no keyboard, decided). A 12-hour Mac sees Noon and Midnight, never 12 AM or
-  12 PM. The menu bar's cup steams. A timer picked inside work hours that end later says both:
-  "Screen stays on for 58 more minutes. Work hours keep it on until 5:00 PM."
-
+  12 PM. The menu bar's cup steams.
 - Apple silicon only (the build is arm64, so Intel Macs can't open it). Desktops get the same
   sensor work as laptops: on a Mac with no battery, Power says "Desktop Mac" and shows System and
   Chip power, with no Battery or Adapter card, row, tile or chart line; fan control is offered

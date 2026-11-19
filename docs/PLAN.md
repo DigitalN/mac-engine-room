@@ -275,10 +275,7 @@ wake the Mac. The name everywhere is **Keep Awake** (never "Caffeine").
   two rows (**1 Hour · 2 Hours**, then **Off · Until Sleep**), the active one in the accent
   colour, and one line under them: "Screen stays on for 42 more minutes." (a whole sentence,
   hours and minutes past an hour, counting down while the menu is open), "Screen stays on until
-  the Mac sleeps.", "Screen stays on until 5:00 PM (work hours)." (no tile lit), "Screen
-  stays on for 58 more minutes. Work hours keep it on until 5:00 PM." (a timer picked inside work
-  hours that end later, its tile lit; back to the work-hours line when it runs out: chosen by the
-  maintainer on 2026-11-19, as the work-hours line alone looked like the click did nothing), "Off for the
+  the Mac sleeps.", "Screen stays on until 5:00 PM (work hours)." (no tile lit), "Off for the
   rest of today's work hours.", "Paused because the battery is below 20%.", or no line, with
   Off lit. Times follow the Mac's 12/24-hour setting, except that a 12-hour Mac never says
   12 AM or 12 PM: every 12 o'clock is **Noon** or **Midnight** ("Screen stays on until Noon
