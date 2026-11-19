@@ -249,24 +249,65 @@ def test_work_hours_never_wake_the_mac_they_hold_once_it_is_awake():
     assert s.holding and notes == ["Keep Awake resumed"]
 
 
-def test_one_hour_inside_the_block_holds_until_whichever_ends_later():
-    m = Model()
-    m.choose(HOUR, at("2026-11-19 16:30"), HOURS)
-    s, notes, _ = run(m, "2026-11-19 16:30")
-    assert (s.kind, s.until, s.lit) == (TIMER, at("2026-11-19 17:30"), HOUR)
-    assert notes == ["Keep Awake on for 1 hour (until 17:30)"]
-    assert run(m, "2026-11-19 17:00")[0].holding  # the block's over; the hour isn't
-    s, notes, _ = run(m, "2026-11-19 17:30")
-    assert not s.holding and notes == ["Keep Awake off (1 hour is up)"]
-
+def test_one_hour_during_work_hours_ends_after_the_hour_and_the_day_stays_off():
     m = Model()
     run(m, "2026-11-19 09:30")
     m.choose(HOUR, at("2026-11-19 10:00"), HOURS)
     s, notes, _ = run(m, "2026-11-19 10:00")
-    assert (s.kind, s.until, s.lit) == (SCHEDULE, at("2026-11-19 17:00"), HOUR)
-    assert notes == ["Keep Awake on until 17:00 (work hours); 1 hour chosen, until 11:00"]
-    s, notes, _ = run(m, "2026-11-19 11:00")
-    assert (s.holding, s.lit, notes) == (True, None, [])  # the hour's up; the block carries on
+    assert (s.kind, s.until, s.lit) == (TIMER, at("2026-11-19 11:00"), HOUR)  # its own terms, not until 17:00
+    assert notes == ["Keep Awake on for 1 hour (until 11:00)"]
+    assert sentence(s, at("2026-11-19 10:02")) == "Screen stays on for 58 more minutes."
+    s, notes, declare = run(m, "2026-11-19 11:00")
+    assert (s.holding, s.lit, s.off_today) == (False, OFF, True) and declare
+    assert notes == ["Keep Awake off (1 hour is up, for the rest of today's work hours)"]
+    assert sentence(s, at("2026-11-19 11:00")) == "Off for the rest of today's work hours."
+    assert not status(m, "2026-11-19 15:00").holding
+    s, notes, _ = run(m, "2026-11-20 09:00")  # back by itself the next workday
+    assert s.kind == SCHEDULE and notes == ["Keep Awake on until 17:00 (work hours)"]
+
+
+def test_two_hours_late_in_work_hours_runs_past_their_end():
+    m = Model()
+    m.choose(TWO_HOURS, at("2026-11-19 16:30"), HOURS)
+    s, notes, _ = run(m, "2026-11-19 16:30")
+    assert (s.kind, s.until, s.lit) == (TIMER, at("2026-11-19 18:30"), TWO_HOURS)
+    assert run(m, "2026-11-19 17:00")[0].holding
+    s, notes, _ = run(m, "2026-11-19 18:30")
+    assert not s.holding and notes == ["Keep Awake off (2 hours are up)"]  # work hours were over by then
+
+
+def test_until_sleep_during_work_hours_then_a_wake_the_same_day_stays_off():
+    m = Model()
+    run(m, "2026-11-19 10:00")
+    m.choose(UNTIL_SLEEP, at("2026-11-19 10:30"), HOURS)
+    assert status(m, "2026-11-19 12:00").kind == SLEEP
+    m.slept()
+    s, notes, declare = run(m, "2026-11-19 12:01", env=Env(screens_awake=False))
+    assert notes == ["Keep Awake off (the Mac is going to sleep, for the rest of today's work hours)"] and not declare
+    s, notes, _ = run(m, "2026-11-19 13:30")
+    assert (s.holding, s.lit, s.off_today, notes) == (False, OFF, True, [])
+    assert status(m, "2026-11-20 09:30").kind == SCHEDULE
+
+
+def test_a_timer_picked_before_work_hours_that_they_overtake_lights_no_tile():
+    m = Model()
+    m.choose(TWO_HOURS, at("2026-11-19 08:00"), HOURS)
+    s, notes, _ = run(m, "2026-11-19 08:00")
+    assert (s.kind, s.lit) == (TIMER, TWO_HOURS)
+    s, notes, _ = run(m, "2026-11-19 09:00")
+    assert (s.kind, s.until, s.lit) == (SCHEDULE, at("2026-11-19 17:00"), None)  # never "2 Hours" beside "until 17:00"
+    assert notes == ["Keep Awake on until 17:00 (work hours)"]
+    assert sentence(s, at("2026-11-19 09:00")) == "Screen stays on until 17:00 (work hours)."
+    s, notes, _ = run(m, "2026-11-19 10:00")  # the timer ran out silently; work hours carry on
+    assert (s.holding, s.lit, notes) == (True, None, [])
+
+
+def test_until_sleep_picked_before_work_hours_carries_through_them():
+    m = Model()
+    m.choose(UNTIL_SLEEP, at("2026-11-19 08:00"), HOURS)
+    assert status(m, "2026-11-19 12:00").kind == SLEEP
+    m.slept()
+    assert status(m, "2026-11-19 13:00").kind == SCHEDULE  # nothing skipped today: work hours are back
 
 
 def test_a_timer_running_into_the_block_hands_over_to_it():

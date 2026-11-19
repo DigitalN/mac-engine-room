@@ -129,7 +129,9 @@ sleeps.
 
 **Work hours** keep the screen on during one block of time on the days you choose (Monday to
 Friday, 9 to 5, once you turn them on). They never wake the Mac: they take effect whenever it's
-awake during those hours. Choosing **Off** inside them turns it off for the rest of the day.
+awake during those hours. Choosing **Off**, or a timer or Until Sleep, inside them sets work
+hours aside for the rest of the day: your choice holds on its own terms, and work hours are back
+the next workday.
 
 With **Stop when the battery is below** on, Keep Awake pauses on battery below the level you
 choose, and comes back when you plug in. Locking the screen pauses it too. When it lets go, the

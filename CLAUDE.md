@@ -62,8 +62,7 @@ sleep) logs the first line too. Fans at any other speed are left alone, and a he
 restarted knows no speeds of its own, so it leaves manual fans alone too.
 
 Keep Awake logs `Keep Awake on for 1 hour (until 15:42)`, `Keep Awake on until the Mac sleeps`
-and `Keep Awake on until 17:00 (work hours)` (with `; 1 hour chosen, until 11:00` for a timer
-picked inside work hours that ends sooner), each time what holds the screen on changes; `Keep
+and `Keep Awake on until 17:00 (work hours)`, each time what holds the screen on changes; `Keep
 Awake off (<why>)`: `Off chosen`, `1 hour is
 up`, `2 hours are up`, `the Mac is going to sleep`, `work hours are over`, `work hours turned
 off` or `work hours changed`, with `, for the rest of today's work hours` while Off for the rest
@@ -539,9 +538,11 @@ Don't undo these without asking:
   `docs/PLAN.md`. The screen stays on (no "Mac awake but screen may sleep" option); the choices
   are fixed at Off · 1 Hour · 2 Hours · Until Sleep (no "forever"); every pick counts from now and
   the last one wins; timers run on the wall clock. Work hours are one block on chosen weekdays,
-  never past midnight, off until turned on, and never wake the Mac. Inside them Off is off for the
-  rest of the day (a later pick holds on its own terms, then Off is back), a timer holds until
-  whichever ends later, and Until Sleep carries past the end. Over the updater's relaunch,
+  never past midnight, off until turned on, and never wake the Mac. Any pick made inside them (Off,
+  a timer, Until Sleep) leaves the rest of that day's off, and holds on its own terms (settled in the
+  hands-on check, 2026-11-19; `skips_todays_hours` is the one place that says so). A timer picked
+  before them holds until whichever ends later, with no tile lit while work hours hold the screen
+  on, and Until Sleep picked before them carries past their end. Over the updater's relaunch,
   caffeinate holds the screen on until the new copy takes over.
   The battery rule is off by default. Locking pauses it. Its own tab, nothing in Settings, no
   Dashboard row. Never called "Caffeine". Work hours are set on a 24-hour bar that snaps to half

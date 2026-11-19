@@ -8,9 +8,10 @@ The choices are Off, 1 Hour, 2 Hours and Until Sleep. Every pick counts from now
 one wins. The timers run on the wall clock (absolute end times), so sleep neither ends nor
 pauses them; Until Sleep ends at the next system sleep. Work hours are one block on chosen
 weekdays, in local time. They never wake the Mac: they take effect whenever the Mac is awake
-with its screens on during the block. Inside the block, Off is off for the rest of that day's
-block (a later pick holds on its own terms, and Off is back when it ends), a timer holds until
-whichever ends later, and Until Sleep carries past the block's end.
+with its screens on during the block. A pick made inside the block, Off or any other, leaves the
+rest of that day's block off: the pick holds on its own terms, and the block is back by itself the
+next workday. A timer picked before the block holds until whichever ends later, and Until Sleep
+picked before it carries past the block's end.
 
 It holds only while the screens are awake (not in a Power Nap dark wake) and the screen is
 unlocked, and with the battery rule on, not on battery below the chosen level. Letting go while
@@ -151,6 +152,14 @@ def today(now):
     return datetime.fromtimestamp(now).date().isoformat()
 
 
+def skips_todays_hours(hours, now):
+    """Whether a pick made now leaves the rest of today's work hours off: one made during them
+    does, whichever it is (Off, a timer or Until Sleep), and holds on its own terms. The one place
+    that says so: a pick made before work hours (which then hold until whichever ends later) would
+    be a change here."""
+    return block_end(hours, now) is not None
+
+
 class Env:
     """What Keep Awake can't decide itself: whether the screens are awake (not asleep, not a
     dark wake), whether the screen is locked, whether another user's session is showing (`away`,
@@ -187,11 +196,12 @@ class Status:
 
     @property
     def lit(self):
-        """The choice to light up: the pick while it lasts, Off when nothing holds the screen on
-        (or it's off for the rest of today's work hours), none while work hours hold it."""
-        if self.pick:
-            return self.pick
-        return None if self.kind == SCHEDULE else OFF
+        """The choice to light up: none while work hours hold the screen on (even over a shorter
+        timer picked before them, so 1 Hour is never lit beside "until 5:00 PM (work hours)"), else
+        the pick while it lasts, else Off."""
+        if self.kind == SCHEDULE:
+            return None
+        return self.pick or OFF
 
 
 def clock_24(t):
@@ -286,14 +296,15 @@ class Model:
         """Every pick counts from now; the last one wins."""
         if choice not in CHOICES:
             return
+        # A pick during work hours, Off or any other, leaves the rest of today's off: the pick holds
+        # on its own terms, and when it ends the work hours stay off until the next workday. One
+        # made outside them leaves an Off for today as it is.
+        if skips_todays_hours(hours, now):
+            self.off_day = today(now)
         if choice == OFF:
             self._why = "Off chosen"
             self.pick = self.until = None
-            # Inside the block, Off is off for the rest of it, back by itself the next workday.
-            self.off_day = today(now) if block_end(hours, now) is not None else None
             return
-        # The last pick wins, and holds on its own terms: Off for the rest of today's work hours
-        # stays, so when the pick ends, Off is back until the next workday.
         self.pick, self._picked = choice, True
         self.until = now + TIMERS[choice] if choice in TIMERS else None
 
@@ -380,10 +391,7 @@ class Model:
             return "Keep Awake on until the Mac sleeps"
         if status.kind == TIMER:
             return f"Keep Awake on for {TIMER_WORDS[self.pick]} (until {clock_24(status.until)})"
-        note = f"Keep Awake on until {clock_label(status.until, clock_24, True, end=True)} (work hours)"
-        if self._picked and self.pick in TIMERS:  # a timer picked inside the block, which ends later
-            note += f"; {TIMER_WORDS[self.pick]} chosen, until {clock_24(self.until)}"
-        return note
+        return f"Keep Awake on until {clock_label(status.until, clock_24, True, end=True)} (work hours)"
 
     @staticmethod
     def _pause_words(paused, rule):

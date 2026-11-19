@@ -242,12 +242,18 @@ wake the Mac. The name everywhere is **Keep Awake** (never "Caffeine").
   midnight), at least one day; no per-day hours, no second block. It never wakes the Mac (no
   scheduled wakes): it takes effect when the Mac is awake with its screens on, as the lid
   opens, at login, after a restart, or when it's turned on inside the block, and not in a
-  dark wake (Power Nap). Inside the block, **Off** is off for the rest of that day's block,
-  across sleeps, back by itself the next workday; a pick after it holds on its own terms (1 Hour
-  for an hour, not until the block's end), and Off for the rest of the day is back when it ends
-  (settled in review on 2026-11-19); **1 or 2 Hours** hold until whichever ends
-  later, the timer or the block (1 Hour at 16:30 holds until 17:30); **Until Sleep** carries
-  past the block's end until the next sleep. Sleeping at lunch doesn't end the block.
+  dark wake (Power Nap). **A pick made inside the block, Off, 1 Hour, 2 Hours or Until Sleep,
+  leaves the rest of that day's block off**, across sleeps, back by itself the next workday: the
+  pick holds on its own terms (1 Hour at 10:00 ends at 11:00, 2 Hours at 16:30 runs to 18:30,
+  Until Sleep ends at the next sleep), and then the line says "Off for the rest of today's work
+  hours." (Settled in the maintainer's hands-on check on 2026-11-19, replacing "whichever ends
+  later" for picks made during work hours: a 1 Hour pick that changed nothing looked like the
+  click did nothing.) **A pick made before the block** keeps the agreed rule: a timer still
+  running when the block starts holds until whichever ends later, the timer or the block, with
+  no tile lit while the block holds the screen on; Until Sleep carries past the block's end
+  until the next sleep. Whether a pick made before should also skip the day is open
+  (`keepawake.skips_todays_hours` is the one place to change). Sleeping at lunch doesn't end the
+  block.
 - **Battery rule:** a switch, "Stop when the battery is below [20%]" (10, 20, 30, 40 or 50%),
   off by default. Only on battery: below the level, Keep Awake lets go (a pick or work hours
   alike) and says "Paused because the battery is below 20%." Plugging in brings it back if its
