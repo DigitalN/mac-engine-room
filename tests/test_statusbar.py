@@ -369,9 +369,9 @@ def test_keep_awake_section_lights_the_choice_and_shows_the_line(monkeypatch):
     assert chosen == ["sleep"] and lit() == ["sleep"]
     assert not bar._keep_awake_line_item.isHidden()
     assert bar._keep_awake_line.stringValue() == "Keep Awake ends when the Mac sleeps"
-    status.update(choice=None, line="Keep Awake ends at 5 PM")
+    status.update(choice=None, line="Keep Awake ends at 5 PM (4 hours 38 minutes)")
     bar._target.menuNeedsUpdate_(bar._menu)
-    assert lit() == [] and bar._keep_awake_line.stringValue() == "Keep Awake ends at 5 PM"
+    assert lit() == [] and bar._keep_awake_line.stringValue() == "Keep Awake ends at 5 PM (4 hours 38 minutes)"
 
 
 def test_cup_follows_the_reading_only_while_keep_awake_holds(monkeypatch):

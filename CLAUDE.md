@@ -200,8 +200,9 @@ To reproduce without touching the user's data, run with
   `PreventUserIdleDisplaySleep` assertion (ctypes): Off, 1 Hour, 2 Hours, Until Sleep, work hours
   (`keep_awake_hours`) and the battery rule (`keep_awake_battery`), validated there for
   `settings.py` (an end can be `"24:00"`). `Model` is the rules and `sentence()` the line the menu
-  and the page both show ("Keep Awake ends at 1:07 PM", "… at 5 PM", "… when the Mac sleeps", the battery
-  pause, or none; no full stop), with `short_clock()` for its times (whole hours without ":00" on a
+  and the page both show ("Keep Awake ends at 1:22 PM (59 minutes)", "… at 5 PM (4 hours 38 minutes)",
+  "… when the Mac sleeps", the battery pause, or none; no full stop), with `time_left()` for the time
+  left (rounded up, never 0) and `short_clock()` for its times (whole hours without ":00" on a
   12-hour Mac) over `clock_label()` (Noon and Midnight on a 12-hour Mac, never
   12 AM or 12 PM; 24:00 for the end of the day on a 24-hour one) and `half_hour_labels()` /
   `bar_labels()` for the page's work-hours bar, all pure and unit-tested; `KeepAwake` runs them on each sample (`feed`), on picks, on settings changes

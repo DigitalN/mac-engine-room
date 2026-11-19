@@ -283,7 +283,9 @@ wake the Mac. The name everywhere is **Keep Awake** (never "Caffeine").
 - **Menu:** a section header, then the choices as tiles drawn like the fan profile buttons, in
   two rows (**1 Hour · 2 Hours**, then **Off · Until Sleep**), the active one in the accent
   colour, and one line under them, with no full stop (the maintainer's wording, 2026-11-19):
-  "Keep Awake ends at 1:07 PM" (a timer), "Keep Awake ends at 5 PM" (work hours, no tile lit),
+  "Keep Awake ends at 1:22 PM (59 minutes)" (a timer, with the time left: "N hours N minutes",
+  zero parts left out, rounded up so it never says 0; it counts down as the menu and the page
+  refresh), "Keep Awake ends at 5 PM (4 hours 38 minutes)" (work hours, no tile lit),
   "Keep Awake ends when the Mac sleeps", "Paused because the battery is below 20%", or no line
   while nothing holds the screen on, Off for the rest of today's work hours included (Off lit).
   Times follow the Mac's 12/24-hour setting, except that on a 12-hour Mac whole hours drop
@@ -291,8 +293,9 @@ wake the Mac. The name everywhere is **Keep Awake** (never "Caffeine").
   **Midnight**, never 12 AM or 12 PM; other times keep their minutes ("1:07 PM"). On a 24-hour
   Mac it's the Mac's own format, and a block ending at midnight ends at 24:00. The line is
   built in one place (`keepawake.sentence`, with `keepawake.short_clock` and `clock_label` for
-  the times) for the menu and the page. It replaced a minutes countdown ("Screen stays on for
-  42 more minutes.") after the hands-on check.
+  the times, `keepawake.time_left` for the time left) for the menu and the page. It replaced
+  the first wording ("Screen stays on for 42 more minutes.") after the hands-on check, and the
+  time left was added after the maintainer checked the next build.
 - **Changed on 2026-11-19 after the maintainer tried it:** the steaming cup and the work-hours
   bar below, in place of From/To time fields.
 - **Menu bar:** while Keep Awake holds the screen on (work hours included), a steaming cup

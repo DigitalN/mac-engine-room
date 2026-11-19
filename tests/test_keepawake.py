@@ -245,11 +245,11 @@ def test_one_hour_during_work_hours_ends_after_the_hour_and_the_day_stays_off():
     s, notes, _ = run(m, "2026-11-19 10:00")
     assert (s.kind, s.until, s.lit) == (TIMER, at("2026-11-19 11:00"), HOUR)  # its own terms, not until 17:00
     assert notes == ["Keep Awake on for 1 hour (until 11:00)"]
-    assert sentence(s) == "Keep Awake ends at 11:00"
+    assert sentence(s, at("2026-11-19 10:01")) == "Keep Awake ends at 11:00 (59 minutes)"
     s, notes, declare = run(m, "2026-11-19 11:00")
     assert (s.holding, s.lit, s.off_today) == (False, OFF, True) and declare
     assert notes == ["Keep Awake off (1 hour is up, for the rest of today's work hours)"]
-    assert sentence(s) is None
+    assert sentence(s, 0) is None
     assert not status(m, "2026-11-19 15:00").holding
     s, notes, _ = run(m, "2026-11-20 09:00")  # back by itself the next workday
     assert s.kind == SCHEDULE and notes == ["Keep Awake on until 17:00 (work hours)"]
@@ -317,11 +317,11 @@ def test_a_pick_after_off_for_today_holds_on_its_own_terms_then_off_is_back():
     s, notes, _ = run(m, "2026-11-19 10:00")
     assert (s.holding, s.kind, s.until, s.lit) == (True, TIMER, at("2026-11-19 11:00"), HOUR)  # not until 17:00
     assert notes == ["Keep Awake on for 1 hour (until 11:00)"]
-    assert sentence(s) == "Keep Awake ends at 11:00"
+    assert sentence(s, at("2026-11-19 10:00")) == "Keep Awake ends at 11:00 (1 hour)"
     s, notes, declare = run(m, "2026-11-19 11:05")
     assert (s.holding, s.lit, s.off_today) == (False, OFF, True)
     assert notes == ["Keep Awake off (1 hour is up, for the rest of today's work hours)"] and declare
-    assert sentence(s) is None
+    assert sentence(s, 0) is None
     assert status(m, "2026-11-20 09:00").kind == SCHEDULE  # back the next workday
 
 
@@ -337,7 +337,7 @@ def test_until_sleep_after_off_for_today_ends_at_sleep_and_off_is_back_at_wake()
     assert notes == ["Keep Awake off (the Mac is going to sleep, for the rest of today's work hours)"]
     s, notes, _ = run(m, "2026-11-19 13:30")  # woke the same day
     assert (s.holding, s.lit, notes) == (False, OFF, [])
-    assert sentence(s) is None
+    assert sentence(s, 0) is None
 
 
 def test_sleeping_at_lunch_doesnt_end_work_hours():
@@ -388,7 +388,7 @@ def test_battery_rule_pauses_only_on_battery_below_its_level():
     s, notes, declare = run(m, "2026-11-21 10:10", env=Env(has_battery=True, on_adapter=False, level=19), rule=RULE)
     assert (s.holding, s.paused, s.battery_low, s.lit) == (False, "battery", True, TWO_HOURS)
     assert notes == ["Keep Awake paused (the battery is below 20%)"] and declare
-    assert sentence(s) == "Paused because the battery is below 20%"
+    assert sentence(s, 0) == "Paused because the battery is below 20%"
     # 20% isn't below 20%.
     assert status(m, "2026-11-21 10:11", env=Env(has_battery=True, on_adapter=False, level=20), rule=RULE).holding
     run(m, "2026-11-21 10:12", env=Env(has_battery=True, on_adapter=False, level=19), rule=RULE)
@@ -414,30 +414,48 @@ def test_battery_rule_applies_to_work_hours_too_and_not_when_off_or_on_a_desktop
 def test_battery_rule_says_nothing_when_nothing_would_hold_the_screen_on():
     m = Model()
     s = status(m, "2026-11-21 10:00", env=Env(has_battery=True, on_adapter=False, level=5), rule=RULE)
-    assert not s.battery_low and sentence(s) is None
+    assert not s.battery_low and sentence(s, 0) is None
 
 
 # ── the sentence ─────────────────────────────────────────
 
 def test_the_line_for_each_state():
-    now = at("2026-11-19 12:07")
+    now = at("2026-11-19 12:22")
     short = lambda t: keepawake.short_clock(t, TWELVE, False, end=True)
-    assert sentence(Status(TIMER, at("2026-11-19 13:07"), HOUR), short) == "Keep Awake ends at 1:07 PM"
-    assert sentence(Status(TIMER, at("2026-11-19 13:00") + 30, HOUR), short) == "Keep Awake ends at 1 PM"
-    assert sentence(Status(SCHEDULE, at("2026-11-19 17:00")), short) == "Keep Awake ends at 5 PM"
-    assert sentence(Status(SCHEDULE, at("2026-11-19 12:00")), short) == "Keep Awake ends at Noon"
-    assert sentence(Status(SCHEDULE, at("2026-11-20 00:00")), short) == "Keep Awake ends at Midnight"
-    assert sentence(Status(SLEEP, None, UNTIL_SLEEP), short) == "Keep Awake ends when the Mac sleeps"
-    assert sentence(Status(TIMER, now + 60, HOUR, "battery", battery_low=True, level=30), short) == (
+    assert sentence(Status(TIMER, at("2026-11-19 13:22"), HOUR), now + 60, short) == (
+        "Keep Awake ends at 1:22 PM (59 minutes)")
+    assert sentence(Status(TIMER, at("2026-11-19 15:22"), TWO_HOURS), at("2026-11-19 13:23"), short) == (
+        "Keep Awake ends at 3:22 PM (1 hour 59 minutes)")
+    assert sentence(Status(TIMER, at("2026-11-19 13:00") + 30, HOUR), now, short) == "Keep Awake ends at 1 PM (39 minutes)"
+    assert sentence(Status(SCHEDULE, at("2026-11-19 17:00")), now, short) == "Keep Awake ends at 5 PM (4 hours 38 minutes)"
+    assert sentence(Status(SCHEDULE, at("2026-11-19 12:00")), now - 3600, short) == "Keep Awake ends at Noon (38 minutes)"
+    assert sentence(Status(SCHEDULE, at("2026-11-20 00:00")), at("2026-11-19 22:00"), short) == (
+        "Keep Awake ends at Midnight (2 hours)")
+    assert sentence(Status(SLEEP, None, UNTIL_SLEEP), now, short) == "Keep Awake ends when the Mac sleeps"
+    assert sentence(Status(TIMER, now + 60, HOUR, "battery", battery_low=True, level=30), now, short) == (
         "Paused because the battery is below 30%")
     # Nothing holding the screen on, Off for the rest of today's work hours included: no line.
-    assert sentence(Status()) is None and sentence(Status(off_today=True)) is None
+    assert sentence(Status(), now) is None and sentence(Status(off_today=True), now) is None
     # Locked, or the screens asleep: the usual line (nobody can see the menu then anyway).
-    assert sentence(Status(SLEEP, None, UNTIL_SLEEP, "locked")) == "Keep Awake ends when the Mac sleeps"
+    assert sentence(Status(SLEEP, None, UNTIL_SLEEP, "locked"), now) == "Keep Awake ends when the Mac sleeps"
     # No full stop on any of them.
     assert not any(line.endswith(".") for line in (
-        sentence(Status(TIMER, now, HOUR), short), sentence(Status(SLEEP, None, UNTIL_SLEEP)),
-        sentence(Status(TIMER, now, HOUR, "battery", battery_low=True, level=20))))
+        sentence(Status(TIMER, now + 90, HOUR), now, short), sentence(Status(SLEEP, None, UNTIL_SLEEP), now),
+        sentence(Status(TIMER, now, HOUR, "battery", battery_low=True, level=20), now)))
+
+
+def test_the_time_left_rounds_up_and_leaves_out_zero_parts():
+    left = keepawake.time_left
+    assert left(2 * 3600) == "2 hours"
+    assert left(3600) == "1 hour"
+    assert left(45 * 60) == "45 minutes"
+    assert left(61 * 60) == "1 hour 1 minute"
+    assert left(119 * 60) == "1 hour 59 minutes"
+    assert left(3 * 3600 + 2 * 60) == "3 hours 2 minutes"
+    assert left(60) == "1 minute"
+    assert left(44 * 60 + 1) == "45 minutes"  # rounded up
+    assert left(59 * 60 + 30) == "1 hour"
+    assert left(20) == "1 minute" and left(0) == "1 minute" and left(-5) == "1 minute"  # never 0
 
 
 def test_short_times_drop_00_on_whole_hours_of_a_12_hour_mac_only():
@@ -572,8 +590,10 @@ def controller(tmp_path, when="2026-11-21 10:00", **settings):
 
 def test_controller_holds_and_releases_one_assertion(tmp_path):
     ka, iokit, clock, changes = controller(tmp_path)
-    assert ka.choose(HOUR) == {"choice": HOUR, "holding": True, "line": "Keep Awake ends at 11:00"}
-    assert ka.status() == {"choice": HOUR, "holding": True, "line": "Keep Awake ends at 11:00"}
+    assert ka.choose(HOUR) == {"choice": HOUR, "holding": True, "line": "Keep Awake ends at 11:00 (1 hour)"}
+    clock.now += 21 * 60
+    assert ka.status() == {"choice": HOUR, "holding": True, "line": "Keep Awake ends at 11:00 (39 minutes)"}  # counts down
+    clock.now -= 21 * 60
     ka.choose(TWO_HOURS)  # a new pick while holding: still the one assertion
     assert iokit.calls == [("hold", 1)] and changes == [True]
     clock.now += 2 * 3600
@@ -669,7 +689,7 @@ def test_controller_follows_the_settings(tmp_path):
     ka._settings.values["keep_awake_hours"] = HOURS
     ka.settings_changed(ka._settings.values)
     assert ka.holding and ka.status() == {"choice": None, "holding": True,
-                                          "line": "Keep Awake ends at 17:00"}
+                                          "line": "Keep Awake ends at 17:00 (7 hours)"}
 
 
 def test_no_choice_or_line_reaches_the_page_before_launch(tmp_path):
@@ -735,12 +755,12 @@ def test_the_line_says_noon_and_midnight(tmp_path):
     ka, iokit, clock, _ = controller(tmp_path, "2026-11-19 10:00", keep_awake_hours={**HOURS, "end": "12:00"})
     ka._format_time, ka._h24 = TWELVE, False
     ka.evaluate()
-    assert ka.status()["line"] == "Keep Awake ends at Noon"
+    assert ka.status()["line"] == "Keep Awake ends at Noon (2 hours)"
     ka._settings.values["keep_awake_hours"] = {**HOURS, "end": "24:00"}
     ka.evaluate()
-    assert ka.status()["line"] == "Keep Awake ends at Midnight"
+    assert ka.status()["line"] == "Keep Awake ends at Midnight (14 hours)"
     ka._format_time, ka._h24 = TWENTY_FOUR, True
-    assert ka.status()["line"] == "Keep Awake ends at 24:00"
+    assert ka.status()["line"] == "Keep Awake ends at 24:00 (14 hours)"
     assert ka.clock()["hours"][-1] == "24:00"
 
 
@@ -782,7 +802,7 @@ def test_a_timer_picked_before_work_hours_holds_on_its_own_terms_and_skips_the_d
     s, notes, declare = run(m, "2026-11-19 10:00")
     assert (s.holding, s.lit, s.off_today) == (False, OFF, True) and declare
     assert notes == ["Keep Awake off (2 hours are up, for the rest of today's work hours)"]
-    assert sentence(s) is None
+    assert sentence(s, 0) is None
     assert not status(m, "2026-11-19 14:00").holding
     assert status(m, "2026-11-20 09:00").kind == SCHEDULE  # back the next workday
 

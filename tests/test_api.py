@@ -7,7 +7,7 @@ from PyObjCTools import AppHelper
 from main import CHARGING_SETTINGS_URL, LOG_PATH, Api, LiveState
 
 
-_KEEP_AWAKE = SimpleNamespace(status=lambda: {"choice": "1h", "holding": True, "line": "Keep Awake ends at 1:07 PM"})
+_KEEP_AWAKE = SimpleNamespace(status=lambda: {"choice": "1h", "holding": True, "line": "Keep Awake ends at 1:07 PM (45 minutes)"})
 
 
 def test_keep_awake_buttons_choose_and_return_what_to_show():
@@ -63,7 +63,7 @@ def test_live_data_carries_the_update_status_for_settings():
                           _keep_awake=_KEEP_AWAKE)
     live = Api(app=app).get_live(0)
     assert live["update"] == ["downloading", "1.2.5"]
-    assert live["keep_awake"] == {"choice": "1h", "holding": True, "line": "Keep Awake ends at 1:07 PM"}
+    assert live["keep_awake"] == {"choice": "1h", "holding": True, "line": "Keep Awake ends at 1:07 PM (45 minutes)"}
     assert live["fan_control"] == {"profile": "balanced", "state": "holding", "targets": [1499, 1499]}
 
 

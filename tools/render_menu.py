@@ -29,10 +29,11 @@ STATES = ("off", "holding", "override", "approval", "unavailable", "other", "err
 # Keep Awake's states, as keepawake.KeepAwake.status() gives them; the times as a Mac set to 12-hour shows them.
 KEEP_AWAKE = {
     "off": {"choice": "off", "holding": False, "line": None},
-    "1h": {"choice": "1h", "holding": True, "line": "Keep Awake ends at 1:07 PM"},
-    "2h": {"choice": "2h", "holding": True, "line": "Keep Awake ends at 3:30 PM"},
+    "1h": {"choice": "1h", "holding": True, "line": "Keep Awake ends at 1:22 PM (59 minutes)"},
+    "2h": {"choice": "2h", "holding": True, "line": "Keep Awake ends at 3:22 PM (1 hour 59 minutes)"},
     "sleep": {"choice": "sleep", "holding": True, "line": "Keep Awake ends when the Mac sleeps"},
-    "schedule": {"choice": None, "holding": True, "line": "Keep Awake ends at 5 PM"},
+    "schedule": {"choice": None, "holding": True, "line": "Keep Awake ends at 5 PM (4 hours 38 minutes)"},
+    "allday": {"choice": None, "holding": True, "line": "Keep Awake ends at Midnight (23 hours 59 minutes)"},  # the longest
     "offtoday": {"choice": "off", "holding": False, "line": None},  # no line
     "battery": {"choice": "2h", "holding": False, "line": "Paused because the battery is below 20%"},
 }

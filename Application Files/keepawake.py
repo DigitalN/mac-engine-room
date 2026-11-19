@@ -255,17 +255,29 @@ def bar_labels(format_time, h24):
     return [short_clock((day + timedelta(hours=3 * i)).timestamp(), format_time, h24, end=i == 8) for i in range(9)]
 
 
-def sentence(status, format_time=clock_24):
+def time_left(seconds):
+    """'2 hours', '1 hour', '45 minutes', '1 hour 1 minute': rounded up to the whole minute, so it
+    never says 0 (under a minute is '1 minute'), and a part that's zero is left out."""
+    total = max(1, math.ceil(seconds / 60 - 1e-9))
+    hours, mins = divmod(total, 60)
+    parts = [f"{hours} hour{'s' if hours != 1 else ''}" if hours else "",
+             f"{mins} minute{'s' if mins != 1 else ''}" if mins else ""]
+    return " ".join(p for p in parts if p)
+
+
+def sentence(status, now, format_time=clock_24):
     """The line under the choices, in the menu and on the page, or None when nothing holds the
     screen on (Off for the rest of today's work hours included). No full stop: the maintainer's
-    wording. `format_time` gives the time as `short_clock` does (KeepAwake passes the Mac's)."""
+    wording. `format_time` gives the time as `short_clock` does (KeepAwake passes the Mac's). The
+    menu is refilled on each sample while it's open and the page on each poll, so the time left
+    counts down there."""
     if status.kind is None:
         return None
     if status.battery_low:
         return f"Paused because the battery is below {status.level}%"
     if status.kind == SLEEP:
         return "Keep Awake ends when the Mac sleeps"
-    return f"Keep Awake ends at {format_time(status.until)}"
+    return f"Keep Awake ends at {format_time(status.until)} ({time_left(status.until - now)})"
 
 
 def fresh(data, now):
@@ -683,10 +695,10 @@ class KeepAwake:
     def status(self):
         """For the menu and the page: what's lit, the line, and whether it holds the screen on."""
         with self._lock:
-            s = self._status
+            s, now = self._status, self._clock()
             fmt, h24 = self._format_time or clock_24, self._h24
             return {"choice": s.lit, "holding": s.holding,
-                    "line": sentence(s, lambda t: short_clock(t, fmt, h24, end=True))}
+                    "line": sentence(s, now, lambda t: short_clock(t, fmt, h24, end=True))}
 
     def hand_over(self):
         """The updater is relaunching into a new version: the pick and today's Off go to the new
