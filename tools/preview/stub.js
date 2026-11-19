@@ -8,8 +8,11 @@
 //   keep awake:  ka1h ka2h kasleep kaschedule kaofftoday kabattery (paused by the battery rule)
 //                kahours (work hours on) karule (battery rule on) sunday (the week starts on Sunday)
 //                h24 (a Mac set to 24-hour time) kaday (work hours 0:00–24:00) kanoon (8:00–Noon)
+//   mouse:       mouseon (all three switches on, allowed, tap running) mousewaiting (switches on,
+//                Accessibility not allowed) mousedenied (all off, not allowed) nomouse (built
+//                without a Swift compiler). Turning a switch on in the preview allows Accessibility.
 //   settings:    fahrenheit dark light
-//   tab:         dashboard (default) thermals keepawake power history settings
+//   tab:         dashboard (default) thermals keepawake power mouse history settings
 // Change window.__state while it runs to try anything else; the next poll picks it up.
 // window.__state.size is what the page last asked the window to be (the app sizes its
 // window to it), and window.__state.calls every API call the page made. Page errors that
@@ -35,6 +38,7 @@
     fans: [{ min: 1499, max: 4296 }, { min: 1499, max: 4744 }],
     fanRpm: null,  // [rpm, …] to show; null follows fan control (0 while macOS has them cool)
     keepAwake: { choice: 'off', holding: false, line: null },  // keepawake.KeepAwake.status()
+    mouse: { available: true, allowed: true, running: false },  // mouse.Mouse.status()
     firstWeekday: 0,  // Python's weekday the Mac's calendar starts on: 0 Monday, 6 Sunday
     h24: false,  // the Mac shows 24-hour time (the bar's labels come from keepawake.half_hour_labels)
     sessions: [],
@@ -82,6 +86,16 @@
     h24: () => { state.h24 = true; },
     kaday: () => { state.settings.keep_awake_hours = { ...state.settings.keep_awake_hours, start: '00:00', end: '24:00' }; },
     kanoon: () => { state.settings.keep_awake_hours = { ...state.settings.keep_awake_hours, start: '08:00', end: '12:00' }; },
+    mouseon: () => {
+      Object.assign(state.settings, { mouse_reverse_scrolling: true, mouse_smooth_scrolling: true, mouse_back_forward: true });
+      state.mouse = { available: true, allowed: true, running: true };
+    },
+    mousewaiting: () => {
+      Object.assign(state.settings, { mouse_reverse_scrolling: true });
+      state.mouse = { available: true, allowed: false, running: false };
+    },
+    mousedenied: () => { state.mouse = { available: true, allowed: false, running: false }; },
+    nomouse: () => { state.mouse = { available: false, allowed: false, running: false }; },
     fahrenheit: () => { state.settings.temperature_unit = 'fahrenheit'; },
     dark: () => { state.settings.theme = 'dark'; },
     light: () => { state.settings.theme = 'light'; },
@@ -130,7 +144,16 @@
 
   const HISTORY = 600;  // seconds of points before the page's first poll
   let seq = 0;
-  function getLive(sinceSeq) {
+  // What mouse.py would report after the switches change (the preview pretends Accessibility is allowed
+  // once a switch is turned on, as if the maintainer allowed it at macOS's prompt).
+  function mouseAfter(settings) {
+    const on = settings.mouse_reverse_scrolling || settings.mouse_smooth_scrolling || settings.mouse_back_forward;
+    if (!state.mouse.available) return;
+    if (on) state.mouse.allowed = true;
+    state.mouse.running = on && state.mouse.allowed;
+  }
+
+  function getLive(sinceSeq, page) {
     const now = Date.now() / 1000, points = [], tpoints = [];
     const times = sinceSeq ? [now] : Array.from({ length: HISTORY }, (_, i) => now - HISTORY + 1 + i);
     let r;
@@ -146,6 +169,7 @@
       points, thermals: { ...r.thermals },  // a plain object, as the bridge sends
       thermal_fields: ['t', 'cpu', 'gpu', 'memory', 'ssd', 'ambient'], thermal_points: tpoints,
       update: state.update, fan_control: state.fanControl, keep_awake: state.keepAwake,
+      ...(page === 'mouse' && { mouse: { ...state.mouse } }),
     };
   }
 
@@ -157,6 +181,7 @@
       const before = state.settings.fan_profile;
       Object.assign(state.settings, changes);
       if (changes.fan_profile && changes.fan_profile !== before) choose(changes.fan_profile);
+      mouseAfter(state.settings);
       return state.settings;
     },
     app_info: () => ({
@@ -168,6 +193,8 @@
     }),
     copy_sensor_report: () => new Promise(done => setTimeout(() => done(true), 300)),
     report_problem: () => null,
+    open_pointer_settings: () => null,
+    open_accessibility_settings: () => null,
     check_for_updates: () => { state.update = ['checking', null]; setTimeout(() => { state.update = ['idle', null]; }, 2000); },
     list_sessions: () => state.sessions,
     get_session: () => null,

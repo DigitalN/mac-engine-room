@@ -32,6 +32,10 @@ DEFAULTS = {
     "menu_fan_profiles": fans.MENU_PROFILES,  # three different profiles, in the menu's order
     "keep_awake_hours": keepawake.DEFAULT_HOURS,  # work hours: off until turned on, Mon–Fri 9:00–17:00
     "keep_awake_battery": keepawake.DEFAULT_BATTERY,  # "Stop when the battery is below 20%", off
+    # The Mouse tab's switches (mouse.py), all off until turned on: no event tap while they're off.
+    "mouse_reverse_scrolling": False,
+    "mouse_smooth_scrolling": False,
+    "mouse_back_forward": False,
 }
 
 
@@ -46,7 +50,8 @@ def validate(raw):
         s["theme"] = raw["theme"]
     if raw.get("temperature_unit") in TEMPERATURE_UNITS:
         s["temperature_unit"] = raw["temperature_unit"]
-    for key in ("menu_bar_show_charging", "record_history", "update_automatically"):
+    for key in ("menu_bar_show_charging", "record_history", "update_automatically",
+                "mouse_reverse_scrolling", "mouse_smooth_scrolling", "mouse_back_forward"):
         if isinstance(raw.get(key), bool):
             s[key] = raw[key]
     if raw.get("fan_profile") in fans.PROFILE_IDS:  # Smart and Manual, gone in 1.2.11, become macOS default

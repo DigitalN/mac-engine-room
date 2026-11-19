@@ -67,3 +67,10 @@ def test_temperatures_are_in_celsius_unless_fahrenheit_is_chosen():
     assert DEFAULTS["temperature_unit"] == "celsius"
     assert validate({"temperature_unit": "fahrenheit"})["temperature_unit"] == "fahrenheit"
     assert validate({"temperature_unit": "kelvin"})["temperature_unit"] == "celsius"
+
+
+def test_mouse_switches_start_off_and_only_take_true_or_false():
+    for key in ("mouse_reverse_scrolling", "mouse_smooth_scrolling", "mouse_back_forward"):
+        assert DEFAULTS[key] is False
+        assert validate({key: True})[key] is True
+        assert validate({key: 1})[key] is False
