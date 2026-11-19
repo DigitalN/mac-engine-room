@@ -3,6 +3,9 @@
 Pythonflow becomes **Mac Engine Room**, an app with two tools: **Thermals**, which replaces
 [ThermalForge](https://github.com/ProducerGuy/ThermalForge), and **Power**, which is today's
 app. Agreed with the maintainer on 2026-11-02. Each release ticks its part off here.
+Keep Awake joined them in 1.4.0, and on 2026-11-19 two more were agreed to trim the menu
+bar: **Displays**, which replaces what the maintainer uses BetterDisplay for, and **Mouse**,
+which replaces LinearMouse.
 
 ## Releases
 
@@ -33,8 +36,11 @@ Each is the usual +0.0.1 with the whole release checklist in DEVELOPMENT.md.
    fan controls) were merged as DigitalN/mac-engine-room#26 and released as 1.2.9 on
    2026-11-02.
 4. **Keep Awake** (see Keep Awake), designed with the maintainer on 2026-11-19 in three
-   grilling rounds. To ship as **1.4.0** through the release checklist once its pull request
-   is merged.
+   grilling rounds. Released as **1.4.0** on 2026-11-19.
+5. **Displays and Mouse** (see Displays, Mouse and Shared groundwork), designed with the
+   maintainer on 2026-11-19 in three grilling rounds. Built at the same time by two sessions,
+   each with its own branch and pull request. **They ship together as 1.5.0 once both are
+   merged:** when the first one is merged, don't release it on its own.
 
 ## Name and identity
 
@@ -53,6 +59,9 @@ Each is the usual +0.0.1 with the whole release checklist in DEVELOPMENT.md.
 - A **Thermals | Power** switcher at the top of the window, Thermals first. Power keeps its
   Now and History pages, and always opens on Now. Settings is shared, with a section for
   each tool. Release 3 puts a **Dashboard** in front of them (see Dashboard).
+- **Changed on 2026-11-19 for 1.5.0:** the switcher becomes **Dashboard | Thermals | Keep
+  Awake | Power | Displays | Mouse**. Like Keep Awake, Displays and Mouse have nothing in
+  Settings and no Dashboard row.
 - Each tool is its own Python module that adds its readings, its menu section and its
   settings. No plugin system beyond that.
 
@@ -203,6 +212,8 @@ This M1 Pro (MacBookPro18,1), lightly loaded on 2026-11-02, has 2,181 SMC keys:
 - **Changed on 2026-11-19 for 1.4.0:** **Open Dashboard** (⌘D) moved to the very top. Then
   Thermals, then Keep Awake (see Keep Awake), then Power; Check for Updates… and Quit stay at
   the bottom.
+- **Changed on 2026-11-19 for 1.5.0:** a **Displays** section below Power, with a brightness
+  slider for each display that can be adjusted (see Displays). Mouse has nothing in the menu.
 - One native menu with custom row views, Thermals first: profile buttons (3 × 2), the Manual
   slider only when Manual is chosen, then temperatures as tiles with fans in the last tile.
   **Changed on 2026-11-02 after trying 1.2.8:** one row of three profile buttons, drawn as
@@ -394,6 +405,215 @@ wake the Mac. The name everywhere is **Keep Awake** (never "Caffeine").
 - Updates aren't held back by a running profile: the fans go back to macOS for the few
   seconds of the relaunch, and the profile comes back afterwards.
 
+## Displays
+
+Agreed on 2026-11-19, for 1.5.0. It replaces what the maintainer uses BetterDisplay for:
+brightness on the 16" M1 Pro's XDR screen up to its HDR peak, and the LG TV's own brightness
+and volume.
+
+- **One slider per display, each on its own.** A slider sets only its own display's backlight.
+  The built-in display uses DisplayServices (`DisplayServicesGetBrightness` and
+  `DisplayServicesSetBrightness`, private, still there on 27.2.1; MonitorControl and Lunar use
+  them). External displays and TVs use DDC/CI (VCP 0x10). There's no software dimming
+  anywhere: on the TV a gamma table would also wash out its HDR. No slider combines hardware
+  and software dimming, and nothing links displays together. A display that doesn't answer
+  DDC gets no slider.
+- **The built-in display goes past 100%.** Its scale runs from 0 to 160%. 0 to 100% is macOS's
+  own brightness, and 100 to 160% is the boost (the level saved as `display_boost`, 1.0 to
+  1.6). 160% is the panel's 1,600-nit HDR peak. Its rated full-screen brightness is 1,000 nits,
+  about 132%, so above that macOS may pull it back after a while. The boost only holds while
+  macOS's own brightness is at its maximum: anything that lowers it (Control Center,
+  auto-brightness) ends the boost.
+- **Which Macs get the boost.** Only the built-in XDR display gets it; the TV's own HDR isn't
+  boosted. It also needs gamma tables to work:
+  - M5 Pro, M5 Max and MacBook Neo have ignored gamma tables since macOS 26.3, and still do on
+    27.2.1, on built-in and external displays alike, so it isn't their panels. Apple's forum
+    thread 819331 has the reports, and FB22273730 is open. Their slider stops at 100% until
+    Apple fixes it, using a model list like `power.NO_CHIP_SENSOR`.
+  - The base M5 works.
+  - A Mac without an XDR screen stops at 100% too.
+- **How the boost works.** This is BrightIntosh's method; BrightIntosh is GPL-3.0, so it's
+  evidence only, not code to copy.
+  - A 1×1 window above everything holds a Metal view with EDR content (`rgba16Float`,
+    `extendedLinearSRGB`, `wantsExtendedDynamicRangeContent`). That puts the screen in EDR
+    mode.
+  - The display's gamma table then lifts everything into the headroom: read it with
+    `CGGetDisplayTransferByTable`, multiply it, and write it back with
+    `CGSetDisplayTransferByTable`.
+  - The strength follows the headroom macOS grants at the moment
+    (`NSScreen.maximumExtendedDynamicRangeColorComponentValue`).
+  - When the app quits or crashes, macOS puts the user's ColorSync tables back.
+  - Whether the trigger window has to keep redrawing is still to be measured (BrightIntosh
+    redraws at 5 fps). Either way it runs in Swift (see Shared groundwork), only while above
+    100%, and it pauses while the screen sleeps.
+  - macOS 26.3 blocked the preset-unlocking methods BetterDisplay and Lunar used before, so
+    don't use those.
+- **Trade-offs accepted:** real HDR video looks blown out while boosted, and screenshots don't
+  show the boost. On the 27 beta, full-screen video was reported to lose the boost after about
+  10 s.
+- **Remembered:** the boost survives sleep, lock and relaunch, like macOS's own brightness.
+  There's no battery rule, and macOS's own heat and power limits stay in charge. Over an
+  update's relaunch it drops to 100% for a few seconds, then comes back; there's no handover.
+- **The keys.** A **Brightness and volume keys** switch on the Displays tab, off until turned
+  on. Turning it on asks for Accessibility (see Shared groundwork). While it's on:
+  - **Brightness keys** adjust the display the pointer is on, or the built-in display when
+    that one can't be adjusted. Each press is 10%, and ⌥⇧ gives quarter steps (2.5%), as
+    macOS does.
+  - **The app's own HUD** replaces macOS's at every step. It looks like the maintainer's
+    screenshot of BetterDisplay's: a sun symbol, a bar of 16 segments with 100% at the 10th,
+    and a bubble over the end of the lit part saying e.g. "130% · 960 nits". It appears on the
+    display being adjusted, where macOS puts its own, and fades after about 1.5 s.
+  - **Nits are calculated, not read from a sensor.** At 100% and above they're 500 × (percent
+    / 100)^2.5, which matches BetterDisplay's 960 at 130% and 1,600 at 160%. Below 100%
+    they're 500 × macOS's linear brightness (`DisplayServicesGetLinearBrightness`). When macOS
+    grants less headroom than asked for, the bubble shows what's actually reached.
+  - **A TV's HUD** has 10 segments from 0 to 100% and no nits.
+  - **Volume and mute keys** control a display's speakers over DDC (VCP 0x62 for volume, 0x8D
+    for mute) when it's macOS's sound output and answers DDC. They get the same HUD with a
+    speaker symbol, in macOS's 16 volume steps. Otherwise the keys are macOS's.
+
+  While the switch is off, the keys belong to macOS and only the menu's slider reaches the
+  boost.
+- **The menu:** a Displays section below Power.
+  - One slider for each display that can be adjusted, labelled with macOS's name for it
+    (`NSScreen.localizedName`, and "Built-in Display" for the laptop's own), with the percent
+    on the right.
+  - The built-in display's slider runs from 0 to 160%, with a tick at 100%.
+  - No volume in the menu.
+- **The Displays tab** (after Power):
+  - A card for each connected display, with its brightness slider and, where DDC allows, a
+    volume slider.
+  - The keys switch, with whether Accessibility is allowed.
+- **DDC** (m1ddc's method; m1ddc is MIT):
+  - Find each `DCPAVServiceProxy` whose `Location` is "External", then use
+    `IOAVServiceCreateWithService` and `IOAVServiceWriteI2C`/`IOAVServiceReadI2C`, at chip
+    address 0x37 and data address 0x51.
+  - Use chip address 0xB7 when the proxy's parent's `EPICProviderClass` is `AppleMCDP29XX`.
+    That's the HDMI chip, and this Mac has it. m1ddc tested that only on an M1 Mac mini, and
+    MonitorControl says DDC doesn't work over any M1 Mac's HDMI port.
+  - Nobody has confirmed DDC on an LG TV. BetterDisplay controls LG TVs over the network,
+    which this app won't do: the updater is its only network access. If the TV doesn't answer
+    on the HDMI port, try a USB-C to HDMI adapter.
+  - The maintainer can only plug the TV in later.
+- **No idle cost:**
+  - DDC is only used on a change, or when the menu or the tab opens. The app remembers what
+    it set.
+  - There's no event tap unless the keys switch is on.
+  - The trigger window only runs above 100%.
+- **Never read identifying keys.** Don't read EDID serial numbers; names come from
+  `NSScreen.localizedName`.
+
+## Mouse
+
+Agreed on 2026-11-19, for 1.5.0. It replaces LinearMouse, which the maintainer uses to reverse
+scrolling on two wheel mice (an MX Vertical and a Keychron M5 8K) while the trackpad keeps
+natural scrolling. macOS 27.2 still has one natural-scrolling setting for mice and trackpads
+(`com.apple.swipescrolldirection`), so this needs an event tap.
+
+- **Three switches on the Mouse tab, all off until turned on:**
+  - **Reverse scrolling:** vertical scrolling on every wheel mouse goes the other way, and
+    horizontal is left as it is. The trackpad and a Magic Mouse (which scrolls like a
+    trackpad) are left alone. There's no list of devices.
+  - **Smooth scrolling:** each notch of the wheel becomes a short glide of pixel scrolling. It
+    has one fixed feel with no tuning, applies to every wheel mouse, and works with or without
+    reversing. Mos is CC BY-NC, which isn't GPL-compatible, so don't use its code.
+  - **Back and forward buttons:** the side buttons (buttons 4 and 5) become Back and Forward
+    everywhere, including Safari and Finder, which ignore them today. Every other button stays
+    as it is.
+- **Pointer acceleration isn't the app's.** System Settings › Mouse › Advanced has a switch for
+  it (since macOS 14, still there on 27, mice only). The Mouse tab has a **Pointer
+  acceleration…** link that opens that pane
+  (`x-apple.systempreferences:com.apple.Mouse-Settings.extension`), like Power's link to the
+  battery's charging settings.
+- **Telling a mouse from the trackpad:**
+  - Go by the device that sent each event. Guessing from scroll phases fails on a Magic Mouse,
+    and it flipped trackpads mid-scroll in Scroll Reverser #130.
+  - LinearMouse (MIT) reads the HID sender ID from the event (`CGEventCopyIOHIDEvent`,
+    `IOHIDEventGetSenderID`) and matches it to the device.
+  - Scroll Reverser (Apache-2.0) looks the device up in the IORegistry. It treats a device as a
+    trackpad when its `HIDScrollAccelerationType` is `HIDTrackpadScrollAcceleration`, or when
+    it's on Apple's multitouch driver.
+  - Flip every event from the same sender, so momentum phases stay consistent.
+  - Set `DeltaAxis1` first, because macOS recomputes the point deltas from it. Then set the
+    fixed-point and point deltas, and the embedded HID event's.
+  - Leave alone the events another app posts (Logi Options+, for example).
+  - **Never read a device's serial number.**
+- **The Mouse tab** (after Displays):
+  - The three switches and the link.
+  - Whether Accessibility is allowed, with a button that opens Privacy & Security ›
+    Accessibility.
+  - Nothing in the menu.
+- **No idle cost:** there's no tap at all while all three switches are off. The tap listens
+  only for scroll events and the other buttons' events, never for mouse movement.
+
+## Shared groundwork
+
+Displays and Mouse are built at the same time by two sessions, each in its own worktree with
+its own branch and pull request. Both need Swift event taps and Accessibility, so the pieces
+they share are specified here and both build to them. Whichever merges second takes the other's
+copy of these pieces.
+
+- **Swift, in the app's own process.** An event tap sits in the path of every input event, so
+  Python can't run one. The app's threads share the GIL and sit at background QoS while idle
+  (a starved one once waited 26 s), and macOS disables a tap that stalls.
+  - Each tool has a Swift dylib, loaded with ctypes:
+    - `Native/Displays/*.swift` → `Contents/Frameworks/libdisplays.dylib`.
+    - `Native/Mouse/*.swift` → `Contents/Frameworks/libmouse.dylib`.
+  - Each dylib exports plain C functions (`@_cdecl`).
+  - A tap runs on a thread of its own, with its own run loop, at user-interactive QoS all the
+    time. It isn't a GIL thread, so *all three always have the same priority* doesn't cover it.
+  - **No Python runs on a tap thread.** Python turns things on and off and sets values.
+    Anything Python must hear about, such as a key press for the HUD, goes to the main queue
+    with `DispatchQueue.main.async`.
+- **Build.**
+  - `scripts/build.sh` compiles each `Native/<Tool>/` folder after PyInstaller, alongside the
+    fan helper. It uses the same `xcrun swiftc -O -target arm64-apple-macos13.0` plus
+    `-emit-library`, writes `Contents/Frameworks/lib<tool>.dylib` (lower case), and runs
+    before signing.
+  - Without a Swift compiler there are no dylibs, and the switches that need them are hidden,
+    as fan control is.
+  - Tests compile the dylibs with `swiftc`, like `tests/test_fan_helper.py`, and are skipped
+    without it.
+- **`Application Files/accessibility.py`**, which both tools use:
+  - `allowed()` calls `AXIsProcessTrusted()`.
+  - `ask()` calls `AXIsProcessTrustedWithOptions({kAXTrustedCheckOptionPrompt: True})`. It
+    runs the first time a switch that needs a tap is turned on. That's macOS's own prompt, and
+    it also adds the app to the list.
+  - `open_settings()` opens
+    `x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility`.
+  - `watch(callback)` calls back on the main thread when the grant may have changed. It
+    listens for the `com.apple.accessibility.api` distributed notification and reads the grant
+    again after a short delay, since the value lags behind the notification. So a tap starts
+    as soon as it's allowed, without a relaunch, and stops if the grant is taken away.
+  - `register(stop, start)`, `stop_taps()` and `start_taps()`: **the updater calls
+    `stop_taps()` just before it swaps the bundle** (in `Updater._install`, before
+    `replaceItemAtURL…`), and `start_taps()` if the swap fails. On macOS 27.2, a bundle
+    replaced under a running tap made tccd refuse the old process, and the keyboard and
+    trackpad froze for about two minutes (Scroll Reverser #220).
+- **Taps:**
+  - Create one only when Accessibility is allowed.
+  - Re-enable it on `kCGEventTapDisabledByTimeout` and `kCGEventTapDisabledByUserInput`.
+  - Call `CFMachPortInvalidate` on every tap that's dropped. Left-over taps slow down all
+    input (Mos #970).
+- **The grant:** TCC keys it to the designated requirement, which pins the Apple Development
+  certificate's name, so updates signed with the same certificate keep it. A renewed
+  certificate (this one expires 2027-10-05) probably keeps it too, but that's unverified.
+- **Settings:** new keys, each validated in `settings.py`:
+  - `display_keys`: false.
+  - `display_boost`: 1.0 to 1.6, default 1.0.
+  - `mouse_reverse_scrolling`, `mouse_smooth_scrolling` and `mouse_back_forward`: all false.
+- **Testing:**
+  - A test copy (with its own bundle identifier) needs its own Accessibility allowance. That's
+    the maintainer's click, so ask first.
+  - Quit LinearMouse and BetterDisplay before any hands-on test. Two apps reversing cancel
+    each other out, and two apps can't both own the keys. The maintainer is deleting both once
+    this is ready to test.
+  - Say so before anything appears on screen, and before the screen's brightness changes.
+  - Each new state goes into `tools/preview/stub.js` and `tools/render_menu.py`.
+  - New log lines go in CLAUDE.md's Debugging section.
+  - Code adapted from LinearMouse, Scroll Reverser or m1ddc gets its notice in
+    `THIRD-PARTY-NOTICES`.
+
 ## Left out on purpose
 
 From ThermalForge's issues, decided against on 2026-11-02: a timer back to macOS default
@@ -401,6 +621,15 @@ From ThermalForge's issues, decided against on 2026-11-02: a timer back to macOS
 Mode when hot (#41, #42), custom or two-sensor curves (#52), Extra Cool (#15), a Smart
 settings file (#64), per-core lists and small trend charts (#25), and hiding profiles or menu
 items (#46). ThermalForge's command-line tool, installers and spike logging don't apply.
+
+For Displays and Mouse, decided against on 2026-11-19:
+- From BetterDisplay: software dimming, sliders that combine hardware and software dimming,
+  linking displays together, controlling an LG TV over the network, resolution and HiDPI, and
+  boosting an external display's HDR.
+- From LinearMouse: per-device settings, tuning for smooth scrolling, button mappings beyond
+  Back and Forward, and pointer acceleration inside the app.
+- A note when another scrolling or display app is running: the maintainer is deleting
+  LinearMouse and BetterDisplay.
 
 ## Rules that carry over
 
