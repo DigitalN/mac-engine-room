@@ -71,11 +71,11 @@
       adapter: { name: '96W USB-C Power Adapter', watts: 96 }, amperage: 2.4,
     }),
     ka1h: () => { state.keepAwake = keepAwake('1h'); },
-    ka2h: () => { state.keepAwake = { choice: '2h', holding: true, line: 'Screen stays on for 1 more hour and 12 minutes.' }; },
+    ka2h: () => { state.keepAwake = { choice: '2h', holding: true, line: 'Keep Awake ends at 3:30 PM' }; },
     kasleep: () => { state.keepAwake = keepAwake('sleep'); },
-    kaschedule: () => { state.keepAwake = { choice: null, holding: true, line: 'Screen stays on until 5:00 PM (work hours).' }; },
-    kaofftoday: () => { state.keepAwake = { choice: 'off', holding: false, line: "Off for the rest of today's work hours." }; },
-    kabattery: () => { state.keepAwake = { choice: '2h', holding: false, line: 'Paused because the battery is below 20%.' }; },
+    kaschedule: () => { state.keepAwake = { choice: null, holding: true, line: 'Keep Awake ends at 5 PM' }; },
+    kaofftoday: () => { state.keepAwake = { choice: 'off', holding: false, line: null }; },
+    kabattery: () => { state.keepAwake = { choice: '2h', holding: false, line: 'Paused because the battery is below 20%' }; },
     kahours: () => { state.settings.keep_awake_hours = { ...state.settings.keep_awake_hours, on: true }; },
     karule: () => { state.settings.keep_awake_battery = { ...state.settings.keep_awake_battery, on: true }; },
     sunday: () => { state.firstWeekday = 6; },
@@ -99,9 +99,9 @@
   function keepAwake(choice) {
     return {
       off: { choice: 'off', holding: false, line: null },
-      '1h': { choice: '1h', holding: true, line: 'Screen stays on for 1 more hour.' },
-      '2h': { choice: '2h', holding: true, line: 'Screen stays on for 2 more hours.' },
-      sleep: { choice: 'sleep', holding: true, line: 'Screen stays on until the Mac sleeps.' },
+      '1h': { choice: '1h', holding: true, line: 'Keep Awake ends at 1:07 PM' },
+      '2h': { choice: '2h', holding: true, line: 'Keep Awake ends at 2:07 PM' },
+      sleep: { choice: 'sleep', holding: true, line: 'Keep Awake ends when the Mac sleeps' },
     }[choice];
   }
 

@@ -635,7 +635,7 @@ class StatusBar:
 
     def _fill_keep_awake(self, status=None):
         """The lit choice and the line (keepawake.sentence, shared with the page). Filled on each
-        sample while the menu is open, so a timer's minutes count down; only changes reach AppKit."""
+        sample while the menu is open; only changes reach AppKit."""
         status = status or self._keep_awake_status() or {}
         lit = status.get("choice", keepawake.OFF)
         for choice, (box, button) in self._keep_awake_tiles.items():

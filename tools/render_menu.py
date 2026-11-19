@@ -29,12 +29,12 @@ STATES = ("off", "holding", "override", "approval", "unavailable", "other", "err
 # Keep Awake's states, as keepawake.KeepAwake.status() gives them; the times as a Mac set to 12-hour shows them.
 KEEP_AWAKE = {
     "off": {"choice": "off", "holding": False, "line": None},
-    "1h": {"choice": "1h", "holding": True, "line": "Screen stays on for 42 more minutes."},
-    "2h": {"choice": "2h", "holding": True, "line": "Screen stays on for 1 more hour and 12 minutes."},
-    "sleep": {"choice": "sleep", "holding": True, "line": "Screen stays on until the Mac sleeps."},
-    "schedule": {"choice": None, "holding": True, "line": "Screen stays on until 5:00 PM (work hours)."},
-    "offtoday": {"choice": "off", "holding": False, "line": "Off for the rest of today's work hours."},
-    "battery": {"choice": "2h", "holding": False, "line": "Paused because the battery is below 20%."},
+    "1h": {"choice": "1h", "holding": True, "line": "Keep Awake ends at 1:07 PM"},
+    "2h": {"choice": "2h", "holding": True, "line": "Keep Awake ends at 3:30 PM"},
+    "sleep": {"choice": "sleep", "holding": True, "line": "Keep Awake ends when the Mac sleeps"},
+    "schedule": {"choice": None, "holding": True, "line": "Keep Awake ends at 5 PM"},
+    "offtoday": {"choice": "off", "holding": False, "line": None},  # no line
+    "battery": {"choice": "2h", "holding": False, "line": "Paused because the battery is below 20%"},
 }
 
 

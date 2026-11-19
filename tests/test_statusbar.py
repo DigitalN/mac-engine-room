@@ -355,7 +355,7 @@ def test_keep_awake_section_lights_the_choice_and_shows_the_line(monkeypatch):
 
     def choose(choice):
         chosen.append(choice)
-        status.update(choice=choice, holding=True, line="Screen stays on until the Mac sleeps.")
+        status.update(choice=choice, holding=True, line="Keep Awake ends when the Mac sleeps")
         return dict(status)
 
     bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None,
@@ -368,10 +368,10 @@ def test_keep_awake_section_lights_the_choice_and_shows_the_line(monkeypatch):
     bar._target.chooseKeepAwake_(button)
     assert chosen == ["sleep"] and lit() == ["sleep"]
     assert not bar._keep_awake_line_item.isHidden()
-    assert bar._keep_awake_line.stringValue() == "Screen stays on until the Mac sleeps."
-    status.update(choice=None, line="Screen stays on until 5:00 PM (work hours).")
+    assert bar._keep_awake_line.stringValue() == "Keep Awake ends when the Mac sleeps"
+    status.update(choice=None, line="Keep Awake ends at 5 PM")
     bar._target.menuNeedsUpdate_(bar._menu)
-    assert lit() == [] and bar._keep_awake_line.stringValue() == "Screen stays on until 5:00 PM (work hours)."
+    assert lit() == [] and bar._keep_awake_line.stringValue() == "Keep Awake ends at 5 PM"
 
 
 def test_cup_follows_the_reading_only_while_keep_awake_holds(monkeypatch):

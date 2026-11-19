@@ -245,8 +245,7 @@ wake the Mac. The name everywhere is **Keep Awake** (never "Caffeine").
   dark wake (Power Nap). **A pick made inside the block, Off, 1 Hour, 2 Hours or Until Sleep,
   leaves the rest of that day's block off**, across sleeps, back by itself the next workday: the
   pick holds on its own terms (1 Hour at 10:00 ends at 11:00, 2 Hours at 16:30 runs to 18:30,
-  Until Sleep ends at the next sleep), and then the line says "Off for the rest of today's work
-  hours." (Settled in the maintainer's hands-on check on 2026-11-19, replacing "whichever ends
+  Until Sleep ends at the next sleep), and then there's no line, Off lit. (Settled in the maintainer's hands-on check on 2026-11-19, replacing "whichever ends
   later" for picks made during work hours: a 1 Hour pick that changed nothing looked like the
   click did nothing.) **A pick made before the block** keeps the agreed rule: a timer still
   running when the block starts holds until whichever ends later, the timer or the block, with
@@ -256,7 +255,7 @@ wake the Mac. The name everywhere is **Keep Awake** (never "Caffeine").
   block.
 - **Battery rule:** a switch, "Stop when the battery is below [20%]" (10, 20, 30, 40 or 50%),
   off by default. Only on battery: below the level, Keep Awake lets go (a pick or work hours
-  alike) and says "Paused because the battery is below 20%." Plugging in brings it back if its
+  alike) and says "Paused because the battery is below 20%". Plugging in brings it back if its
   time hasn't run out (timers keep counting); on the adapter it holds even below the level.
   Hidden on Macs with no battery. It uses the battery reading the sampler already takes.
 - **Pauses and endings:** locking the screen, or switching to another user's session, pauses
@@ -279,15 +278,17 @@ wake the Mac. The name everywhere is **Keep Awake** (never "Caffeine").
   once). A quit by the user, a restart or a logout brings back nothing but work hours.
 - **Menu:** a section header, then the choices as tiles drawn like the fan profile buttons, in
   two rows (**1 Hour · 2 Hours**, then **Off · Until Sleep**), the active one in the accent
-  colour, and one line under them: "Screen stays on for 42 more minutes." (a whole sentence,
-  hours and minutes past an hour, counting down while the menu is open), "Screen stays on until
-  the Mac sleeps.", "Screen stays on until 5:00 PM (work hours)." (no tile lit), "Off for the
-  rest of today's work hours.", "Paused because the battery is below 20%.", or no line, with
-  Off lit. Times follow the Mac's 12/24-hour setting, except that a 12-hour Mac never says
-  12 AM or 12 PM: every 12 o'clock is **Noon** or **Midnight** ("Screen stays on until Noon
-  (work hours)."), and on a 24-hour Mac a block ending at midnight ends at 24:00. The sentence
-  is built in one place (`keepawake.sentence`, with `keepawake.clock_label` for the times) for
-  the menu and the page.
+  colour, and one line under them, with no full stop (the maintainer's wording, 2026-11-19):
+  "Keep Awake ends at 1:07 PM" (a timer), "Keep Awake ends at 5 PM" (work hours, no tile lit),
+  "Keep Awake ends when the Mac sleeps", "Paused because the battery is below 20%", or no line
+  while nothing holds the screen on, Off for the rest of today's work hours included (Off lit).
+  Times follow the Mac's 12/24-hour setting, except that on a 12-hour Mac whole hours drop
+  ":00" ("1 PM", "5 PM"), as the bar's labels do, and 12 o'clock is always **Noon** or
+  **Midnight**, never 12 AM or 12 PM; other times keep their minutes ("1:07 PM"). On a 24-hour
+  Mac it's the Mac's own format, and a block ending at midnight ends at 24:00. The line is
+  built in one place (`keepawake.sentence`, with `keepawake.short_clock` and `clock_label` for
+  the times) for the menu and the page. It replaced a minutes countdown ("Screen stays on for
+  42 more minutes.") after the hands-on check.
 - **Changed on 2026-11-19 after the maintainer tried it:** the steaming cup and the work-hours
   bar below, in place of From/To time fields.
 - **Menu bar:** while Keep Awake holds the screen on (work hours included), a steaming cup

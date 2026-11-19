@@ -232,36 +232,34 @@ def half_hour_labels(format_time, h24):
             for i in range(49)]
 
 
+def short_clock(t, format_time, h24, end=False):
+    """A time in Keep Awake's line and the bar's hour labels: clock_label, and on a 12-hour Mac a
+    whole hour without its ':00' ("1 PM", "5 PM"; Noon and Midnight stay as they are). Other times
+    keep their minutes ("1:07 PM"), and a 24-hour Mac keeps its own format ("17:00", "24:00")."""
+    label = clock_label(t, format_time, h24, end)
+    if h24 or label in ("Noon", "Midnight") or datetime.fromtimestamp(t).minute:
+        return label
+    return label.replace(":00", "", 1)
+
+
 def bar_labels(format_time, h24):
     """The bar's labels, every 3 hours from 0:00 to 24:00: Midnight · 3 AM · … · Noon · … ·
-    Midnight on a 12-hour Mac (whole hours without ':00'), the times themselves on a 24-hour one."""
-    labels = half_hour_labels(format_time, h24)[::6]
-    return labels if h24 else [label.replace(":00", "", 1) for label in labels]
+    Midnight on a 12-hour Mac, the times themselves on a 24-hour one."""
+    day = datetime(2001, 1, 1)  # a day with no daylight saving change, anywhere
+    return [short_clock((day + timedelta(hours=3 * i)).timestamp(), format_time, h24, end=i == 8) for i in range(9)]
 
 
-def duration_words(seconds):
-    """'42 more minutes', '1 more hour', '1 more hour and 12 minutes': rounded up to the minute,
-    so it never says 0."""
-    total = max(1, math.ceil(seconds / 60 - 1e-9))
-    hours, mins = divmod(total, 60)
-    if not hours:
-        return f"{mins} more minute{'s' if mins != 1 else ''}"
-    text = f"{hours} more hour{'s' if hours != 1 else ''}"
-    return text + (f" and {mins} minute{'s' if mins != 1 else ''}" if mins else "")
-
-
-def sentence(status, now, format_time=clock_24):
-    """The line under the choices, in the menu and on the page, or None. `format_time` follows
-    the Mac's 12/24-hour setting (KeepAwake gives it NSDateFormatter's short time style)."""
+def sentence(status, format_time=clock_24):
+    """The line under the choices, in the menu and on the page, or None when nothing holds the
+    screen on (Off for the rest of today's work hours included). No full stop: the maintainer's
+    wording. `format_time` gives the time as `short_clock` does (KeepAwake passes the Mac's)."""
     if status.kind is None:
-        return "Off for the rest of today's work hours." if status.off_today else None
+        return None
     if status.battery_low:
-        return f"Paused because the battery is below {status.level}%."
+        return f"Paused because the battery is below {status.level}%"
     if status.kind == SLEEP:
-        return "Screen stays on until the Mac sleeps."
-    if status.kind == TIMER:
-        return f"Screen stays on for {duration_words(status.until - now)}."
-    return f"Screen stays on until {format_time(status.until)} (work hours)."
+        return "Keep Awake ends when the Mac sleeps"
+    return f"Keep Awake ends at {format_time(status.until)}"
 
 
 def fresh(data, now):
@@ -673,10 +671,10 @@ class KeepAwake:
     def status(self):
         """For the menu and the page: what's lit, the line, and whether it holds the screen on."""
         with self._lock:
-            s, now = self._status, self._clock()
+            s = self._status
             fmt, h24 = self._format_time or clock_24, self._h24
             return {"choice": s.lit, "holding": s.holding,
-                    "line": sentence(s, now, lambda t: clock_label(t, fmt, h24, end=True))}
+                    "line": sentence(s, lambda t: short_clock(t, fmt, h24, end=True))}
 
     def hand_over(self):
         """The updater is relaunching into a new version: the pick and today's Off go to the new
