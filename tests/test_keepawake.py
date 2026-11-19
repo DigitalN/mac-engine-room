@@ -763,3 +763,37 @@ def test_a_day_long_block_on_a_daylight_saving_day():
     assert at("2026-11-02 00:00") - at("2026-11-01 00:00") == 25 * 3600  # clocks went back that night
     assert block_end(sunday, at("2026-03-08 12:00")) == at("2026-03-09 00:00")
     assert at("2026-03-09 00:00") - at("2026-03-08 00:00") == 23 * 3600
+
+
+def test_a_timer_inside_longer_work_hours_says_both_and_goes_back_when_it_ends():
+    m = Model()
+    run(m, "2026-11-19 09:30")
+    m.choose(HOUR, at("2026-11-19 10:00"), HOURS)
+    s = status(m, "2026-11-19 10:02")
+    twelve = lambda t: keepawake.clock_label(t, TWELVE, False, end=True)
+    assert (s.kind, s.lit) == (SCHEDULE, HOUR)
+    assert sentence(s, at("2026-11-19 10:02"), twelve) == (
+        "Screen stays on for 58 more minutes. Work hours keep it on until 5:00 PM.")
+    s = status(m, "2026-11-19 11:00")  # the hour's up
+    assert s.lit is None and sentence(s, at("2026-11-19 11:00"), twelve) == "Screen stays on until 5:00 PM (work hours)."
+    m.choose(TWO_HOURS, at("2026-11-19 10:00"), {**HOURS, "end": "12:00"})
+    s = status(m, "2026-11-19 10:00", hours={**HOURS, "end": "12:00"})
+    assert sentence(s, at("2026-11-19 10:00"), twelve) == (  # two hours, and work hours until Noon
+        "Screen stays on for 2 more hours. Work hours keep it on until Noon.")
+
+
+def test_the_two_sentence_line_leaves_the_other_lines_alone():
+    now = at("2026-11-19 16:00")
+    m = Model()
+    m.choose(TWO_HOURS, now, HOURS)  # ends after work hours
+    assert sentence(status(m, now), now) == "Screen stays on for 2 more hours."
+    m = Model()
+    m.choose(HOUR, now - 3600 * 6, HOURS)
+    low = Env(has_battery=True, on_adapter=False, level=5)
+    m.choose(HOUR, now, {**HOURS, "end": "18:00"})
+    s = status(m, now, hours={**HOURS, "end": "18:00"}, env=low, rule=RULE)
+    assert sentence(s, now) == "Paused because the battery is below 20%."
+    m = Model()
+    m.choose(OFF, now, HOURS)
+    m.choose(HOUR, now + 60, HOURS)
+    assert sentence(status(m, now + 60), now + 60) == "Screen stays on for 1 more hour."

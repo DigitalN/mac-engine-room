@@ -251,6 +251,11 @@ def sentence(status, now, format_time=clock_24):
         return "Screen stays on until the Mac sleeps."
     if status.kind == TIMER:
         return f"Screen stays on for {duration_words(status.until - now)}."
+    if status.pick in TIMERS and status.pick_until is not None and status.pick_until > now:
+        # A timer picked inside work hours that end later: the click shows, counting down, and so
+        # does what holds the screen on after it.
+        return (f"Screen stays on for {duration_words(status.pick_until - now)}. "
+                f"Work hours keep it on until {format_time(status.until)}.")
     return f"Screen stays on until {format_time(status.until)} (work hours)."
 
 

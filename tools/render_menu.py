@@ -33,6 +33,8 @@ KEEP_AWAKE = {
     "2h": {"choice": "2h", "holding": True, "line": "Screen stays on for 1 more hour and 12 minutes."},
     "sleep": {"choice": "sleep", "holding": True, "line": "Screen stays on until the Mac sleeps."},
     "schedule": {"choice": None, "holding": True, "line": "Screen stays on until 5:00 PM (work hours)."},
+    "timerhours": {"choice": "1h", "holding": True,
+                   "line": "Screen stays on for 58 more minutes. Work hours keep it on until 5:00 PM."},
     "offtoday": {"choice": "off", "holding": False, "line": "Off for the rest of today's work hours."},
     "battery": {"choice": "2h", "holding": False, "line": "Paused because the battery is below 20%."},
 }

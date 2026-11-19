@@ -5,7 +5,7 @@
 //   fan control: off (default) holding max override approval unavailable other error
 //   this Mac:    fanless onefan noscreen nochip ioreport hot charging desktop gpuheld (GPU parked 3 min) hint
 //                (noscreen,fanless,ioreport is the 13" M4 Air)
-//   keep awake:  ka1h ka2h kasleep kaschedule kaofftoday kabattery (paused by the battery rule)
+//   keep awake:  ka1h ka2h kasleep kaschedule katimerhours (1 Hour inside longer work hours) kaofftoday kabattery (paused by the battery rule)
 //                kahours (work hours on) karule (battery rule on) sunday (the week starts on Sunday)
 //                h24 (a Mac set to 24-hour time) kaday (work hours 0:00–24:00) kanoon (8:00–Noon)
 //   settings:    fahrenheit dark light
@@ -74,6 +74,7 @@
     ka2h: () => { state.keepAwake = { choice: '2h', holding: true, line: 'Screen stays on for 1 more hour and 12 minutes.' }; },
     kasleep: () => { state.keepAwake = keepAwake('sleep'); },
     kaschedule: () => { state.keepAwake = { choice: null, holding: true, line: 'Screen stays on until 5:00 PM (work hours).' }; },
+    katimerhours: () => { state.keepAwake = { choice: '1h', holding: true, line: 'Screen stays on for 58 more minutes. Work hours keep it on until 5:00 PM.' }; },
     kaofftoday: () => { state.keepAwake = { choice: 'off', holding: false, line: "Off for the rest of today's work hours." }; },
     kabattery: () => { state.keepAwake = { choice: '2h', holding: false, line: 'Paused because the battery is below 20%.' }; },
     kahours: () => { state.settings.keep_awake_hours = { ...state.settings.keep_awake_hours, on: true }; },
