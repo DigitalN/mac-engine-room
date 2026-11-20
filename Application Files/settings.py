@@ -36,6 +36,10 @@ DEFAULTS = {
     # event tap while it's off), and the built-in XDR display's boost past 100%, 1.0 (none) to 1.6.
     "display_keys": False,
     "display_boost": 1.0,
+    # The Mouse tab's switches (mouse.py), all off until turned on: no event tap while they're off.
+    "mouse_reverse_scrolling": False,
+    "mouse_smooth_scrolling": False,
+    "mouse_back_forward": False,
 }
 
 BOOST_RANGE = (1.0, 1.6)  # display_boost: 100% to 160%
@@ -52,7 +56,8 @@ def validate(raw):
         s["theme"] = raw["theme"]
     if raw.get("temperature_unit") in TEMPERATURE_UNITS:
         s["temperature_unit"] = raw["temperature_unit"]
-    for key in ("menu_bar_show_charging", "record_history", "update_automatically", "display_keys"):
+    for key in ("menu_bar_show_charging", "record_history", "update_automatically", "display_keys",
+                "mouse_reverse_scrolling", "mouse_smooth_scrolling", "mouse_back_forward"):
         if isinstance(raw.get(key), bool):
             s[key] = raw[key]
     if raw.get("fan_profile") in fans.PROFILE_IDS:  # Smart and Manual, gone in 1.2.11, become macOS default

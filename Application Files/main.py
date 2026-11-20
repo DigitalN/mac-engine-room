@@ -280,6 +280,8 @@ class Api:
         live["keep_awake"] = self._app._keep_awake.status()
         if page == "displays":  # it reads the Accessibility grant, so only while the Displays tab shows
             live["displays"] = self._app._displays.status()
+        if page == "mouse":  # it reads the Accessibility grant, so only while the Mouse tab shows
+            live["mouse"] = self._app._mouse.status()
         return live
 
     def keep_awake(self, choice):
@@ -310,11 +312,20 @@ class Api:
 
     def open_accessibility_settings(self):
         """Privacy & Security › Accessibility (Device Control and Data Access on macOS 27), where the user
-        allows the keys switch."""
+        allows the Mouse tab's switches and the Displays tab's keys switch."""
         import accessibility
         from PyObjCTools import AppHelper
 
         AppHelper.callAfter(accessibility.open_settings)
+
+    def open_pointer_settings(self):
+        """System Settings › Mouse: pointer acceleration is macOS's own setting."""
+        from AppKit import NSURL, NSWorkspace
+        from PyObjCTools import AppHelper
+
+        import mouse
+
+        AppHelper.callAfter(NSWorkspace.sharedWorkspace().openURL_, NSURL.URLWithString_(mouse.POINTER_SETTINGS_URL))
 
     def open_fan_approval(self):
         """Login Items & Extensions, where the user allows the fan helper."""
@@ -458,6 +469,7 @@ class EngineRoomApp:
         from fans import FanControl, Helper
         from history import ChargingRecorder, HistoryStore
         from keepawake import KeepAwake
+        from mouse import Mouse
         from power import PowerReader
         from priority import Priority
         from settings import Settings
@@ -479,6 +491,7 @@ class EngineRoomApp:
                                 fans_running=lambda: self._fans.running, priority=self._priority)
         self._keep_awake = KeepAwake(self._settings, DATA_DIR, on_change=self._on_keep_awake_change)
         self._displays = Displays(self._settings)
+        self._mouse = Mouse(self._settings)
         self._login_item = launch.LoginItem(self._app_path, DATA_DIR)
         self._updater = Updater(
             self._app_path, VERSION, settings=self._settings, data_dir=DATA_DIR,
@@ -542,6 +555,7 @@ class EngineRoomApp:
         self._fans.nudge()  # a profile chosen or tuned: act on it now
         self._keep_awake.settings_changed(values)  # work hours or the battery rule changed
         self._displays.settings_changed(values)  # the keys switch: the tap starts or stops
+        self._mouse.settings_changed(values)  # a Mouse switch: the tap starts or stops
         AppHelper.callAfter(self._apply_theme, values["theme"])
 
     # ── window lifecycle (main thread) ──
@@ -946,6 +960,7 @@ class EngineRoomApp:
         self._keep_awake.start()  # before the first sample, which feeds it
         self._displays.on_change(self._on_displays_change)
         self._displays.start()  # the boost if it was on, and the key tap if its switch is on and it's allowed
+        self._mouse.start()  # its tap, if a switch is on and Accessibility is allowed
         self._sampler.start()
         self._fans.start()
         self._wake_observer = AppKit.NSWorkspace.sharedWorkspace().notificationCenter().addObserverForName_object_queue_usingBlock_(

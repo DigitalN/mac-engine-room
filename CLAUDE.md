@@ -109,6 +109,19 @@ keys`, `Display keys off`, `Display keys tap stopped for the update` and `Displa
 couldn't be made: macOS refused it`. A build without the dylib logs `Displays isn't available:
 this build has no libdisplays.dylib` (`running from source` from source).
 
+Mouse logs `Mouse tap on (reverse scrolling, back and forward buttons)` each time the tap starts or
+what it does changes, `Mouse tap off (every switch is off)`, `Mouse is waiting for Accessibility to
+be allowed (…)` (a switch is on but Accessibility isn't allowed, or was taken away), `Asked macOS
+to allow Accessibility for the mouse switches` (once per launch, the first time a switch is turned
+on while it isn't allowed), `Mouse tap stopped for the update` (just before the updater swaps the
+bundle), `Mouse tap couldn't be made: macOS refused it`, and at launch `Mouse isn't available: this
+build has no libmouse.dylib` (built without `swiftc`) or `…: running from source`. The tap itself is
+Swift and logs to the unified log, not app.log: `/usr/bin/log show --last 1h --predicate 'subsystem
+== "com.pythonflow.monitor" AND category == "mouse"'` shows `macOS disabled the mouse tap (too slow
+| user input); enabled it again` and `macOS refused the mouse tap`. Reverse scrolling that seems to do
+nothing while `Mouse tap on` is logged probably means another app is reversing too (LinearMouse,
+Scroll Reverser): two reversals cancel out.
+
 `Menu took 1.8 s to open` is timed from the click to the open, filled menu (only logged above
 0.3 s). `Mac busy: running at full priority` and `Mac quiet again` are each switch of the app's
 threads between user-interactive and background, with what the app saw in brackets: `(a wait
@@ -226,6 +239,23 @@ To reproduce without touching the user's data, run with
   the app disconnects, after 10 s without a word, and before sleep. `main.swift` is the
   server; `Fans.swift` holds and hands back the fans, and `tests/test_fan_helper.py` runs it
   against a simulated SMC (`tests/fan_helper/FakeSMC.swift`) behaving like an M4 or the M1 Pro.
+- **Mouse**: `Application Files/mouse.py` and `Native/Mouse/`. Reverse scrolling (vertical, wheel mice
+  only), smooth scrolling (one fixed feel) and the side buttons as Back and Forward, done by an active
+  event tap in Swift (`Contents/Frameworks/libmouse.dylib`, loaded with ctypes): `Mouse.swift` is the
+  tap and its three C functions (`mouse_configure`, `mouse_stop`, `mouse_running`), `Devices.swift`
+  tells a wheel mouse from the trackpad or a Magic Mouse by the event's HID sender ID looked up in
+  the IORegistry (Apple's multitouch driver or `HIDTrackpadScrollAcceleration` is a trackpad; cached
+  per sender), `Glide.swift` is smooth scrolling (each notch's line delta × 36 points, eased out on
+  a 120 Hz timer that runs only while a glide does), and `BackForward.swift` turns a side button into
+  a navigation swipe for apps that ignore the buttons (Apple's, Firefox, Opera, ForkLift) and passes
+  it on unchanged to the rest. The tap runs on a thread of its own with its own run loop at
+  user-interactive QoS, listens only for scroll events and the other buttons' presses and releases,
+  leaves alone events other apps post (no HID event, or sender 0), re-enables itself when macOS
+  disables it, and is always invalidated when dropped. No Python runs on it, and there's no tap while
+  every switch is off. `mouse.py` applies the settings and runs the Accessibility flow:
+  `should_ask`, `switches` and `describe` are pure and unit-tested, and `Mouse` is tested with a
+  stand-in dylib (`tests/test_mouse.py`); `tests/test_mouse_native.py` compiles the Swift and runs
+  `tests/mouse/main.swift` against its pure parts, and loads the dylib with every switch off.
 - **Keep Awake**: `Application Files/keepawake.py`. Holds the screen on with IOKit's
   `PreventUserIdleDisplaySleep` assertion (ctypes): Off, 1 Hour, 2 Hours, Until Sleep, work hours
   (`keep_awake_hours`) and the battery rule (`keep_awake_battery`), validated there for
@@ -243,8 +273,8 @@ To reproduce without touching the user's data, run with
   again at each wake. Only the updater's relaunch (`EngineRoomApp._quit_for_update`) writes
   `keep-awake-handover.json` (a pick, today's Off, and the pid of the `caffeinate` it leaves holding
   the screen on over the gap), which the new copy reads once and deletes, ending that caffeinate.
-- **Accessibility**: `Application Files/accessibility.py`, shared with Mouse (the same file in both
-  pull requests). `allowed()`, `ask()` (macOS's prompt, the first time a switch that needs a tap is
+- **Accessibility**: `Application Files/accessibility.py`, shared by every tool with an event tap
+  (Mouse, and Displays' keys). `allowed()`, `ask()` (macOS's prompt, the first time a switch that needs a tap is
   turned on), `open_settings()`, `watch(callback)` (the `com.apple.accessibility.api` distributed
   notification, read again after 0.5 and 3 s since the value lags), and `register(stop, start)` /
   `stop_taps()` / `start_taps()`: `Updater._install` stops every tap just before it swaps the
@@ -325,9 +355,11 @@ To reproduce without touching the user's data, run with
   in for the page.
 - **Frontend**: `Application Files/index.html`. A single page in vanilla JS with a
   hand-rolled canvas chart and no external resources. A **Dashboard | Thermals | Keep Awake | Power |
-  Displays** switcher (Keep Awake between Thermals and Power) and a shared Settings page. Displays
-  has a card for each display (sliders sent at most every 60 ms and left alone by polls while held)
-  and the keys switch with Accessibility's status. Keep Awake's work
+  Displays | Mouse** switcher (Keep Awake between Thermals and Power) and a shared Settings page.
+  Displays has a card for each display (sliders sent at most every 60 ms and left alone by polls
+  while held) and the keys switch with Accessibility's status. The Mouse tab's switches are
+  settings; whether this copy has the tap and whether Accessibility is allowed come with
+  `get_live` only while it's the page showing. Keep Awake's work
   hours are a 24-hour bar (pointer events with `setPointerCapture`, mouse only), saved once on
   release after a 120 ms snap to the half hour; its labels come from `Api.app_info`'s `clock`. The window opens on the Dashboard, and **Open
   Dashboard** in the menu switches to it (`EngineRoomApp._show_tab`); Power always opens on
@@ -655,6 +687,14 @@ Don't undo these without asking:
   app's own (BetterDisplay's look: 16 segments to 160% with 100% at the 10th, a bubble like
   "130% · 960 nits", 10 segments and no nits on a TV). No volume in the menu, nothing in Settings,
   no Dashboard row, no LG TV control over the network.
+- **Mouse** (1.5.0), designed with the maintainer on 2026-11-19; the whole design is in
+  `docs/PLAN.md`. It replaces LinearMouse. Three switches, all off until turned on: reverse
+  scrolling (vertical only, every wheel mouse, no list of devices; the trackpad and a Magic Mouse are
+  left alone), smooth scrolling (one fixed feel, no tuning), and the side buttons as Back and Forward
+  everywhere. Going by the sending device, never by scroll phases. Pointer acceleration is macOS's
+  own setting (System Settings › Mouse › Advanced), so the tab links to it. Its own tab, nothing in
+  the menu or Settings, no Dashboard row. No per-device settings, no button mappings beyond Back and
+  Forward. Never use Mos's code (CC BY-NC).
 - Apple silicon only (the build is arm64, so Intel Macs can't open it). Desktops get the same
   sensor work as laptops: on a Mac with no battery, Power says "Desktop Mac" and shows System and
   Chip power, with no Battery or Adapter card, row, tile or chart line; fan control is offered
@@ -705,4 +745,5 @@ Don't undo these without asking:
 `python3 -m pytest`. `tests/test_power.py::test_reads_this_mac` does a live
 hardware read, and is skipped where there's no battery or SMC; `tests/test_ioreport.py::test_reads_this_mac`
 reads this Mac's IOReport for 0.3 s, and is skipped where it can't be used. `tests/test_fan_helper.py`
-compiles the fan helper with `swiftc` (about 3 s), and is skipped without it.
+compiles the fan helper with `swiftc` (about 3 s), and `tests/test_mouse_native.py` Mouse's tap (about
+4 s); both are skipped without it.

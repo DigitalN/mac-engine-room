@@ -82,3 +82,10 @@ def test_display_boost_runs_from_100_to_160_percent():
     assert validate({"display_boost": 1})["display_boost"] == 1.0
     for junk in (1.7, 0.9, True, "1.3", None):
         assert validate({"display_boost": junk})["display_boost"] == 1.0
+
+
+def test_mouse_switches_start_off_and_only_take_true_or_false():
+    for key in ("mouse_reverse_scrolling", "mouse_smooth_scrolling", "mouse_back_forward"):
+        assert DEFAULTS[key] is False
+        assert validate({key: True})[key] is True
+        assert validate({key: 1})[key] is False

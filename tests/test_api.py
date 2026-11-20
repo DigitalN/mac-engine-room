@@ -181,3 +181,27 @@ def test_the_displays_tabs_sliders_go_to_the_main_thread(monkeypatch):
     api.open_accessibility_settings()
     assert calls == [(tool.set_brightness, (1, 130.0)), (displays.haptic, ()), (tool.set_brightness, (1, 100.0)),
                      (tool.set_volume, (5, 40.0)), (tool.refresh, ()), (accessibility.open_settings, ())]
+
+
+def test_the_mouse_tab_gets_its_status_only_while_it_shows():
+    app = SimpleNamespace(_updater=SimpleNamespace(status="idle", version=None),
+                          _sampler=SimpleNamespace(dashboard_polled=lambda fans: None), _live=LiveState(),
+                          _fans=SimpleNamespace(status={}), _keep_awake=_KEEP_AWAKE,
+                          _mouse=SimpleNamespace(status=lambda: {"available": True, "allowed": False, "running": False}))
+    assert Api(app=app).get_live(0, "mouse")["mouse"] == {"available": True, "allowed": False, "running": False}
+    assert "mouse" not in Api(app=app).get_live(0, "dashboard")
+
+
+def test_mouse_tab_links_open_system_settings(monkeypatch):
+    import accessibility
+    import mouse
+
+    calls = []
+    monkeypatch.setattr(AppHelper, "callAfter", lambda func, *args: calls.append((func, args)))
+    Api(app=None).open_pointer_settings()
+    Api(app=None).open_accessibility_settings()
+    [(open_url, (url,)), (open_pane, ())] = calls
+    assert open_url.__name__ == "openURL_" and url.absoluteString() == mouse.POINTER_SETTINGS_URL
+    assert url.absoluteString() == "x-apple.systempreferences:com.apple.Mouse-Settings.extension"
+    assert open_pane is accessibility.open_settings
+    assert accessibility.SETTINGS_URL == "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"

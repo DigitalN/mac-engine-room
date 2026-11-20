@@ -369,6 +369,7 @@ dialog .actions { justify-content: flex-end; }
     <button role="tab" data-tab="keepawake" aria-selected="false">Keep Awake</button>
     <button role="tab" data-tab="power" aria-selected="false">Power</button>
     <button role="tab" data-tab="displays" aria-selected="false">Displays</button>
+    <button role="tab" data-tab="mouse" aria-selected="false">Mouse</button>
   </div>
   <div class="nav">
     <div class="seg small" role="tablist" id="power-tabs" hidden>
@@ -501,6 +502,55 @@ dialog .actions { justify-content: flex-end; }
           <div class="srow">
             <div class="lbl"><span id="d-access"></span><div class="hint" id="d-access-hint"></div></div>
             <button class="btn" id="d-access-open">Open Privacy &amp; Security</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Mouse: the three switches, pointer acceleration's link, and Accessibility ── -->
+  <section class="page" id="page-mouse">
+    <div class="settings">
+      <div class="group" id="m-unavailable" style="display: none">
+        <div class="card"><div class="srow"><div class="lbl">Not available in this copy of Mac Engine Room<div class="hint">It was built without a Swift compiler, which the Mouse switches need.</div></div></div></div>
+      </div>
+      <div class="group m-needs-tap">
+        <h3>Scrolling</h3>
+        <div class="card">
+          <div class="srow">
+            <div class="lbl">Reverse scrolling<div class="hint">Wheel mice scroll the other way. The trackpad and a Magic Mouse keep their own direction.</div></div>
+            <label class="switch"><input type="checkbox" id="m-reverse"><span></span></label>
+          </div>
+          <div class="srow">
+            <div class="lbl">Smooth scrolling<div class="hint">Each notch of a wheel glides instead of jumping.</div></div>
+            <label class="switch"><input type="checkbox" id="m-smooth"><span></span></label>
+          </div>
+        </div>
+      </div>
+      <div class="group m-needs-tap">
+        <h3>Buttons</h3>
+        <div class="card">
+          <div class="srow">
+            <div class="lbl">Back and forward buttons<div class="hint">A mouse's side buttons go back and forward everywhere, Safari and Finder included.</div></div>
+            <label class="switch"><input type="checkbox" id="m-back-forward"><span></span></label>
+          </div>
+        </div>
+      </div>
+      <div class="group">
+        <h3>Pointer</h3>
+        <div class="card">
+          <div class="srow">
+            <div class="lbl">Pointer acceleration<div class="hint">macOS's own setting for mice, in System Settings › Mouse › Advanced.</div></div>
+            <button class="btn" id="m-pointer">Open in System Settings</button>
+          </div>
+        </div>
+      </div>
+      <div class="group m-needs-tap">
+        <h3 id="m-access-title">Accessibility</h3>
+        <div class="card">
+          <div class="srow">
+            <div class="lbl"><span id="m-access"></span><div class="hint" id="m-access-hint"></div></div>
+            <button class="btn" id="m-access-open">Open Privacy &amp; Security</button>
           </div>
         </div>
       </div>
@@ -1558,6 +1608,34 @@ function renderDisplays() {
 $('d-keys').onchange = e => save({ display_keys: e.target.checked });
 $('d-access-open').onclick = () => call('open_accessibility_settings');
 
+// ── Mouse ───────────────────────────────────────────────
+// The switches are settings (mouse.py runs the tap); whether this copy has the tap and whether
+// Accessibility is allowed come with each poll while this tab shows. Renders only while it's showing.
+let mouseState = null;  // mouse.Mouse.status(): { available, allowed, running, setting }
+function renderMouse() {
+  if (activeTab !== 'mouse' || !settings) return;
+  const m = mouseState || { available: true, allowed: true, running: false };
+  put('m-unavailable', 'display', m.available ? 'none' : '');
+  for (const g of document.querySelectorAll('#page-mouse .m-needs-tap')) put(g, 'display', m.available ? '' : 'none');
+  setChecked($('m-reverse'), settings.mouse_reverse_scrolling);
+  setChecked($('m-smooth'), settings.mouse_smooth_scrolling);
+  setChecked($('m-back-forward'), settings.mouse_back_forward);
+  const on = settings.mouse_reverse_scrolling || settings.mouse_smooth_scrolling || settings.mouse_back_forward;
+  const setting = m.setting || 'Accessibility';  // Device Control and Data Access on macOS 27
+  put('m-access-title', 'text', setting);
+  put('m-access', 'text', m.allowed ? 'Allowed' : 'Not allowed');
+  put('m-access-hint', 'text', m.allowed
+    ? 'Mac Engine Room can change how mice scroll and what their side buttons do.'
+    : on ? `The switches take effect once Mac Engine Room is allowed in Privacy & Security › ${setting}.`
+      : 'Turning on a switch asks for it. Mac Engine Room needs it to change how mice scroll and what their side buttons do.');
+  put('m-access-open', 'display', m.allowed ? 'none' : '');
+}
+$('m-reverse').onchange = e => save({ mouse_reverse_scrolling: e.target.checked });
+$('m-smooth').onchange = e => save({ mouse_smooth_scrolling: e.target.checked });
+$('m-back-forward').onchange = e => save({ mouse_back_forward: e.target.checked });
+$('m-pointer').onclick = () => call('open_pointer_settings');
+$('m-access-open').onclick = () => call('open_accessibility_settings');
+
 // ── polling ─────────────────────────────────────────────
 const POLL_MS = 1000;  // main.py samples at this rate while the page is polling
 let polling = false;
@@ -1588,6 +1666,7 @@ async function poll() {
       if (r.fan_control) fanControl = r.fan_control;
       if (r.keep_awake) { keepAwake = r.keep_awake; renderKeepAwake(); }
       if (r.displays) { displaysState = r.displays; renderDisplays(); }
+      if (r.mouse) { mouseState = r.mouse; renderMouse(); }
       if (r.thermals) {
         const changed = !thermals || thermals.available.join() !== r.thermals.available.join();
         thermals = r.thermals;
@@ -1607,7 +1686,7 @@ async function poll() {
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') poll(); });
 window.addEventListener('resize', () => { renderLiveChart(); renderThermalChart(); if (activeTab === 'history') renderDetailCharts(); });
 
-// ── tabs: Dashboard | Thermals | Keep Awake | Power (Now, History) | Displays, and the shared Settings ──
+// ── tabs: Dashboard | Thermals | Keep Awake | Power (Now, History) | Displays | Mouse, and the shared Settings ──
 function showTab(tab) {
   if (tab === 'power') tab = 'now';  // Power always opens on Now
   const isPower = tab === 'now' || tab === 'history';
@@ -1623,6 +1702,7 @@ function showTab(tab) {
   if (tab === 'thermals') { renderThermals(); renderThermalChart(); poll(); }
   if (tab === 'keepawake') renderKeepAwake();
   if (tab === 'displays') { renderDisplays(); call('refresh_displays').catch(() => {}); poll(); }  // DDC only now, or on a change
+  if (tab === 'mouse') { renderMouse(); poll(); }  // poll now: the grant comes with it
   if (tab === 'now') { renderNow(); renderLiveChart(); }
   if (tab === 'history') loadSessions();
   if (tab === 'settings') renderSettings();
@@ -1737,7 +1817,7 @@ function applySettings() {
   else document.documentElement.setAttribute('data-theme', t);
   unitF = settings?.temperature_unit === 'fahrenheit';
   renderDashboard(); renderThermals(); renderLiveChart(); renderThermalChart(); renderDetailCharts(); renderFanTuning();
-  renderKeepAwake(); renderDisplays();
+  renderKeepAwake(); renderDisplays(); renderMouse();
 }
 
 async function renderSettings() {

@@ -3,7 +3,8 @@ option) any later version: see LICENSE. It includes work from the projects below
 its own license, whose notices follow.
 
 Code and other material adapted from:
-  Powerflow, ThermalForge, macos-smc-fan, macmon, Stats, m1ddc, MonitorControl
+  Powerflow, ThermalForge, macos-smc-fan, macmon, Stats, m1ddc, MonitorControl, LinearMouse,
+  Scroll Reverser
 
 Libraries bundled in Mac Engine Room.app:
   pywebview, bottle, proxy_tools, typing_extensions, PyObjC, PyInstaller, Python (with
@@ -202,6 +203,55 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+--------------------------------------------------------------------------------
+LinearMouse
+https://github.com/linearmouse/linearmouse
+
+Used by Mouse's event tap ("Native/Mouse"): finding the device that sent an event from its HID
+sender ID (CGEventCopyIOHIDEvent, IOHIDEventGetSenderID), the navigation swipe that Back and
+Forward become in apps that ignore the side buttons and the list of those apps
+(UniversalBackForwardTransformer, GestureKit), and the 36-point line step of smooth scrolling.
+
+MIT License
+
+Copyright (c) 2021-2024 LinearMouse
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--------------------------------------------------------------------------------
+Scroll Reverser
+https://github.com/pilotmoon/Scroll-Reverser
+
+Used by Mouse's event tap ("Native/Mouse"): telling a trackpad from a wheel mouse in the
+IORegistry, and the order a scroll event's deltas are reversed in (DeltaAxis first, then the
+fixed-point and point deltas). Licensed under the Apache License, Version 2.0, whose text is in
+the Python section below (under OpenSSL). Its NOTICE file:
+
+Scroll Reverser
+Copyright 2011 Nicholas Moore
+
+This software is released under the the Apache 2.0 License (see LICENSE).
+
+The name "Scroll Reverser" and the application icon are
+trademarks and may not be used by derivatve works (except as required to
+describe the origin of the work).
 
 --------------------------------------------------------------------------------
 pywebview

@@ -13,8 +13,12 @@
 //                dkeys (the keys switch on, allowed) dkeyswaiting (on, Accessibility not allowed) muted
 //                oldmacos (before macOS 27: the list is still called Accessibility)
 //                nodisplays (a build without libdisplays.dylib)
+//   mouse:       mouseon (all three switches on, allowed, tap running) mousewaiting (switches on,
+//                Accessibility not allowed) mousedenied (all off, not allowed) nomouse (built
+//                without a Swift compiler) macos26 (the list is Accessibility, not macOS 27's Device
+//                Control and Data Access). Turning a switch on in the preview allows it.
 //   settings:    fahrenheit dark light
-//   tab:         dashboard (default) thermals keepawake power displays history settings
+//   tab:         dashboard (default) thermals keepawake power displays mouse history settings
 // Change window.__state while it runs to try anything else; the next poll picks it up.
 // window.__state.size is what the page last asked the window to be (the app sizes its
 // window to it), window.__state.calls every API call the page made, and window.__state.haptics
@@ -23,6 +27,9 @@
 (() => {
   const app = window.__app;
   const wave = (t, base, amp, period) => Math.round((base + amp * Math.sin(t / period)) * 10) / 10;
+  // accessibility.setting_name(): what System Settings calls the list the tap is allowed in.
+  const SETTING = /(^|,)macos26(,|$)/.test(new URLSearchParams(location.search).get('s') || '')
+    ? 'Accessibility' : 'Device Control and Data Access';
   const state = window.__state = {
     settings: { ...app.settings, launch_at_login: true },
     fanControl: { profile: 'macos', state: 'off' },
@@ -47,6 +54,7 @@
       displays: [{ id: 1, name: 'Built-in Display', builtin: true, adjustable: true, answered: true, percent: 100, top: 160,
                    nits: 500, volume: null, muted: null, boosting: false }],
     },
+    mouse: { available: true, allowed: true, running: false, setting: SETTING },  // mouse.Mouse.status()
     firstWeekday: 0,  // Python's weekday the Mac's calendar starts on: 0 Monday, 6 Sunday
     h24: false,  // the Mac shows 24-hour time (the bar's labels come from keepawake.half_hour_labels)
     sessions: [],
@@ -108,6 +116,17 @@
     muted: () => { const tv = state.displays.displays.find(d => d.id === 5); if (tv) tv.muted = true; },
     nodisplays: () => { state.displays = { available: false, displays: [], allowed: false, running: false, setting: 'Device Control and Data Access' }; },
     oldmacos: () => { state.displays.setting = 'Accessibility'; },
+    mouseon: () => {
+      Object.assign(state.settings, { mouse_reverse_scrolling: true, mouse_smooth_scrolling: true, mouse_back_forward: true });
+      state.mouse = { available: true, allowed: true, running: true, setting: SETTING };
+    },
+    mousewaiting: () => {
+      Object.assign(state.settings, { mouse_reverse_scrolling: true });
+      state.mouse = { available: true, allowed: false, running: false, setting: SETTING };
+    },
+    mousedenied: () => { state.mouse = { available: true, allowed: false, running: false, setting: SETTING }; },
+    nomouse: () => { state.mouse = { available: false, allowed: false, running: false, setting: SETTING }; },
+    macos26: () => {},  // SETTING reads it
     fahrenheit: () => { state.settings.temperature_unit = 'fahrenheit'; },
     dark: () => { state.settings.theme = 'dark'; },
     light: () => { state.settings.theme = 'light'; },
@@ -169,6 +188,15 @@
 
   const HISTORY = 600;  // seconds of points before the page's first poll
   let seq = 0;
+  // What mouse.py would report after the switches change (the preview pretends Accessibility is allowed
+  // once a switch is turned on, as if the maintainer allowed it at macOS's prompt).
+  function mouseAfter(settings) {
+    const on = settings.mouse_reverse_scrolling || settings.mouse_smooth_scrolling || settings.mouse_back_forward;
+    if (!state.mouse.available) return;
+    if (on) state.mouse.allowed = true;
+    state.mouse.running = on && state.mouse.allowed;
+  }
+
   function getLive(sinceSeq, page) {
     const now = Date.now() / 1000, points = [], tpoints = [];
     const times = sinceSeq ? [now] : Array.from({ length: HISTORY }, (_, i) => now - HISTORY + 1 + i);
@@ -186,6 +214,7 @@
       thermal_fields: ['t', 'cpu', 'gpu', 'memory', 'ssd', 'ambient'], thermal_points: tpoints,
       update: state.update, fan_control: state.fanControl, keep_awake: state.keepAwake,
       ...(page === 'displays' && { displays: JSON.parse(JSON.stringify(state.displays)) }),
+      ...(page === 'mouse' && { mouse: { ...state.mouse } }),
     };
   }
 
@@ -198,6 +227,7 @@
       Object.assign(state.settings, changes);
       if (changes.fan_profile && changes.fan_profile !== before) choose(changes.fan_profile);
       if ('display_keys' in changes) state.displays.running = changes.display_keys && state.displays.allowed;
+      mouseAfter(state.settings);
       return state.settings;
     },
     app_info: () => ({
@@ -213,6 +243,8 @@
     open_accessibility_settings: () => null,
     copy_sensor_report: () => new Promise(done => setTimeout(() => done(true), 300)),
     report_problem: () => null,
+    open_pointer_settings: () => null,
+    open_accessibility_settings: () => null,
     check_for_updates: () => { state.update = ['checking', null]; setTimeout(() => { state.update = ['idle', null]; }, 2000); },
     list_sessions: () => state.sessions,
     get_session: () => null,
