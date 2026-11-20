@@ -123,7 +123,10 @@ nothing while `Mouse tap on` is logged probably means another app is reversing t
 Scroll Reverser): two reversals cancel out.
 
 `Menu took 1.8 s to open` is timed from the click to the open, filled menu (only logged above
-0.3 s). `Mac busy: running at full priority` and `Mac quiet again` are each switch of the app's
+0.3 s). The click's time is macOS's record of the last mouse-down
+(`CGEventSourceSecondsSinceLastEventType`): the click never reaches the app as its current event,
+which is the last pointer move (measured on 27.2). A menu opened with a key since that mouse-down
+(the keyboard, VoiceOver), or with no mouse-down in the last minute, logs nothing. `Mac busy: running at full priority` and `Mac quiet again` are each switch of the app's
 threads between user-interactive and background, with what the app saw in brackets: `(a wait
 ended 1.4 s late)` or `(efficiency cores 3% idle)` (a quiet launch logs neither: it just stays at
 full priority until the Mac has been quiet for 30 s). A `Mac quiet again` followed within seconds
@@ -494,7 +497,9 @@ To reproduce without touching the user's data, run with
   app now does it while the menu is open and while the Mac is busy, so `Menu took … s to open` lines
   from a busy Mac after a `Mac busy` line (the main thread already up when the click came) are that
   measurement. It's probably the same mechanism, but until menus are measured, don't write that the
-  delay is inside macOS, or that raising the main thread's QoS fixed it.
+  delay is inside macOS, or that raising the main thread's QoS fixed it. The line never fired in
+  1.2.15 to 1.5.0 (they took the click from the app's current event, which is never the click), so a log from those versions with no `Menu took` lines says nothing about how fast menus
+  opened.
 - **Only pass real changes to AppKit and WebKit.** A new menu bar title costs about
   0.9 ms of redraw, and setting the same one again still costs 0.2 ms (measured). The
   menu's rows and tiles are only filled in while it's open, through `_put()`, which
