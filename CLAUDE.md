@@ -130,15 +130,16 @@ by `Mac busy`, or by a menu slow to open, means the Mac wasn't quiet: the bracke
 the efficiency cores were. The app doesn't time a menu's open (see *Idle work stays on the
 efficiency cores*), so a slow menu shows only on screen. The first reading also logs which cores
 quiet is judged on: `Quiet is judged on the efficiency cores (cpu 0, 1 of 10)`, or `… on all 10
-cores (no efficiency cores found)`. `First reading 62.4 s after launch (read at 9.6 s)` is timed from the process's start to
-the first reading in the menu bar (only logged above 2 s); `read at` is when the sampler had it. A
-`read at` well before the first reading means the main thread wasn't running its run loop yet: at
-a 1.2.18 login launch it was silent for 10 s just after AppKit's `finishLaunching` began, cause
-unknown (#59). When most of the wait was before the app's own code began to run, the bracket says
-so too: a copy that had never run sat at exec (`sample` showed it in `_dyld_start`) for 224 s
-once, with XprotectService busy, so probably macOS's security scan of a first launch; that wait
-isn't the app's. A slow first reading with no `Mac busy` line before it isn't the app's priority,
-and neither is a menu slow to open then: look at the macOS log for what else was waiting.
+cores (no efficiency cores found)`. `First reading 62.4 s after launch (read at 9.6 s)` is timed
+from the process's start to the first reading in the menu bar (only logged above 2 s); `read at` is
+when the sampler had it. A `read at` well before the first reading means the main thread wasn't
+running its run loop yet: at a 1.2.18 login launch it was silent for 10 s just after AppKit's
+`finishLaunching` began, cause unknown (#59). When most of the wait was before the app's own code
+began to run, the bracket says so too: a copy that had never run sat at exec (`sample` showed it in
+`_dyld_start`) for 224 s once, with XprotectService busy, so probably macOS's security scan of a
+first launch; that wait isn't the app's. A slow first reading with no `Mac busy` line before it
+isn't the app's priority, and neither is a menu slow to open then: look at the macOS log for what
+else was waiting.
 
 `Dashboard took 0.8 s to open the first time` is timed from the click to the page loaded: the
 first open of each launch makes the window and starts WebKit (see *Launcher* below). `Dashboard
@@ -496,11 +497,11 @@ To reproduce without touching the user's data, run with
   pointer move), and macOS's mouse-down clocks (`CGEventSourceSecondsSinceLastEventType`, the
   combined session and HID states alike) record the opening click only after the menu has opened
   (measured on 27.2). So the `Menu took … s to open` line that 1.2.15 to 1.5.0 had never fired, and
-  the app now has none. On a quiet Mac, two opens took 0.19 and 0.27 s from the click to
-  `menuNeedsUpdate:`, read from that clock after the menu closed. Timing a slow menu needs `sample`
-  of the main thread during the open, or a screen recording. It's probably the same mechanism, but
-  until menus are measured, don't write that the delay is inside macOS, or that raising the main
-  thread's QoS fixed it.
+  the app now has none. On a quiet Mac, two opens took 0.25 and 0.19 s from the click to
+  `menuNeedsUpdate:` (0.27 and 0.19 s to the open menu), read from that clock after the menu closed.
+  Timing a slow menu needs `sample` of the main thread during the open, or a screen recording. It's
+  probably the same mechanism, but until menus are measured, don't write that the delay is inside
+  macOS, or that raising the main thread's QoS fixed it.
 - **Only pass real changes to AppKit and WebKit.** A new menu bar title costs about
   0.9 ms of redraw, and setting the same one again still costs 0.2 ms (measured). The
   menu's rows and tiles are only filled in while it's open, through `_put()`, which
