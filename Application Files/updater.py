@@ -29,6 +29,7 @@ import time
 from datetime import date
 from pathlib import Path
 
+import accessibility
 from launch import RELEASES_URL, REPOSITORY, activate_app, in_applications_folder, relaunch
 
 log = logging.getLogger("pythonflow")
@@ -372,6 +373,9 @@ class Updater:
         if self._staged is None:
             return
         (version, app, folder), self._staged = self._staged, None
+        # Event taps go first: on macOS 27.2 a bundle replaced under a running tap made tccd refuse
+        # the old process, and the keyboard and trackpad froze for about two minutes.
+        accessibility.stop_taps()
         # Swaps the two folders in one step, so there's never a moment without an app.
         # Only the new copy's metadata is kept, so nothing from the original download
         # (like the quarantine flag macOS checked on first launch) carries over.
@@ -380,6 +384,7 @@ class Updater:
             NSFileManagerItemReplacementUsingNewMetadataOnly, None, None)
         shutil.rmtree(folder, ignore_errors=True)
         if not ok:
+            accessibility.start_taps()
             self._set_status(IDLE)
             log.error("Couldn't install %s: %s", version, error)
             _alert_failure("Mac Engine Room couldn't replace itself in the Applications folder.")

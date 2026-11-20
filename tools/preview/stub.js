@@ -8,11 +8,17 @@
 //   keep awake:  ka1h ka2h kasleep kaschedule kaofftoday kabattery (paused by the battery rule)
 //                kahours (work hours on) karule (battery rule on) sunday (the week starts on Sunday)
 //                h24 (a Mac set to 24-hour time) kaday (work hours 0:00–24:00) kanoon (8:00–Noon)
+//   displays:    tv (an LG TV answering DDC, with volume) tvnoddc (one that doesn't) tvasking (DDC not answered yet)
+//                boosted (the built-in at 130%) noboost (an M5 Pro: stops at 100%) noxdr (no XDR screen: no nits)
+//                dkeys (the keys switch on, allowed) dkeyswaiting (on, Accessibility not allowed) muted
+//                oldmacos (before macOS 27: the list is still called Accessibility)
+//                nodisplays (a build without libdisplays.dylib)
 //   settings:    fahrenheit dark light
-//   tab:         dashboard (default) thermals keepawake power history settings
+//   tab:         dashboard (default) thermals keepawake power displays history settings
 // Change window.__state while it runs to try anything else; the next poll picks it up.
 // window.__state.size is what the page last asked the window to be (the app sizes its
-// window to it), and window.__state.calls every API call the page made. Page errors that
+// window to it), window.__state.calls every API call the page made, and window.__state.haptics
+// how many trackpad taps it asked for (a brightness slider landing on 100%). Page errors that
 // the app would log go to the console.
 (() => {
   const app = window.__app;
@@ -35,6 +41,12 @@
     fans: [{ min: 1499, max: 4296 }, { min: 1499, max: 4744 }],
     fanRpm: null,  // [rpm, …] to show; null follows fan control (0 while macOS has them cool)
     keepAwake: { choice: 'off', holding: false, line: null },  // keepawake.KeepAwake.status()
+    // displays.Displays.status(): the built-in XDR display at macOS's own maximum to start with.
+    displays: {
+      available: true, allowed: false, running: false, setting: 'Device Control and Data Access',  // 'Accessibility' before macOS 27 (s=oldmacos)
+      displays: [{ id: 1, name: 'Built-in Display', builtin: true, adjustable: true, answered: true, percent: 100, top: 160,
+                   nits: 500, volume: null, muted: null, boosting: false }],
+    },
     firstWeekday: 0,  // Python's weekday the Mac's calendar starts on: 0 Monday, 6 Sunday
     h24: false,  // the Mac shows 24-hour time (the bar's labels come from keepawake.half_hour_labels)
     sessions: [],
@@ -82,6 +94,20 @@
     h24: () => { state.h24 = true; },
     kaday: () => { state.settings.keep_awake_hours = { ...state.settings.keep_awake_hours, start: '00:00', end: '24:00' }; },
     kanoon: () => { state.settings.keep_awake_hours = { ...state.settings.keep_awake_hours, start: '08:00', end: '12:00' }; },
+    tv: () => state.displays.displays.push({ id: 5, name: 'LG TV SSCR2', builtin: false, adjustable: true, answered: true,
+                                             percent: 60, top: 100, nits: null, volume: 25, muted: false, boosting: false }),
+    tvnoddc: () => state.displays.displays.push({ id: 5, name: 'LG TV SSCR2', builtin: false, adjustable: false, answered: false,
+                                                  percent: null, top: 100, nits: null, volume: null, muted: null, boosting: false }),
+    tvasking: () => state.displays.displays.push({ id: 5, name: 'LG TV SSCR2', builtin: false, adjustable: false, answered: null,
+                                                   percent: null, top: 100, nits: null, volume: null, muted: null, boosting: false }),
+    boosted: () => setBrightness(1, 130),
+    noboost: () => Object.assign(state.displays.displays[0], { top: 100 }),
+    noxdr: () => Object.assign(state.displays.displays[0], { top: 100, nits: null }),
+    dkeys: () => { state.settings.display_keys = true; Object.assign(state.displays, { allowed: true, running: true }); },
+    dkeyswaiting: () => { state.settings.display_keys = true; },
+    muted: () => { const tv = state.displays.displays.find(d => d.id === 5); if (tv) tv.muted = true; },
+    nodisplays: () => { state.displays = { available: false, displays: [], allowed: false, running: false, setting: 'Device Control and Data Access' }; },
+    oldmacos: () => { state.displays.setting = 'Accessibility'; },
     fahrenheit: () => { state.settings.temperature_unit = 'fahrenheit'; },
     dark: () => { state.settings.theme = 'dark'; },
     light: () => { state.settings.theme = 'light'; },
@@ -103,6 +129,19 @@
       '2h': { choice: '2h', holding: true, line: 'Keep Awake ends at 2:22 PM (2 hours)' },
       sleep: { choice: 'sleep', holding: true, line: 'Keep Awake ends when the Mac sleeps' },
     }[choice];
+  }
+
+  // What displays.py would say after a slider: nits as Native/Displays/Scale.swift works them out
+  // (below 100%, 500 × a stand-in for macOS's linear brightness).
+  function setBrightness(id, percent) {
+    const d = state.displays.displays.find(x => x.id === id);
+    if (!d) return;
+    d.percent = Math.max(0, Math.min(d.top, percent));
+    d.boosting = d.builtin && d.percent > 100;
+    if (d.builtin && d.nits !== null) {
+      const nits = d.percent <= 100 ? 500 * (d.percent / 100) ** 2.2 : Math.min(1600, 500 * (d.percent / 100) ** 2.5);
+      d.nits = nits >= 100 ? Math.round(nits / 10) * 10 : Math.round(nits);  // as Scale.shown rounds them
+    }
   }
 
   function reading(t) {
@@ -130,7 +169,7 @@
 
   const HISTORY = 600;  // seconds of points before the page's first poll
   let seq = 0;
-  function getLive(sinceSeq) {
+  function getLive(sinceSeq, page) {
     const now = Date.now() / 1000, points = [], tpoints = [];
     const times = sinceSeq ? [now] : Array.from({ length: HISTORY }, (_, i) => now - HISTORY + 1 + i);
     let r;
@@ -146,6 +185,7 @@
       points, thermals: { ...r.thermals },  // a plain object, as the bridge sends
       thermal_fields: ['t', 'cpu', 'gpu', 'memory', 'ssd', 'ambient'], thermal_points: tpoints,
       update: state.update, fan_control: state.fanControl, keep_awake: state.keepAwake,
+      ...(page === 'displays' && { displays: JSON.parse(JSON.stringify(state.displays)) }),
     };
   }
 
@@ -157,6 +197,7 @@
       const before = state.settings.fan_profile;
       Object.assign(state.settings, changes);
       if (changes.fan_profile && changes.fan_profile !== before) choose(changes.fan_profile);
+      if ('display_keys' in changes) state.displays.running = changes.display_keys && state.displays.allowed;
       return state.settings;
     },
     app_info: () => ({
@@ -164,8 +205,12 @@
       history_recording: state.settings.record_history, update_unavailable_reason: state.updateUnavailable,
       fan_profiles: app.fan_profiles, fan_tuning_limits: app.fan_tuning_limits, sensor_hint: state.sensorHint,
       keep_awake_choices: app.keep_awake_choices, keep_awake_battery_levels: app.keep_awake_battery_levels,
-      first_weekday: state.firstWeekday, clock: state.h24 ? app.clock24 : app.clock12,
+      first_weekday: state.firstWeekday, clock: state.h24 ? app.clock24 : app.clock12, display_snap: app.display_snap,
     }),
+    set_display_brightness: (id, percent, haptic) => { if (haptic) state.haptics = (state.haptics || 0) + 1; setBrightness(id, percent); },
+    set_display_volume: (id, percent) => { const d = state.displays.displays.find(x => x.id === id); if (d) Object.assign(d, { volume: percent, muted: false }); },
+    refresh_displays: () => null,
+    open_accessibility_settings: () => null,
     copy_sensor_report: () => new Promise(done => setTimeout(() => done(true), 300)),
     report_problem: () => null,
     check_for_updates: () => { state.update = ['checking', null]; setTimeout(() => { state.update = ['idle', null]; }, 2000); },

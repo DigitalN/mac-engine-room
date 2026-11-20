@@ -403,3 +403,92 @@ def test_the_cup_has_steam_and_falls_back_to_a_plain_one(monkeypatch):
     bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None)
     assert bar._cup is not None
     assert asked.index("cup.and.heat.waves.fill") < asked.index("cup.and.saucer.fill")
+
+
+_BUILTIN = {"id": 1, "name": "Built-in Display", "builtin": True, "adjustable": True, "percent": 100.0, "top": 160.0}
+_TV = {"id": 5, "name": "LG TV SSCR2", "builtin": False, "adjustable": True, "percent": 60.0, "top": 100.0}
+
+
+def test_displays_get_a_slider_each_and_the_built_in_one_runs_to_160(monkeypatch):
+    _fake_status_item(monkeypatch)
+    shown = [_BUILTIN, {**_TV, "adjustable": False, "percent": None}]
+    bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None, displays=lambda: shown)
+    bar._target.menuNeedsUpdate_(bar._menu)
+    assert not bar._displays_header.isHidden()
+    [(item, display, (name, percent, slider))] = bar._display_items  # a display that doesn't answer DDC gets none
+    assert (display, name.stringValue(), percent.stringValue()) == (1, "Built-in Display", "100%")
+    assert (slider.minValue(), slider.maxValue(), slider.doubleValue()) == (0, 160, 100)
+    # The TV answers: the items are made again, in macOS's order.
+    shown[1] = _TV
+    bar._target.menuNeedsUpdate_(bar._menu)
+    assert [d for _, d, _ in bar._display_items] == [1, 5]
+    assert bar._display_items[1][2][2].maxValue() == 100
+    order = list(bar._menu.itemArray())
+    assert order.index(bar._displays_header) + 1 == order.index(bar._display_items[0][0])
+
+
+def test_no_display_to_adjust_hides_the_section(monkeypatch):
+    _fake_status_item(monkeypatch)
+    bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None, displays=lambda: [])
+    bar._target.menuNeedsUpdate_(bar._menu)
+    assert bar._displays_header.isHidden() and bar._display_items == []
+
+
+def test_moving_a_slider_sets_whole_percents_and_shows_them_at_once(monkeypatch):
+    _fake_status_item(monkeypatch)
+    set_to = []
+    bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None,
+                    displays=lambda: [_BUILTIN, _TV], on_display_brightness=lambda d, p: set_to.append((d, p)))
+    bar._target.menuNeedsUpdate_(bar._menu)
+    slider = bar._display_items[0][2][2]
+    slider.setDoubleValue_(131.6)
+    bar._target.slideDisplay_(slider)
+    assert set_to == [(1, 132.0)]
+    assert bar._display_items[0][2][1].stringValue() == "132%"
+
+
+def test_a_dragged_slider_sits_on_100_near_it_with_the_trackpads_tap_as_it_lands(monkeypatch):
+    _fake_status_item(monkeypatch)
+    set_to, taps = [], []
+    monkeypatch.setattr(StatusBar, "_pointer_holds", staticmethod(lambda slider: True))
+    monkeypatch.setattr(statusbar.display_tool, "haptic", lambda: taps.append(1))
+    bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None,
+                    displays=lambda: [{**_BUILTIN, "percent": 90.0}, _TV], on_display_brightness=lambda d, p: set_to.append((d, p)))
+    bar._target.menuNeedsUpdate_(bar._menu)
+    builtin, tv = bar._display_items[0][2][2], bar._display_items[1][2][2]
+    for raw in (97.4, 101.6, 104.2, 99.3):
+        builtin.setDoubleValue_(raw)
+        bar._target.slideDisplay_(builtin)
+        if raw < 104:
+            assert builtin.doubleValue() == 100  # back on the mark while the pointer is in the zone
+    assert set_to == [(1, 100.0), (1, 104.0), (1, 100.0)]  # staying on the mark sends nothing new
+    assert len(taps) == 2  # landing from 90, then again from 104; not while it stays on 100
+    assert bar._display_items[0][2][1].stringValue() == "100%"
+    tv.setDoubleValue_(98.0)  # a TV ends at 100: nothing to snap to
+    bar._target.slideDisplay_(tv)
+    assert set_to[-1] == (5, 98.0) and len(taps) == 2
+
+
+def test_a_slider_moved_without_the_pointer_never_snaps(monkeypatch):
+    _fake_status_item(monkeypatch)
+    set_to = []
+    monkeypatch.setattr(statusbar.display_tool, "haptic", lambda: set_to.append("tap"))
+    bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None,
+                    displays=lambda: [_BUILTIN], on_display_brightness=lambda d, p: set_to.append((d, p)))
+    bar._target.menuNeedsUpdate_(bar._menu)
+    slider = bar._display_items[0][2][2]
+    slider.setDoubleValue_(101.0)  # VoiceOver's step up from 100: no pointer event comes with it
+    bar._target.slideDisplay_(slider)
+    assert set_to == [(1, 101.0)] and slider.doubleValue() == 101
+
+
+def test_a_key_press_shows_in_the_open_menu(monkeypatch):
+    _fake_status_item(monkeypatch)
+    bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None, displays=lambda: [_BUILTIN])
+    bar._target.menuNeedsUpdate_(bar._menu)
+    bar.set_displays([{**_BUILTIN, "percent": 110.0}])  # closed: nothing changes
+    assert bar._display_items[0][2][1].stringValue() == "100%"
+    bar.menu_open = True
+    bar.set_displays([{**_BUILTIN, "percent": 110.0}])
+    assert bar._display_items[0][2][1].stringValue() == "110%"
+    assert bar._display_items[0][2][2].doubleValue() == 110
