@@ -122,26 +122,23 @@ Swift and logs to the unified log, not app.log: `/usr/bin/log show --last 1h --p
 nothing while `Mouse tap on` is logged probably means another app is reversing too (LinearMouse,
 Scroll Reverser): two reversals cancel out.
 
-`Menu took 1.8 s to open` is timed from the click to the open, filled menu (only logged above
-0.3 s). The click's time is macOS's record of the last mouse-down
-(`CGEventSourceSecondsSinceLastEventType`): the click never reaches the app as its current event,
-which is the last pointer move (measured on 27.2). A menu opened with a key since that mouse-down
-(the keyboard, VoiceOver), or with no mouse-down in the last minute, logs nothing. `Mac busy: running at full priority` and `Mac quiet again` are each switch of the app's
+`Mac busy: running at full priority` and `Mac quiet again` are each switch of the app's
 threads between user-interactive and background, with what the app saw in brackets: `(a wait
 ended 1.4 s late)` or `(efficiency cores 3% idle)` (a quiet launch logs neither: it just stays at
 full priority until the Mac has been quiet for 30 s). A `Mac quiet again` followed within seconds
-by a slow menu or by `Mac busy` means the Mac wasn't quiet: the brackets say how idle the
-efficiency cores were. The first reading also logs which cores quiet is judged on: `Quiet is
-judged on the efficiency cores (cpu 0, 1 of 10)`, or `… on all 10 cores (no efficiency cores
-found)`. `First reading 62.4 s after launch (read at 9.6 s)` is timed from the process's start to
+by `Mac busy`, or by a menu slow to open, means the Mac wasn't quiet: the brackets say how idle
+the efficiency cores were. The app doesn't time a menu's open (see *Idle work stays on the
+efficiency cores*), so a slow menu shows only on screen. The first reading also logs which cores
+quiet is judged on: `Quiet is judged on the efficiency cores (cpu 0, 1 of 10)`, or `… on all 10
+cores (no efficiency cores found)`. `First reading 62.4 s after launch (read at 9.6 s)` is timed from the process's start to
 the first reading in the menu bar (only logged above 2 s); `read at` is when the sampler had it. A
 `read at` well before the first reading means the main thread wasn't running its run loop yet: at
 a 1.2.18 login launch it was silent for 10 s just after AppKit's `finishLaunching` began, cause
 unknown (#59). When most of the wait was before the app's own code began to run, the bracket says
 so too: a copy that had never run sat at exec (`sample` showed it in `_dyld_start`) for 224 s
 once, with XprotectService busy, so probably macOS's security scan of a first launch; that wait
-isn't the app's. A slow menu or first reading with no `Mac busy` line before it isn't the app's
-priority: look at the macOS log for what else was waiting.
+isn't the app's. A slow first reading with no `Mac busy` line before it isn't the app's priority,
+and neither is a menu slow to open then: look at the macOS log for what else was waiting.
 
 `Dashboard took 0.8 s to open the first time` is timed from the click to the page loaded: the
 first open of each launch makes the window and starts WebKit (see *Launcher* below). `Dashboard
@@ -494,12 +491,16 @@ To reproduce without touching the user's data, run with
   two threads at priority 4 while the three managed ones were at 47. The experiment that would
   tell, the main thread also setting its own QoS to user-interactive while it's raised, has now been
   run for WebKit's start (the table above), not for menus, so the menu delay is still unmeasured. The
-  app now does it while the menu is open and while the Mac is busy, so `Menu took … s to open` lines
-  from a busy Mac after a `Mac busy` line (the main thread already up when the click came) are that
-  measurement. It's probably the same mechanism, but until menus are measured, don't write that the
-  delay is inside macOS, or that raising the main thread's QoS fixed it. The line never fired in
-  1.2.15 to 1.5.0 (they took the click from the app's current event, which is never the click), so a log from those versions with no `Menu took` lines says nothing about how fast menus
-  opened.
+  app now does it while the menu is open and while the Mac is busy. The app can't time a menu's
+  open: the click never reaches it as its current event (at `menuNeedsUpdate:` that's the last
+  pointer move), and macOS's mouse-down clocks (`CGEventSourceSecondsSinceLastEventType`, the
+  combined session and HID states alike) record the opening click only after the menu has opened
+  (measured on 27.2). So the `Menu took … s to open` line that 1.2.15 to 1.5.0 had never fired, and
+  the app now has none. On a quiet Mac, two opens took 0.19 and 0.27 s from the click to
+  `menuNeedsUpdate:`, read from that clock after the menu closed. Timing a slow menu needs `sample`
+  of the main thread during the open, or a screen recording. It's probably the same mechanism, but
+  until menus are measured, don't write that the delay is inside macOS, or that raising the main
+  thread's QoS fixed it.
 - **Only pass real changes to AppKit and WebKit.** A new menu bar title costs about
   0.9 ms of redraw, and setting the same one again still costs 0.2 ms (measured). The
   menu's rows and tiles are only filled in while it's open, through `_put()`, which

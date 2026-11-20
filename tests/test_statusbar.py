@@ -8,7 +8,7 @@ import AppKit
 
 import statusbar
 from statusbar import (FIGURE_SPACE, StatusBar, battery_status, fans_text, format_temperature, format_watts,
-                       menu_bar_temperature, menu_bar_title, menu_bar_value, slow_menu_note, click_age)
+                       menu_bar_temperature, menu_bar_title, menu_bar_value)
 
 
 class _FakeButton:
@@ -289,60 +289,6 @@ def test_a_desktop_has_no_battery_or_adapter_row(monkeypatch):
     bar.update({"system_load": 12.0, "has_battery": False, "external_connected": True}, _thermals(), {})
     bar._target.menuNeedsUpdate_(bar._menu)
     assert bar._rows["battery"].isHidden() and bar._rows["adapter"].isHidden() and not bar._rows["system"].isHidden()
-
-
-def test_a_menu_is_only_logged_when_it_was_slow_to_open():
-    assert slow_menu_note(0.05) is None
-    assert slow_menu_note(0.3) is None
-    assert slow_menu_note(0.31) == "Menu took 0.3 s to open"
-    assert slow_menu_note(1.84) == "Menu took 1.8 s to open"
-
-
-def test_a_click_is_macos_last_mouse_down_unless_a_key_went_down_since():
-    assert click_age(0.4, 900.0, 30.0) == 0.4  # a left click
-    assert click_age(900.0, 1.2, 30.0) == 1.2  # a right click: the more recent of the two
-    assert click_age(2.5, 0.4, 30.0) == 0.4
-    assert click_age(59.9, 900.0, 900.0) == 59.9  # a long stall still counts
-    assert click_age(60.0, 900.0, 900.0) is None  # no click in the last minute
-    assert click_age(5.0, 900.0, 0.2) is None  # a key since: the keyboard or VoiceOver
-    assert click_age(-1.0, 900.0, 30.0) is None
-
-
-def test_the_click_time_is_on_the_monotonic_clock(monkeypatch):
-    _fake_status_item(monkeypatch)
-    monkeypatch.setattr(statusbar.time, "monotonic", lambda: 500.0)
-    ages = {statusbar._LEFT_MOUSE_DOWN: 1.8, statusbar._RIGHT_MOUSE_DOWN: 900.0, statusbar._KEY_DOWN: 30.0}
-    monkeypatch.setattr(statusbar, "_seconds_since_last_event", lambda: lambda state, kind: ages[kind])
-    bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None)
-    assert bar._click_time() == 498.2
-    ages[statusbar._KEY_DOWN] = 0.1
-    assert bar._click_time() is None
-
-
-def test_macos_says_when_the_last_mouse_down_was():
-    since = statusbar._seconds_since_last_event()
-    assert since(statusbar._COMBINED_SESSION, statusbar._LEFT_MOUSE_DOWN) >= 0
-
-
-def test_the_log_says_how_long_a_click_took_to_open_the_menu(monkeypatch, caplog):
-    import logging
-
-    _fake_status_item(monkeypatch)
-    now = [500.0]
-    monkeypatch.setattr(statusbar.time, "monotonic", lambda: now[0])
-    bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None)
-    bar._click_time = lambda: 498.2  # the click was 1.8 s ago
-    with caplog.at_level(logging.INFO, logger="pythonflow"):
-        bar._target.menuNeedsUpdate_(bar._menu)
-        bar._target.menuWillOpen_(bar._menu)
-        bar._target.menuDidClose_(bar._menu)
-        bar._click_time = lambda: 499.9  # a quick one
-        bar._target.menuNeedsUpdate_(bar._menu)
-        bar._target.menuWillOpen_(bar._menu)
-        bar._click_time = lambda: None  # opened from the keyboard: no click to time
-        bar._target.menuNeedsUpdate_(bar._menu)
-        bar._target.menuWillOpen_(bar._menu)
-    assert [r.getMessage() for r in caplog.records] == ["Menu took 1.8 s to open"]
 
 
 def test_quitting_takes_the_item_out_of_the_menu_bar(monkeypatch):

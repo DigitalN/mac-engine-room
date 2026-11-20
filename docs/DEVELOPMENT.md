@@ -262,8 +262,7 @@ copy that has its own identifier (`scripts/make-test-copy.sh`), as for fan contr
 3. Launch the test copy during the load (`open -n --env PYTHONFLOW_DATA_DIR=/tmp/pf-data "$T"`),
    then open its menu by hand a few times, and its dashboard once. In `/tmp/pf-data/Logs/app.log`:
    `First reading … s after launch (read at … s)` is only there above 2 s (a `read at` well before
-   it means the main thread was held up, not the sampler), `Menu took … s to open` above 0.3 s,
-   `Dashboard took … s to open the first time` after the first open (it makes the window and starts
+   it means the main thread was held up, not the sampler), `Dashboard took … s to open the first time` after the first open (it makes the window and starts
    WebKit), and `Mac busy: running at full priority` should follow the load starting (a wait of the
    sampler ending late is what it listens for; the sampler is itself starved by a sudden heavy
    load, so it can take a while), `Mac quiet again` about 30 s after the load ends. Both end with what the app saw: `(a wait ended
@@ -272,7 +271,8 @@ copy that has its own identifier (`scripts/make-test-copy.sh`), as for fan contr
    cores (cpu 0, 1 of 10)`): idle performance cores don't count, since a background thread can't
    use them. A real build is the case to watch, because Spotlight and the other background daemons
    keep the efficiency cores busy with its output after it has stopped using the rest: no `Mac
-   quiet again` should be followed within seconds by a slow menu or by `Mac busy`.
+   quiet again` should be followed within seconds by `Mac busy`, or by a menu that's slow to open
+   (the app can't time a menu's open, so that's by eye).
 4. `ps -M -p <pid>` shows each thread's priority: the main thread, the sampler and fan control
    at 4 (background) when the Mac is quiet, nothing is open and no fan profile holds the fans, and
    all at 47 during the load (and while a profile holds the fans, whatever the load).
