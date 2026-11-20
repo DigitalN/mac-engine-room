@@ -59,6 +59,9 @@ KEEP_AWAKE_ROWS = ((keepawake.HOUR, keepawake.TWO_HOURS), (keepawake.OFF, keepaw
 KEEP_AWAKE_SYMBOLS = ("cup.and.heat.waves.fill", "cup.and.saucer.fill")
 DISPLAY_LABEL_HEIGHT, DISPLAY_SLIDER_HEIGHT = 18, 24  # a display's name and percent, then its slider
 TICK_SIZE = (1, 5)  # the built-in display's mark at 100%, under its slider
+# What moves a slider by the pointer: it sends its action on each of them, the last with the mouse-up.
+POINTER_EVENTS = (AppKit.NSEventTypeLeftMouseDown, AppKit.NSEventTypeLeftMouseDragged, AppKit.NSEventTypeLeftMouseUp)
+POINTER_FRESH_FOR = 1.0  # seconds: an older one is a pointer event AppKit still holds as current, not this move
 # Fan control states with the profile buttons available to click.
 PROFILES_USABLE = ("off", "holding", "override", "other", "approval", "error")
 
@@ -277,6 +280,7 @@ class StatusBar:
         self._on_display_brightness = on_display_brightness
         self._display_items = []  # (item, display id, (name label, percent label, slider)) in the menu's order
         self._display_shape = None  # the (id, name, top) of each display shown, to know when to rebuild
+        self._slider_at = {}  # slider tag → where its knob was last put or slid, to know when it lands on 100%
         self._keep_awake_status = keep_awake_status
         self._on_keep_awake = on_keep_awake
         self._on_menu_open = on_menu_open
@@ -727,16 +731,18 @@ class StatusBar:
                 gone = {id(v) for v in views}  # their ids may be reused by the new views
                 self._shown = {k: v for k, v in self._shown.items() if k[0] not in gone}
             self._display_items = []
+            self._slider_at = {}
             at = self._menu.indexOfItem_(self._displays_header) + 1
             for i, d in enumerate(shown):
                 item, views = self._build_display(d, i)
                 self._menu.insertItem_atIndex_(item, at + i)
                 self._display_items.append((item, d["id"], views))
         self._put(self._displays_header, "setHidden_", not shown)
-        for (item, _, (name, percent, slider)), d in zip(self._display_items, shown):
+        for tag, ((item, _, (name, percent, slider)), d) in enumerate(zip(self._display_items, shown)):
             self._put(percent, "setStringValue_", display_tool.menu_label(d))
             if d.get("percent") is not None and not self._dragging(slider):
                 self._put(slider, "setDoubleValue_", float(d["percent"]))
+                self._slider_at[tag] = float(d["percent"])
 
     @staticmethod
     def _dragging(slider):
@@ -744,12 +750,30 @@ class StatusBar:
         event = AppKit.NSApp.currentEvent()
         return event is not None and event.type() == AppKit.NSEventTypeLeftMouseDragged and slider.window() == event.window()
 
+    @staticmethod
+    def _pointer_holds(slider):
+        """The pointer is moving this slider: pressed, dragged, or let go. Not the arrow keys or VoiceOver,
+        whose steps come with no pointer event of their own."""
+        event = AppKit.NSApp.currentEvent()
+        return (event is not None and event.type() in POINTER_EVENTS and slider.window() == event.window()
+                and AppKit.NSProcessInfo.processInfo().systemUptime() - event.timestamp() < POINTER_FRESH_FOR)
+
     def _slide_display(self, tag, value):
-        """A slider moved: whole percents, the label at once, the display through displays.py."""
+        """A slider moved: whole percents, the label at once, the display through displays.py. Dragged near
+        100% on the built-in XDR display, the knob sits on 100, with the trackpad's tap as it lands
+        (displays.snap)."""
         if tag >= len(self._display_items):
             return
-        _, display, (_, percent, _) = self._display_items[tag]
-        value = float(round(value))
+        _, display, (_, percent, slider) = self._display_items[tag]
+        value, landed = display_tool.snap(float(round(value)), slider.maxValue(), self._pointer_holds(slider),
+                                          self._slider_at.get(tag))
+        if value == 100 and slider.doubleValue() != 100:
+            slider.setDoubleValue_(100.0)  # on the mark until the pointer leaves the zone
+        if value == self._slider_at.get(tag):
+            return  # still on the mark, or the same whole percent: nothing new to send
+        self._slider_at[tag] = value
+        if landed:
+            display_tool.haptic()
         self._put(percent, "setStringValue_", display_tool.menu_label({"percent": value}))
         self._on_display_brightness(display, value)
 

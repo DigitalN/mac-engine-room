@@ -17,7 +17,8 @@
 //   tab:         dashboard (default) thermals keepawake power displays history settings
 // Change window.__state while it runs to try anything else; the next poll picks it up.
 // window.__state.size is what the page last asked the window to be (the app sizes its
-// window to it), and window.__state.calls every API call the page made. Page errors that
+// window to it), window.__state.calls every API call the page made, and window.__state.haptics
+// how many trackpad taps it asked for (a brightness slider landing on 100%). Page errors that
 // the app would log go to the console.
 (() => {
   const app = window.__app;
@@ -204,9 +205,9 @@
       history_recording: state.settings.record_history, update_unavailable_reason: state.updateUnavailable,
       fan_profiles: app.fan_profiles, fan_tuning_limits: app.fan_tuning_limits, sensor_hint: state.sensorHint,
       keep_awake_choices: app.keep_awake_choices, keep_awake_battery_levels: app.keep_awake_battery_levels,
-      first_weekday: state.firstWeekday, clock: state.h24 ? app.clock24 : app.clock12,
+      first_weekday: state.firstWeekday, clock: state.h24 ? app.clock24 : app.clock12, display_snap: app.display_snap,
     }),
-    set_display_brightness: (id, percent) => setBrightness(id, percent),
+    set_display_brightness: (id, percent, haptic) => { if (haptic) state.haptics = (state.haptics || 0) + 1; setBrightness(id, percent); },
     set_display_volume: (id, percent) => { const d = state.displays.displays.find(x => x.id === id); if (d) Object.assign(d, { volume: percent, muted: false }); },
     refresh_displays: () => null,
     open_accessibility_settings: () => null,

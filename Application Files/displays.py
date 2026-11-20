@@ -28,6 +28,7 @@ log = logging.getLogger("pythonflow")
 # on 27.2.1; Apple forum thread 819331, FB22273730), so the boost can't work there. The base M5 works.
 CHIPS_IGNORING_GAMMA = frozenset({"Apple M5 Pro", "Apple M5 Max", "Apple A18 Pro"})  # A18 Pro: the MacBook Neo
 SAVE_BOOST_AFTER = 1.0  # seconds: dragging a slider or holding a key saves once, at the end
+SNAP_WITHIN = 3  # points either side of 100%: a brightness slider dragged there sits on 100 (the menu's and the page's)
 
 # displays_set_keys' answers (Native/Displays/Displays.swift).
 ON, OFF, NOT_ALLOWED, REFUSED = 1, 0, -1, -2
@@ -68,6 +69,25 @@ def should_ask(was_on, now_on, allowed, asked):
     """Ask macOS for Accessibility when the keys switch has just been turned on, it isn't allowed, and
     macOS hasn't been asked since launch. Later, the tab's button opens the pane instead."""
     return now_on and not was_on and not allowed and not asked
+
+
+def snap(value, top, held, before=None):
+    """Where a brightness slider moved to `value` sits, and whether it has just landed on 100% (for the
+    trackpad's tap): on exactly 100 within SNAP_WITHIN of it, on a display that runs past 100 (the
+    built-in XDR one) while the pointer holds the slider. Never for the arrow keys or VoiceOver: they
+    step one point at a time, so from 100 a step to 101 would snap back to 100 and never get past it."""
+    if held and top > 100 and abs(value - 100) <= SNAP_WITHIN:
+        return 100.0, before != 100
+    return value, False
+
+
+def haptic():
+    """The trackpad's alignment tap, macOS's own for something snapping into place (a Force Touch trackpad
+    feels it; a mouse feels nothing). Main thread."""
+    import AppKit
+
+    AppKit.NSHapticFeedbackManager.defaultPerformer().performFeedbackPattern_performanceTime_(
+        AppKit.NSHapticFeedbackPatternAlignment, AppKit.NSHapticFeedbackPerformanceTimeNow)
 
 
 def menu_label(display):

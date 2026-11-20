@@ -447,6 +447,41 @@ def test_moving_a_slider_sets_whole_percents_and_shows_them_at_once(monkeypatch)
     assert bar._display_items[0][2][1].stringValue() == "132%"
 
 
+def test_a_dragged_slider_sits_on_100_near_it_with_the_trackpads_tap_as_it_lands(monkeypatch):
+    _fake_status_item(monkeypatch)
+    set_to, taps = [], []
+    monkeypatch.setattr(StatusBar, "_pointer_holds", staticmethod(lambda slider: True))
+    monkeypatch.setattr(statusbar.display_tool, "haptic", lambda: taps.append(1))
+    bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None,
+                    displays=lambda: [{**_BUILTIN, "percent": 90.0}, _TV], on_display_brightness=lambda d, p: set_to.append((d, p)))
+    bar._target.menuNeedsUpdate_(bar._menu)
+    builtin, tv = bar._display_items[0][2][2], bar._display_items[1][2][2]
+    for raw in (97.4, 101.6, 104.2, 99.3):
+        builtin.setDoubleValue_(raw)
+        bar._target.slideDisplay_(builtin)
+        if raw < 104:
+            assert builtin.doubleValue() == 100  # back on the mark while the pointer is in the zone
+    assert set_to == [(1, 100.0), (1, 104.0), (1, 100.0)]  # staying on the mark sends nothing new
+    assert len(taps) == 2  # landing from 90, then again from 104; not while it stays on 100
+    assert bar._display_items[0][2][1].stringValue() == "100%"
+    tv.setDoubleValue_(98.0)  # a TV ends at 100: nothing to snap to
+    bar._target.slideDisplay_(tv)
+    assert set_to[-1] == (5, 98.0) and len(taps) == 2
+
+
+def test_a_slider_moved_without_the_pointer_never_snaps(monkeypatch):
+    _fake_status_item(monkeypatch)
+    set_to = []
+    monkeypatch.setattr(statusbar.display_tool, "haptic", lambda: set_to.append("tap"))
+    bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None,
+                    displays=lambda: [_BUILTIN], on_display_brightness=lambda d, p: set_to.append((d, p)))
+    bar._target.menuNeedsUpdate_(bar._menu)
+    slider = bar._display_items[0][2][2]
+    slider.setDoubleValue_(101.0)  # VoiceOver's step up from 100: no pointer event comes with it
+    bar._target.slideDisplay_(slider)
+    assert set_to == [(1, 101.0)] and slider.doubleValue() == 101
+
+
 def test_a_key_press_shows_in_the_open_menu(monkeypatch):
     _fake_status_item(monkeypatch)
     bar = StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None, displays=lambda: [_BUILTIN])

@@ -124,6 +124,32 @@ def test_the_boost_is_the_built_in_displays_percent_over_100():
     assert displays.boost_of([]) == 1.0
 
 
+def test_a_dragged_slider_sits_on_100_within_3_points_of_it_on_a_display_that_boosts():
+    assert displays.SNAP_WITHIN == 3
+    for value in (97.0, 98.0, 99.0, 100.0, 101.0, 102.0, 103.0):  # inside the zone, edges included
+        assert displays.snap(value, 160, held=True, before=90.0)[0] == 100.0
+    for value in (96.0, 96.9, 103.1, 104.0, 0.0, 160.0):  # outside it
+        assert displays.snap(value, 160, held=True, before=90.0) == (value, False)
+
+
+def test_the_tap_comes_only_as_the_slider_lands_on_100():
+    assert displays.snap(98.0, 160, held=True, before=95.0) == (100.0, True)  # entering from below
+    assert displays.snap(102.0, 160, held=True, before=110.0) == (100.0, True)  # and from above
+    assert displays.snap(101.0, 160, held=True, before=100.0) == (100.0, False)  # already on it
+    assert displays.snap(99.0, 160, held=True) == (100.0, True)  # nothing known before
+
+
+def test_a_display_that_ends_at_100_never_snaps():
+    for value in (97.0, 98.0, 99.0):
+        assert displays.snap(value, 100, held=True, before=90.0) == (value, False)
+
+
+def test_the_arrow_keys_and_voiceover_never_snap():
+    # They step one point at a time: from 100, a step to 101 would be put back on 100 and never get past it.
+    for value in (97.0, 99.0, 101.0, 103.0):
+        assert displays.snap(value, 160, held=False, before=100.0) == (value, False)
+
+
 def test_the_boost_comes_back_only_with_macoss_brightness_at_its_maximum():
     assert displays.can_bring_back([BUILTIN], 1.3)
     assert not displays.can_bring_back([{**BUILTIN, "percent": 90.0}], 1.3)

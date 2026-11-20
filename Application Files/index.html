@@ -1460,7 +1460,12 @@ $('ka-level').onchange = e => saveBattery({ level: +e.target.value });
 // sliders and the keys switch go back through the API and settings. Cards are made again only when
 // the displays themselves change, and a slider being moved is left alone by the polls.
 let displaysState = null;  // { available, displays: [{ id, name, builtin, adjustable, answered, percent, top, nits, volume, muted }], allowed, running }
-const heldSliders = new Set();
+const heldSliders = new Set();  // moved by the pointer: never the arrow keys or VoiceOver
+const sliderAt = new WeakMap();  // where each slider was last shown, to know when it lands on 100%
+let displaySnap = 0;  // displays.SNAP_WITHIN, from app_info
+// As displays.snap (unit-tested there): [where a brightness slider sits, whether it just landed on 100%].
+const snapBrightness = (value, top, held, before) =>
+  held && top > 100 && Math.abs(value - 100) <= displaySnap ? [100, before !== 100] : [value, false];
 const fmtPercent = p => !isNum(p) ? '—' : (Math.round(p * 10) / 10 === Math.round(p) ? `${Math.round(p)}%` : `${p.toFixed(1)}%`);
 function displayNote(d) {
   if (d.builtin) return "macOS doesn't let apps change this display's brightness right now.";
@@ -1486,27 +1491,30 @@ function displayCard(d) {
 }
 function showSlider(el, value) {
   if (!isNum(value)) return;
+  sliderAt.set(el, value);
   if (+el.value !== value) el.value = value;
   el.style.setProperty('--fill', String(value / +el.max));
 }
 const sendTimers = new Map(), sendLatest = new Map();
-function sendSlider(el) {  // at most every 60 ms while moving, and always the last value
-  const key = el.id;
-  sendLatest.set(key, +el.value);
-  if (sendTimers.has(key)) return;
-  const send = () => {
-    const value = sendLatest.get(key);
-    call(el.dataset.kind === 'b' ? 'set_display_brightness' : 'set_display_volume', +el.dataset.id, value);
-    sendTimers.set(key, setTimeout(() => { sendTimers.delete(key); if (sendLatest.get(key) !== value) sendSlider(el); }, 60));
-  };
-  send();
+function sendSlider(el, landed = false) {  // at most every 60 ms while moving, always the last value, and at once onto 100%
+  const key = el.id, value = +el.value;
+  sendLatest.set(key, value);
+  if (sendTimers.has(key) && !landed) return;
+  clearTimeout(sendTimers.get(key));
+  if (el.dataset.kind === 'b') call('set_display_brightness', +el.dataset.id, value, landed);
+  else call('set_display_volume', +el.dataset.id, value);
+  sendTimers.set(key, setTimeout(() => { sendTimers.delete(key); if (sendLatest.get(key) !== value) sendSlider(el); }, 60));
 }
 function bindSliders() {
   for (const el of document.querySelectorAll('#d-list input.range')) {
     el.oninput = () => {
-      showSlider(el, +el.value);
-      put(`d-${el.dataset.kind}v-${el.dataset.id}`, 'html', esc(fmtPercent(+el.value)));
-      sendSlider(el);
+      const before = sliderAt.get(el);
+      const [value, landed] = el.dataset.kind === 'b'
+        ? snapBrightness(+el.value, +el.max, heldSliders.has(el), before) : [+el.value, false];
+      showSlider(el, value);  // a snapped one sits on 100 until the pointer leaves the zone
+      if (value === before) return;  // still on the mark: nothing new to send
+      put(`d-${el.dataset.kind}v-${el.dataset.id}`, 'html', esc(fmtPercent(value)));
+      sendSlider(el, landed);
     };
     el.onpointerdown = () => heldSliders.add(el);
     el.onpointerup = el.onpointercancel = el.onchange = () => heldSliders.delete(el);
@@ -1894,7 +1902,7 @@ window.addEventListener('pywebviewready', async () => {
   const info = await call('app_info');
   fanProfiles = info.fan_profiles; tuningLimits = info.fan_tuning_limits;
   kaChoices = info.keep_awake_choices; kaLevels = info.keep_awake_battery_levels; firstWeekday = info.first_weekday;
-  kaClock = info.clock || kaClock;
+  kaClock = info.clock || kaClock; displaySnap = info.display_snap || 0;
   applySettings(); renderToggles(); renderThermalToggles();
   await poll();  // measure the page with data in it, so the window opens at its final height
   reportContentSize();

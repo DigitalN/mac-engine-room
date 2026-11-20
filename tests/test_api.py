@@ -26,6 +26,7 @@ def test_app_info_gives_the_page_keep_awakes_choices_and_the_first_weekday():
     assert info["keep_awake_choices"] == [["off", "Off"], ["1h", "1 Hour"], ["2h", "2 Hours"], ["sleep", "Until Sleep"]]
     assert info["keep_awake_battery_levels"] == (10, 20, 30, 40, 50)
     assert info["first_weekday"] in range(7)
+    assert info["display_snap"] == 3  # the page's brightness sliders snap to 100% as the menu's do
 
 
 def test_log_file_button_shows_the_log_file(monkeypatch):
@@ -167,14 +168,16 @@ def test_the_displays_tab_gets_its_status_only_while_it_shows():
 
 def test_the_displays_tabs_sliders_go_to_the_main_thread(monkeypatch):
     import accessibility
+    import displays
 
     calls = []
     monkeypatch.setattr(AppHelper, "callAfter", lambda func, *args: calls.append((func, args)))
     tool = SimpleNamespace(set_brightness=object(), set_volume=object(), refresh=object())
     api = Api(app=SimpleNamespace(_displays=tool))
     api.set_display_brightness("1", 130)
+    api.set_display_brightness(1, 100, True)  # a dragged slider landing on 100%: the trackpad's tap first
     api.set_display_volume(5, "40")
     api.refresh_displays()
     api.open_accessibility_settings()
-    assert calls == [(tool.set_brightness, (1, 130.0)), (tool.set_volume, (5, 40.0)), (tool.refresh, ()),
-                     (accessibility.open_settings, ())]
+    assert calls == [(tool.set_brightness, (1, 130.0)), (displays.haptic, ()), (tool.set_brightness, (1, 100.0)),
+                     (tool.set_volume, (5, 40.0)), (tool.refresh, ()), (accessibility.open_settings, ())]

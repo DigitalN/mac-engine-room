@@ -291,7 +291,12 @@ To reproduce without touching the user's data, run with
   brightness went below its maximum, pauses while the screens sleep, and comes back at launch
   (`display_boost`) only with macOS's brightness at its maximum. Chips that ignore gamma tables
   (`displays.CHIPS_IGNORING_GAMMA`: M5 Pro, M5 Max, A18 Pro) and screens without XDR stop at
-  100%. The keys (`Keys.swift`): a tap on a thread of its own for system-defined events only
+  100%. Dragged within `displays.SNAP_WITHIN` (3 points) of 100% on a display that runs past it, a
+  brightness slider sits on 100 (`displays.snap`), with macOS's alignment haptic as it lands (a Force
+  Touch trackpad's; the page asks `Api` for it); the menu counts the mouse-up too, since a slider's
+  last action comes with it. Only while the pointer holds it, never for the arrow keys or VoiceOver:
+  they step one point, so from 100 a step to 101 would snap back and never get past it. The keys
+  (`Keys.swift`): a tap on a thread of its own for system-defined events only
   (brightness 2 and 3, volume 0 and 1, mute 7), taking brightness while a display can be adjusted
   and volume while macOS's sound output is a display whose volume answers DDC; presses go to the
   main queue at user-interactive QoS, where the step, the write and the HUD (`HUD.swift`) happen

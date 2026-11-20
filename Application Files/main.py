@@ -286,10 +286,14 @@ class Api:
         """The Keep Awake tab's buttons: Off, 1 Hour, 2 Hours or Until Sleep. Returns what to show."""
         return self._app._keep_awake.choose(str(choice))
 
-    def set_display_brightness(self, display, percent):
-        """The Displays tab's brightness sliders."""
+    def set_display_brightness(self, display, percent, haptic=False):
+        """The Displays tab's brightness sliders. `haptic` when a dragged one has just landed on 100%
+        (displays.snap): the page has no tap of its own, so the trackpad's comes from here, as the menu's."""
+        import displays
         from PyObjCTools import AppHelper
 
+        if haptic:
+            AppHelper.callAfter(displays.haptic)
         AppHelper.callAfter(self._app._displays.set_brightness, int(display), float(percent))
 
     def set_display_volume(self, display, percent):
@@ -406,6 +410,7 @@ class Api:
         AppHelper.callAfter(NSWorkspace.sharedWorkspace().openURL_, NSURL.URLWithString_(REPORT_ISSUE_URL))
 
     def app_info(self):
+        import displays
         import fans
         import keepawake
 
@@ -415,7 +420,8 @@ class Api:
                 "version": VERSION, "log_path": str(LOG_PATH), "sensor_hint": self._app._sensor_hint(),
                 "history_recording": self._app._settings.get()["record_history"],
                 "update_unavailable_reason": self._app._updater.unavailable_reason,
-                "fan_profiles": fans.page_profiles(), "fan_tuning_limits": fans.TUNING_LIMITS}
+                "fan_profiles": fans.page_profiles(), "fan_tuning_limits": fans.TUNING_LIMITS,
+                "display_snap": displays.SNAP_WITHIN}
 
     def set_content_size(self, width, height, fit=False):
         """The page reports the size it needs; the window can't be made bigger.
