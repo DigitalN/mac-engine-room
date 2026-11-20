@@ -13,6 +13,13 @@
 //   (screensChanged). The trigger is made again only when the built-in display itself moved; making
 //   it again on every one restored the table each time and flickered the screen (1.5.0's test copy).
 // - At alpha 0.003 (BetterDisplay's), the pixel can't be seen and still triggers EDR.
+// - Entering EDR isn't visible: as the trigger appears, macOS ramps the backlight from 600 to 1,600
+//   nits over 0.75 s while WindowServer holds SDR white at 500 nits (its log). It costs about 2 W:
+//   the screen drew 9.30 W before and 11.34 W with the trigger at ×1, at full brightness. macOS
+//   itself keeps EDR for 15 s after the trigger goes.
+// - The trigger stays for `triggerGrace` after the boost drops back to 100%, so stepping across 100%
+//   doesn't take it away and make it again; a key step aiming past 100% (or the slider near it) makes
+//   it ahead of the boost (prepare), so macOS has granted the headroom by the time the factor rises.
 // When the app quits or crashes, macOS puts the user's ColorSync tables back.
 //
 // Main thread only.
@@ -26,6 +33,11 @@ final class Boost {
     static let integrityInterval = 5.0  // seconds between checks that the table is still ours
     static let headroomWait = 3.0  // app.log says so if macOS hasn't granted any headroom by then
     static let wakeSettle = 2.0  // seconds after the screens wake (or the built-in display is back) before the boost comes back
+    /// Seconds the trigger stays at ×1 once the boost is back at 100% (or after prepare): about 2 W
+    /// while it does (9.30 W against 11.34 W, measured), plus macOS's own 15 s of EDR after it goes.
+    static let triggerGrace = 5.0
+    /// DisplayServices' notifications for a brightness the controller just set are its own, not macOS's.
+    static let ownBrightnessFor = 0.5
 
     /// What the boost asks for (percent, 100 = none) and whether it's paused (screens asleep).
     private(set) var percent = 100.0
@@ -48,6 +60,8 @@ final class Boost {
     private var starts = 0
     private var observing: CGDirectDisplayID = 0
     private var reported = false  // app.log has the first table write (or no headroom) since the trigger appeared
+    private var release: DispatchWorkItem?  // takes the trigger away after the grace period
+    private var ignoreBrightnessUntil = Date.distantPast
     /// The boost ended because macOS's brightness went below its maximum (its reason, for app.log).
     var onEnded: (String) -> Void = { _ in }
     /// It's on (with its gamma factor and headroom), or off, or paused (why), for app.log.
@@ -55,8 +69,14 @@ final class Boost {
     /// The table was written with a new factor, or put back: the nits and "boosting" it lists change.
     var onWritten: () -> Void = {}
 
+    /// Boosting: past 100% with the trigger up.
     var active: Bool {
         return percent > Scale.plainTop && !paused && window != nil
+    }
+
+    /// The screen is in EDR because of the trigger (boosting, or at ×1 for the grace period).
+    var hasTrigger: Bool {
+        return window != nil
     }
 
     /// Asked for, even while paused for the screens' sleep: the built-in display's percent is the boost's.
@@ -69,28 +89,65 @@ final class Boost {
         return Double(screen(for: display)?.maximumExtendedDynamicRangeColorComponentValue ?? 1)
     }
 
-    /// Boost the built-in display to `percent` (100 or less turns it off). macOS's own brightness must
-    /// be at its maximum; the caller sets it first.
-    func set(_ percent: Double, display: CGDirectDisplayID) {
+    /// Boost the built-in display to `percent`. Above 100%, macOS's own brightness must be at its
+    /// maximum (the caller sets it first). At 100 or less the factor goes back to ×1 at once, before
+    /// the caller brings macOS's brightness down, and the trigger stays for the grace period. `target`
+    /// is where a fade is going, for app.log.
+    func set(_ percent: Double, display: CGDirectDisplayID, target: Double? = nil) {
         let was = self.percent
         self.percent = percent
         self.display = display
         guard percent > Scale.plainTop else {
             if was > Scale.plainTop {
-                stop()
+                apply()
                 onLog("Display boost off")
+                releaseSoon()
             }
             return
         }
         guard !paused, !gone else {
             return
         }
+        release?.cancel()
+        if was <= Scale.plainTop {
+            onLog(String(format: "Display boost on at %.0f%%", target ?? percent))
+            reported = false  // its first table write is logged too
+        }
         if window == nil {
             start()
-            onLog(String(format: "Display boost on at %.0f%%", percent))
         } else {
             apply()
         }
+    }
+
+    /// Puts the screen in EDR ahead of a boost (the trigger at ×1): a key step aiming past 100%, or
+    /// the slider near it. It goes after the grace period if no boost follows.
+    func prepare(display: CGDirectDisplayID) {
+        guard !paused, !gone, !requested else {
+            return
+        }
+        self.display = display
+        if window == nil {
+            start()
+        }
+        releaseSoon()
+    }
+
+    /// The controller is about to set macOS's brightness itself.
+    func ownBrightnessChange() {
+        ignoreBrightnessUntil = Date().addingTimeInterval(Self.ownBrightnessFor)
+    }
+
+    private func releaseSoon() {
+        release?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            guard let self, !self.requested else {
+                return
+            }
+            self.stop()
+        }
+        release = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.triggerGrace, execute: item)
     }
 
     /// The screens went to sleep (true) or woke (false): the trigger and table go while they sleep.
@@ -99,17 +156,18 @@ final class Boost {
             return
         }
         paused = asleep
-        guard percent > Scale.plainTop else {
-            return
-        }
         if asleep {
             if window != nil {
                 stop()
-                onLog("Display boost paused (the screens are asleep)")
+                if requested {
+                    onLog("Display boost paused (the screens are asleep)")
+                }
             }
             return
         }
-        resumeSoon()
+        if requested {
+            resumeSoon()
+        }
     }
 
     /// macOS changed something about the screens. Most of these only mean the headroom moved, and
@@ -117,7 +175,7 @@ final class Boost {
     /// is made again and the table read again (macOS may have reset it); while the built-in display
     /// isn't a screen, the boost pauses.
     func screensChanged() {
-        guard requested else {
+        guard requested || window != nil else {
             return
         }
         let now = NSScreen.screens.first { CGDisplayIsBuiltin($0.displayID) != 0 }
@@ -130,12 +188,16 @@ final class Boost {
             apply()
         case .move:
             stop()
-            start()
+            if requested {
+                start()
+            }
         case .gone:
             gone = true
             if window != nil {
                 stop()
-                onLog("Display boost paused (the built-in display isn't in use)")
+                if requested {
+                    onLog("Display boost paused (the built-in display isn't in use)")
+                }
             }
         case .back:
             gone = false
@@ -195,6 +257,8 @@ final class Boost {
     }
 
     private func stop() {
+        release?.cancel()
+        release = nil
         timer?.invalidate()
         timer = nil
         if observing != 0 {
@@ -237,12 +301,13 @@ final class Boost {
         apply()
     }
 
-    /// Writes the table for the headroom macOS grants now (nothing until the screen is in EDR).
+    /// Writes the table for the headroom macOS grants now (nothing until the screen is in EDR), or ×1
+    /// at 100% and below while the trigger stays.
     private func apply() {
-        guard active, let base else {
+        guard window != nil, !paused, let base else {
             return
         }
-        let factor = Scale.gammaFactor(percent: percent, headroom: headroom)
+        let factor = percent > Scale.plainTop ? Scale.gammaFactor(percent: percent, headroom: headroom) : 1
         guard abs(factor - written) > 0.0005 else {
             return
         }
@@ -330,7 +395,11 @@ final class Boost {
     fileprivate static weak var current: Boost?
 
     fileprivate func macOSBrightness(_ value: Double) {
-        guard percent > Scale.plainTop, value < 0.999 else {
+        // The controller's own fades set macOS's brightness below its maximum just before a boost, and
+        // their notifications can arrive once it's boosting: those, and any the current value
+        // contradicts, aren't macOS's.
+        guard percent > Scale.plainTop, value < 0.999, Date() > ignoreBrightnessUntil,
+              (DisplayServices.brightness(display) ?? value) < 0.999 else {
             return
         }
         stop()

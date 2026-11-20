@@ -94,6 +94,9 @@ class FakeAccess:
     def register(self, stop, start):
         self.taps.append((stop, start))
 
+    def setting_name(self):
+        return "Device Control and Data Access"
+
 
 def make(settings=None, library=None, access=None, chip="Apple M1 Pro"):
     later = []
@@ -220,8 +223,11 @@ def test_turning_the_switch_on_asks_once_then_the_tap_starts_when_allowed(caplog
         assert access.asked == 1  # once a launch
         access.granted = library.allowed = True
         access.watchers[0](True)
-    assert library.keys_running()
-    assert "Display keys on: brightness, volume and mute" in caplog.text
+        assert library.keys_running()
+        # What the tap takes is the dylib's line (it knows where the sound goes), not a fixed one here.
+        assert "Display keys on" not in caplog.text
+        tool.settings_changed({"display_keys": False})
+    assert "Display keys off" in caplog.text
 
 
 def test_the_switch_on_at_launch_never_asks():
@@ -254,6 +260,7 @@ def test_the_tab_gets_the_displays_and_the_grant():
     tool.start()
     status = tool.status()
     assert status["available"] and status["allowed"] and not status["running"]
+    assert status["setting"] == "Device Control and Data Access"  # what the tab calls the list
     assert [d["name"] for d in status["displays"]] == ["Built-in Display", "LG TV SSCR2"]
 
 
@@ -262,6 +269,16 @@ def test_without_the_dylib_there_is_nothing(monkeypatch):
     tool = Displays(FakeSettings(), access=FakeAccess(), call_on_main=lambda fn: fn())
     tool.start()
     assert not tool.available
-    assert tool.status() == {"available": False, "displays": [], "allowed": False, "running": False}
+    assert tool.status() == {"available": False, "displays": [], "allowed": False, "running": False,
+                             "setting": "Device Control and Data Access"}
     tool.set_brightness(1, 50)  # nothing to do, and no error
     assert tool.displays() == []
+
+
+def test_macos_27_calls_the_accessibility_list_device_control_and_data_access(monkeypatch):
+    import accessibility
+
+    for version, name in [("27.2.1", "Device Control and Data Access"), ("28.0", "Device Control and Data Access"),
+                          ("26.4", "Accessibility"), ("15.7.2", "Accessibility"), ("", "Accessibility")]:
+        monkeypatch.setattr(accessibility.platform, "mac_ver", lambda v=version: (v, ("", "", ""), ""))
+        assert accessibility.setting_name() == name, version

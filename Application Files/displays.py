@@ -309,7 +309,7 @@ class Displays:
             return
         result = self._library.set_keys(True)
         if result == ON:
-            self._show("Display keys on: brightness, volume and mute")
+            self._shown = "on"  # the dylib logs what the tap takes, and again whenever that changes
         elif result == NOT_ALLOWED:  # the grant went between reading it and making the tap
             self._allowed = False
             self._show("Display keys are waiting for Accessibility to be allowed")
@@ -326,15 +326,16 @@ class Displays:
 
     def status(self):
         """For the Displays tab: the displays, whether this build has the dylib, whether Accessibility is
-        allowed (read now: the tab polls it) and whether the tap is running. A grant that changed without
-        its notification is acted on from here."""
+        allowed (read now: the tab polls it), what System Settings calls that list, and whether the tap
+        is running. A grant that changed without its notification is acted on from here."""
         if self._library is None:
-            return {"available": False, "displays": [], "allowed": False, "running": False}
+            return {"available": False, "displays": [], "allowed": False, "running": False,
+                    "setting": self._access.setting_name()}
         allowed = self._access.allowed()
         if allowed != self._allowed:
             self._main(lambda: self._grant_changed(allowed))
         return {"available": True, "displays": self.displays(), "allowed": allowed,
-                "running": self._library.keys_running()}
+                "running": self._library.keys_running(), "setting": self._access.setting_name()}
 
     def _main(self, fn):
         if self._call_on_main is not None:

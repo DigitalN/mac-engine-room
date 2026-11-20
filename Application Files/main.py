@@ -305,7 +305,8 @@ class Api:
         AppHelper.callAfter(self._app._displays.refresh)
 
     def open_accessibility_settings(self):
-        """Privacy & Security › Accessibility, where the user allows the keys switch."""
+        """Privacy & Security › Accessibility (Device Control and Data Access on macOS 27), where the user
+        allows the keys switch."""
         import accessibility
         from PyObjCTools import AppHelper
 

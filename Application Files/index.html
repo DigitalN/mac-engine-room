@@ -478,7 +478,8 @@ dialog .actions { justify-content: flex-end; }
     </div>
   </section>
 
-  <!-- ── Displays: a card for each display, then the keys switch and Accessibility ── -->
+  <!-- ── Displays: a card for each display, then the keys switch and Accessibility (Device Control and
+       Data Access on macOS 27) ── -->
   <section class="page" id="page-displays">
     <div class="settings">
       <div class="group" id="d-unavailable" style="display: none">
@@ -492,6 +493,11 @@ dialog .actions { justify-content: flex-end; }
             <div class="lbl">Brightness and volume keys<div class="hint">Brightness keys change the display the pointer is on, past 100% on the built-in XDR screen; ⌥⇧ takes quarter steps. Volume and mute reach a display's speakers when it's the sound output and answers DDC.</div></div>
             <label class="switch"><input type="checkbox" id="d-keys"><span></span></label>
           </div>
+        </div>
+      </div>
+      <div class="group" id="d-access-group">
+        <h3 id="d-access-title">Accessibility</h3>
+        <div class="card">
           <div class="srow">
             <div class="lbl"><span id="d-access"></span><div class="hint" id="d-access-hint"></div></div>
             <button class="btn" id="d-access-open">Open Privacy &amp; Security</button>
@@ -1511,6 +1517,7 @@ function renderDisplays() {
   const s = displaysState || { available: true, displays: [], allowed: true, running: false };
   put('d-unavailable', 'display', s.available ? 'none' : '');
   put('d-keys-group', 'display', s.available ? '' : 'none');
+  put('d-access-group', 'display', s.available ? '' : 'none');
   const list = $('d-list');
   const shape = s.displays.map(d => [d.id, d.name, d.top, d.adjustable, d.answered, isNum(d.volume)].join()).join('|');
   if (list.dataset.shape !== shape) {
@@ -1531,10 +1538,12 @@ function renderDisplays() {
     }
   }
   setChecked($('d-keys'), settings.display_keys);
-  put('d-access', 'text', s.allowed ? 'Accessibility allowed' : 'Accessibility not allowed');
+  const setting = s.setting || 'Accessibility';  // Device Control and Data Access on macOS 27
+  put('d-access-title', 'text', setting);
+  put('d-access', 'text', s.allowed ? 'Allowed' : 'Not allowed');
   put('d-access-hint', 'text', s.allowed
     ? 'Mac Engine Room can take the brightness and volume keys.'
-    : settings.display_keys ? 'The keys take effect once Mac Engine Room is allowed in Privacy & Security › Accessibility.'
+    : settings.display_keys ? `The keys take effect once Mac Engine Room is allowed in Privacy & Security › ${setting}.`
       : 'Turning on the keys asks for it. Mac Engine Room needs it to take the brightness and volume keys.');
   put('d-access-open', 'display', s.allowed ? 'none' : '');
 }

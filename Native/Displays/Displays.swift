@@ -54,8 +54,58 @@ final class Display {
     }
 }
 
+/// Eases the built-in display's brightness to a key step's target over macOS's own fade time
+/// (Scale.fadeFor), on the main thread with a short timer that stops when it arrives: never a
+/// continuous animation. The timer fires at user-interactive QoS, since the main thread sits at
+/// background QoS while the app is idle (priority.py), where timers are coalesced and fire late.
+final class Fade {
+    static let interval = 1.0 / 60
+    private(set) var level = 0.0
+    private(set) var target = 0.0
+    private var from = 0.0
+    private var began = Date.distantPast
+    private var source: DispatchSourceTimer?
+    var step: (Double) -> Void = { _ in }  // puts a level on the screen
+    var finished: () -> Void = {}
+
+    var running: Bool {
+        return source != nil
+    }
+
+    /// From where a running fade is now (or `current` when none is), towards `target`.
+    func go(from current: Double, to target: Double) {
+        from = running ? level : current
+        self.target = target
+        began = Date()
+        if source == nil {
+            let timer = DispatchSource.makeTimerSource(flags: .strict, queue: .main)
+            timer.schedule(deadline: .now() + Self.interval, repeating: Self.interval, leeway: .milliseconds(2))
+            timer.setEventHandler(qos: .userInteractive, flags: .enforceQoS) { [weak self] in self?.tick() }
+            timer.resume()
+            source = timer
+        }
+    }
+
+    func stop() {
+        source?.cancel()
+        source = nil
+    }
+
+    private func tick() {
+        let progress = Date().timeIntervalSince(began) / Scale.fadeFor
+        level = Scale.eased(from: from, to: target, progress: progress)
+        step(level)
+        if progress >= 1 {
+            stop()
+            finished()
+        }
+    }
+}
+
 final class Controller {
     static let shared = Controller()
+    /// The slider at or above this on the built-in XDR display puts the screen in EDR ahead of a boost.
+    static let prepareFrom = 90.0
     static let ddcQueue = DispatchQueue(label: "Mac Engine Room DDC", qos: .userInitiated)
 
     private(set) var displays: [Display] = []
@@ -75,6 +125,9 @@ final class Controller {
     private var walk = 0  // the latest IORegistry walk asked for; an older one's result is dropped
     private var shapes: [ScreenShape]?  // the screens as discover() last saw them
     private var changeSoon: DispatchWorkItem?
+    private let fade = Fade()
+    private var fading: CGDirectDisplayID = 0  // the display the fade is on
+    private var keysLogged: String?
     var changed: () -> Void = {}
     var log: (String) -> Void = { _ in }
 
@@ -92,12 +145,20 @@ final class Controller {
                 return
             }
             self.log("Display boost off (\(why))")
+            self.fade.stop()
             if let builtin = self.displays.first(where: { $0.builtin }) {
                 self.readBuiltin(builtin)
             }
             self.changed()
         }
         boost.onWritten = { [weak self] in self?.changedSoon() }
+        fade.step = { [weak self] level in
+            guard let self else {
+                return
+            }
+            self.putBuiltin(self.fading, level, target: self.fade.target)
+        }
+        fade.finished = { [weak self] in self?.fadeFinished() }
         sound.onChange = { [weak self] in self?.route() }
         let center = NotificationCenter.default
         // macOS posts this every time a screen's EDR headroom moves (dozens a second while the boost's
@@ -218,6 +279,9 @@ final class Controller {
     }
 
     private func readBuiltin(_ display: Display) {
+        if fade.running && fading == display.id {
+            return  // the fade's target stands
+        }
         if boost.requested {
             display.brightness = boost.percent
         } else if DisplayServices.canAdjust(display.id), let value = DisplayServices.brightness(display.id) {
@@ -292,21 +356,48 @@ final class Controller {
         }
         let value = max(0, min(display.top, percent))
         if display.builtin {
-            if value > Scale.plainTop {
-                if (DisplayServices.brightness(id) ?? 0) < 0.999 {
-                    DisplayServices.setBrightness(id, 1)
-                }
-                boost.set(value, display: id)
-            } else {
-                boost.set(Scale.plainTop, display: id)  // off before macOS's brightness goes down
-                DisplayServices.setBrightness(id, value / 100)
+            // The slider follows the finger directly. Near 100% the screen goes into EDR first, so
+            // crossing it is as seamless as the keys' fades.
+            fade.stop()
+            if display.top > Scale.plainTop && value >= Self.prepareFrom {
+                boost.prepare(display: id)
             }
+            putBuiltin(id, value)
             display.brightness = value
             display.linear = DisplayServices.linearBrightness(id)
         } else if display.adjustable {
             display.brightness = value
             write(display, .brightness, Scale.ddcValue(percent: value, maximum: display.brightnessMax))
         }
+    }
+
+    /// Puts a level on the built-in display: macOS's own brightness up to 100%, the boost's factor
+    /// above it. Crossing upward, macOS's brightness is at its maximum before the factor rises;
+    /// downward, the factor is back at ×1 before macOS's brightness comes down.
+    private func putBuiltin(_ id: CGDirectDisplayID, _ level: Double, target: Double? = nil) {
+        if level > Scale.plainTop {
+            if (DisplayServices.brightness(id) ?? 0) < 0.999 {
+                boost.ownBrightnessChange()
+                DisplayServices.setBrightness(id, 1)
+            }
+            boost.set(level, display: id, target: target)
+        } else {
+            boost.set(Scale.plainTop, display: id)
+            boost.ownBrightnessChange()
+            DisplayServices.setBrightness(id, level / 100)
+        }
+    }
+
+    /// A key step's fade arrived: the nits a 100% or lower step reaches are known now.
+    private func fadeFinished() {
+        guard let display = displays.first(where: { $0.id == fading }) else {
+            return
+        }
+        display.linear = DisplayServices.linearBrightness(display.id)
+        if let content = brightnessHUD(display) {
+            HUD.shared.update(content)
+        }
+        changed()
     }
 
     func setVolume(_ id: CGDirectDisplayID, _ percent: Double) {
@@ -377,12 +468,14 @@ final class Controller {
             return -2
         }
         keyTap = tap
+        route()  // app.log: what it takes
         return 1
     }
 
     func stopKeys() {
         keyTap?.stop()
         keyTap = nil
+        keysLogged = nil
         sound.listen(false)
     }
 
@@ -392,17 +485,28 @@ final class Controller {
 
     /// Which keys the tap takes: brightness while any display can be adjusted, volume and mute while
     /// macOS's sound goes to a display whose volume answers DDC.
+    /// app.log has what the tap takes while it runs, again whenever that changes.
     private func route() {
         let anyAdjustable = displays.contains { $0.adjustable }
-        routing.set(brightness: anyAdjustable, volume: soundTarget() != nil)
+        let output = keyTap != nil || keysWanted ? sound.current() : nil
+        let target = soundTarget(output)
+        routing.set(brightness: anyAdjustable, volume: target != nil)
+        guard keyTap != nil else {
+            return
+        }
+        let line = keysLine(brightness: anyAdjustable, volumeTo: target?.name, soundToDisplay: output?.display ?? false)
+        if line != keysLogged {
+            keysLogged = line
+            log(line)
+        }
     }
 
-    private func soundTarget() -> Display? {
+    private func soundTarget(_ output: (name: String, display: Bool)?? = nil) -> Display? {
         guard keyTap != nil || keysWanted else {
             return nil
         }
         let candidates = displays.filter { !$0.builtin && $0.volume != nil }
-        let id = soundDisplay(output: sound.current(), candidates: candidates.map { ($0.id, $0.name) })
+        let id = soundDisplay(output: output ?? sound.current(), candidates: candidates.map { ($0.id, $0.name) })
         return candidates.first { $0.id == id }
     }
 
@@ -412,11 +516,27 @@ final class Controller {
             guard let display = keyDisplay() else {
                 return
             }
-            if display.builtin && !boost.requested {
-                readBuiltin(display)  // macOS's own brightness may have moved since
+            let up = press.key == .brightnessUp
+            if display.builtin {
+                // Each step eases over macOS's own fade time; a press during a fade aims one step past
+                // its target, from where it is now. The HUD shows the target at once.
+                if !(fade.running && fading == display.id) && !boost.requested {
+                    readBuiltin(display)  // macOS's own brightness may have moved since
+                }
+                if fading != display.id {
+                    fade.stop()
+                }
+                let from = display.brightness ?? 0
+                let next = Scale.stepped(from, up: up, fine: press.fine, top: display.top)
+                if display.top > Scale.plainTop && up && next >= Scale.plainTop {
+                    boost.prepare(display: display.id)  // EDR ahead of the boost: no wait at 100%
+                }
+                display.brightness = next
+                fading = display.id
+                fade.go(from: from, to: next)
+            } else {
+                setBrightness(display.id, Scale.stepped(display.brightness ?? 0, up: up, fine: press.fine, top: display.top))
             }
-            let next = Scale.stepped(display.brightness ?? 0, up: press.key == .brightnessUp, fine: press.fine, top: display.top)
-            setBrightness(display.id, next)
             showHUD(brightnessOf: display)
         } else {
             guard let display = soundTarget(), let volume = display.volume else {
@@ -444,15 +564,22 @@ final class Controller {
     }
 
     private func showHUD(brightnessOf display: Display) {
-        guard let screen = NSScreen.screens.first(where: { $0.displayID == display.id }) else {
+        guard let screen = NSScreen.screens.first(where: { $0.displayID == display.id }),
+              let content = brightnessHUD(display) else {
             return
         }
+        HUD.shared.show(content, on: screen)
+    }
+
+    /// The HUD for a display's brightness: its target. Past 100% the nits are the scale's (500 ×
+    /// ratio, as BetterDisplay shows them); at 100% and below, macOS's linear brightness, known once a
+    /// fade has arrived (the HUD is updated then).
+    private func brightnessHUD(_ display: Display) -> HUDContent? {
         let percent = display.brightness ?? 0
         let nits = display.builtin && display.xdr
-            ? Scale.nits(percent: percent, linear: display.linear ?? 0, headroom: boost.active ? boost.headroom : 1) : nil
-        HUD.shared.show(HUDContent(symbol: "sun.max.fill", value: percent, top: display.top,
-                                   segments: Scale.segments(top: display.top), bubble: Scale.bubble(percent: percent, nits: nits)),
-                        on: screen)
+            ? Scale.nits(percent: percent, linear: display.linear ?? 0, headroom: .infinity) : nil
+        return HUDContent(symbol: "sun.max.fill", value: percent, top: display.top,
+                          segments: Scale.segments(top: display.top), bubble: Scale.bubble(percent: percent, nits: nits))
     }
 
     private func showHUD(volumeOf display: Display) {

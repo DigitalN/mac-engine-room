@@ -11,6 +11,7 @@
 //   displays:    tv (an LG TV answering DDC, with volume) tvnoddc (one that doesn't) tvasking (DDC not answered yet)
 //                boosted (the built-in at 130%) noboost (an M5 Pro: stops at 100%) noxdr (no XDR screen: no nits)
 //                dkeys (the keys switch on, allowed) dkeyswaiting (on, Accessibility not allowed) muted
+//                oldmacos (before macOS 27: the list is still called Accessibility)
 //                nodisplays (a build without libdisplays.dylib)
 //   settings:    fahrenheit dark light
 //   tab:         dashboard (default) thermals keepawake power displays history settings
@@ -41,7 +42,7 @@
     keepAwake: { choice: 'off', holding: false, line: null },  // keepawake.KeepAwake.status()
     // displays.Displays.status(): the built-in XDR display at macOS's own maximum to start with.
     displays: {
-      available: true, allowed: false, running: false,
+      available: true, allowed: false, running: false, setting: 'Device Control and Data Access',  // 'Accessibility' before macOS 27 (s=oldmacos)
       displays: [{ id: 1, name: 'Built-in Display', builtin: true, adjustable: true, answered: true, percent: 100, top: 160,
                    nits: 500, volume: null, muted: null, boosting: false }],
     },
@@ -104,7 +105,8 @@
     dkeys: () => { state.settings.display_keys = true; Object.assign(state.displays, { allowed: true, running: true }); },
     dkeyswaiting: () => { state.settings.display_keys = true; },
     muted: () => { const tv = state.displays.displays.find(d => d.id === 5); if (tv) tv.muted = true; },
-    nodisplays: () => { state.displays = { available: false, displays: [], allowed: false, running: false }; },
+    nodisplays: () => { state.displays = { available: false, displays: [], allowed: false, running: false, setting: 'Device Control and Data Access' }; },
+    oldmacos: () => { state.displays.setting = 'Accessibility'; },
     fahrenheit: () => { state.settings.temperature_unit = 'fahrenheit'; },
     dark: () => { state.settings.theme = 'dark'; },
     light: () => { state.settings.theme = 'light'; },

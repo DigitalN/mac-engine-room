@@ -99,7 +99,11 @@ flickered). macOS's own log says what moved its brightness: `log show --predicat
 key press, and `CBAutoBrightnessEnabled` in `/usr/libexec/corebrightnessdiag status-info` says whether
 auto-brightness is on. At launch: `Display boost brought back at 130%`, or `Display
 boost not brought back: macOS's brightness is below its maximum` (or `this Mac's display can't
-boost`). The keys: `Display keys on: brightness, volume and mute`, `Display keys are waiting for
+boost`). `Display boost on` and `off` come at each crossing of 100%; the trigger stays 5 s after
+`off`, so stepping back past 100% within that logs no new trigger (no `has no EDR headroom`, and the
+`at ×` line straight away). The keys: what the tap takes, when it starts and whenever that changes,
+e.g. `Display keys on: brightness (volume and mute stay with macOS: the sound isn't going to a
+display)` or `Display keys on: brightness, volume and mute (LG TV SSCR2)`; `Display keys are waiting for
 Accessibility to be allowed`, `Asked macOS to allow Accessibility for the brightness and volume
 keys`, `Display keys off`, `Display keys tap stopped for the update` and `Display keys tap
 couldn't be made: macOS refused it`. A build without the dylib logs `Displays isn't available:
@@ -247,7 +251,8 @@ To reproduce without touching the user's data, run with
   bundle and starts them again if the swap fails (a bundle replaced under a running tap froze
   input for two minutes on 27.2, Scroll Reverser #220). On macOS 27 System Settings calls the
   list **Device Control and Data Access**, and the prompt didn't appear for an LSUIElement app
-  (tccd logged that it showed it): the maintainer added the app with +. An app TCC can't find in
+  (tccd logged that it showed it): the maintainer added the app with +. `setting_name()` gives the
+  list's name for the macOS running, which the Displays and Mouse tabs show. An app TCC can't find in
   Launch Services (one in `/private/tmp`) can't be listed at all, so test copies live somewhere
   registered.
 - **Displays**: `Application Files/displays.py` over `Native/Displays/*.swift`, built into
@@ -270,7 +275,19 @@ To reproduce without touching the user's data, run with
   notification only writes the factor for the new headroom: the trigger is made again only when the
   built-in display's ID or frame changed, and the list of displays only when the screens themselves
   did (`ScreenChange`, tested). Making the trigger again on each one restored the table each time and
-  flickered the screen. It ends when DisplayServices' brightness notification says macOS's own
+  flickered the screen. **Entering EDR isn't visible**: macOS ramps the backlight from 600 to 1,600
+  nits over 0.75 s while WindowServer holds SDR white at 500 (its log), and the screen draws about 2
+  W more (9.30 W against 11.34 W with the trigger at ×1); macOS keeps EDR 15 s after the trigger
+  goes. So the trigger stays 5 s at ×1 after the boost drops back to 100% (`triggerGrace`), and a key
+  step aiming past 100% (or the slider at 90% or more) makes it ahead of the boost (`prepare`).
+  **The keys' steps ease** over 0.25 s, macOS's own fade per step (its corebrightnessd ramps):
+  `Fade`, a 60 Hz `DispatchSourceTimer` on the main queue at user-interactive QoS (the main thread
+  idles at background QoS, where timers fire late) that stops when it arrives. At 100% and below it
+  moves macOS's brightness, above it the factor; crossing upward macOS's brightness reaches its
+  maximum first, downward the factor reaches ×1 first. A press during a fade aims one step past its
+  target, from where it is; the HUD shows the target at once. DisplayServices' notifications for the
+  fade's own brightness can arrive once it's boosting, so the boost ignores them for 0.5 s and checks
+  the current value. It ends when DisplayServices' brightness notification says macOS's own
   brightness went below its maximum, pauses while the screens sleep, and comes back at launch
   (`display_boost`) only with macOS's brightness at its maximum. Chips that ignore gamma tables
   (`displays.CHIPS_IGNORING_GAMMA`: M5 Pro, M5 Max, A18 Pro) and screens without XDR stop at
@@ -278,8 +295,8 @@ To reproduce without touching the user's data, run with
   (brightness 2 and 3, volume 0 and 1, mute 7), taking brightness while a display can be adjusted
   and volume while macOS's sound output is a display whose volume answers DDC; presses go to the
   main queue at user-interactive QoS, where the step, the write and the HUD (`HUD.swift`) happen
-  before Python hears of it. `Scale.swift` has the pure parts (scale, nits, factor, steps,
-  segments), tested by `tests/displays/main.swift`; `tools/render_menu.py --displays` and the
+  before Python hears of it. `Scale.swift` has the pure parts (scale, nits, factor, steps, easing,
+  segments, `ScreenChange`; `keysLine` is in `Keys.swift`), tested by `tests/displays/main.swift`; `tools/render_menu.py --displays` and the
   preview's `tv`, `boosted`, `dkeys`… states show the rest.
 - **Menu bar**: `Application Files/statusbar.py`. Native `NSStatusItem` and `NSMenu`
   (PyObjC). The title shows watts or a temperature; the menu's fan profile buttons,

@@ -48,6 +48,15 @@ final class HUD {
         hideTimer = timer
     }
 
+    /// Changes what a HUD still on screen shows (the same kind: brightness or volume), without keeping
+    /// it up longer.
+    func update(_ content: HUDContent) {
+        guard let panel, panel.isVisible, view.content.symbol == content.symbol else {
+            return
+        }
+        view.content = content
+    }
+
     private func fade() {
         guard let panel else {
             return

@@ -213,6 +213,23 @@ final class SoundOutput {
     }
 }
 
+/// app.log's line for what the tap takes now: brightness while a display can be adjusted, volume and
+/// mute while the sound goes to a display whose volume answers DDC (`volumeTo`, its name). Pure.
+func keysLine(brightness: Bool, volumeTo: String?, soundToDisplay: Bool) -> String {
+    let volumeStays = soundToDisplay ? "the display the sound goes to doesn't answer DDC for volume"
+        : "the sound isn't going to a display"
+    switch (brightness, volumeTo) {
+    case (true, let name?):
+        return "Display keys on: brightness, volume and mute (\(name))"
+    case (true, nil):
+        return "Display keys on: brightness (volume and mute stay with macOS: \(volumeStays))"
+    case (false, let name?):
+        return "Display keys on: volume and mute (\(name)); brightness stays with macOS: no display's brightness can be adjusted"
+    case (false, nil):
+        return "Display keys on, taking nothing yet: no display's brightness can be adjusted, and \(volumeStays)"
+    }
+}
+
 /// Which display the sound goes to, if any: the one whose name the output device has, or, if there's
 /// only one display it could be, that one. Pure.
 func soundDisplay(output: (name: String, display: Bool)?, candidates: [(id: CGDirectDisplayID, name: String)]) -> CGDirectDisplayID? {

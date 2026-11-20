@@ -139,6 +139,29 @@ check("an M5 Pro doesn't", !BoostSupport.supported(builtin: true, potentialHeadr
 check("a screen without XDR doesn't", !BoostSupport.supported(builtin: true, potentialHeadroom: 1, chipIgnoresGamma: false))
 check("an external display doesn't", !BoostSupport.supported(builtin: false, potentialHeadroom: 16, chipIgnoresGamma: false))
 
+// ── easing the keys' steps ──
+
+check("a fade starts where it is", near(Scale.eased(from: 50, to: 60, progress: 0), 50))
+check("and ends at the target", near(Scale.eased(from: 50, to: 60, progress: 1), 60))
+check("past the end it stays there", near(Scale.eased(from: 50, to: 60, progress: 1.4), 60))
+check("it eases out: more than half way at half the time", Scale.eased(from: 0, to: 10, progress: 0.5) > 5)
+check("downward too", near(Scale.eased(from: 110, to: 100, progress: 0.5), 102.5))
+let fadeSteps = stride(from: 0.0, through: 1.0, by: 0.1).map { Scale.eased(from: 95, to: 105, progress: $0) }
+check("it never turns back", zip(fadeSteps, fadeSteps.dropFirst()).allSatisfy { $0 <= $1 })
+check("macOS's own fade time", near(Scale.fadeFor, 0.25))
+
+// ── what the keys take, for app.log ──
+
+check("brightness only, with the sound on the Mac's speakers",
+      keysLine(brightness: true, volumeTo: nil, soundToDisplay: false)
+        == "Display keys on: brightness (volume and mute stay with macOS: the sound isn't going to a display)")
+check("everything, with the sound on a TV that answers",
+      keysLine(brightness: true, volumeTo: "LG TV SSCR2", soundToDisplay: true) == "Display keys on: brightness, volume and mute (LG TV SSCR2)")
+check("the sound on a display that doesn't answer DDC for volume",
+      keysLine(brightness: true, volumeTo: nil, soundToDisplay: true)
+        == "Display keys on: brightness (volume and mute stay with macOS: the display the sound goes to doesn't answer DDC for volume)")
+check("nothing to take", keysLine(brightness: false, volumeTo: nil, soundToDisplay: false).hasPrefix("Display keys on, taking nothing yet"))
+
 // ── screen-parameters notifications ──
 // macOS posts one every time a screen's EDR headroom moves, dozens a second while the boost's trigger
 // ramps it up. 1.5.0's test copy made the trigger again on every one, restoring the table each time,

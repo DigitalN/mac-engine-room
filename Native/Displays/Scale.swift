@@ -52,6 +52,18 @@ enum Scale {
 
     /// One press of a brightness key from `percent`: to the next multiple of the step in that
     /// direction (so 47% goes to 50% or 40%), within 0 and `top`.
+    /// macOS's own brightness keys fade each step over about 0.25 s (corebrightnessd's ramps in
+    /// WindowServer's log on the M1 Pro, 27.2.1: 0.21 to 0.26 s from the press to the new brightness),
+    /// so the keys' steps ease over the same time.
+    static let fadeFor = 0.25
+
+    /// Where a fade is, `progress` (0…1) of the way from `from` to `to`. It eases out, slowing as it
+    /// arrives, as macOS's own steps do.
+    static func eased(from: Double, to: Double, progress: Double) -> Double {
+        let t = max(0, min(1, progress))
+        return from + (to - from) * (1 - (1 - t) * (1 - t))
+    }
+
     static func stepped(_ percent: Double, up: Bool, fine: Bool, top: Double) -> Double {
         return snap(percent, up: up, size: fine ? fineStep : step, top: top)
     }
