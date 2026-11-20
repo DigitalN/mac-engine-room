@@ -79,6 +79,36 @@ new copy `Keep Awake ended the caffeinate that held the screen on over the updat
 Awake couldn't hold the screen on (IOKit error 0x…)` is logged once until it holds again. `pmset -g assertions` lists
 `PreventUserIdleDisplaySleep named: "Mac Engine Room Keep Awake"` while it holds the screen on.
 
+Displays logs `Displays: Built-in Display (boost to 160%), LG TV SSCR2 (DDC: brightness, volume)`
+whenever the displays or what can be adjusted change: a built-in display says `(to 100%)` where it
+can't boost and `(can't be adjusted)` where DisplayServices won't, an external one `(no DDC)`. An
+external display that never answers logs `<name> doesn't answer DDC, so its brightness stays its
+own`, and a write it refused `<name> didn't take a DDC write`. The boost logs `Display boost on at
+130%`, then `Display boost at ×1.330, macOS's headroom 3.20 (the table's top entry: wrote 1.330, reads
+back 1.330)` at the first gamma table write (the check every 5 s compares the table with what read
+back, so a read-back that differs is macOS clamping or resampling, not another app), or
+`Display boost has no EDR headroom from macOS yet (1.00)` if macOS hadn't granted any 3 s after
+the trigger appeared (a screen that's asleep or dimmed has none); `Display boost off`, or `Display
+boost off (macOS's brightness went below its maximum)`; `Display boost paused (the screens are
+asleep)` or `Display boost paused (the built-in display isn't in use)` (the lid closed with an
+external), and `Display boost resumed` (2 s after they wake or it's back, or `Display boost off
+(macOS's brightness is below its maximum)`). Many `Display boost at` lines in a row mean the trigger
+is being made again over and over (1.5.0's test copy did, on every headroom change, and the screen
+flickered). macOS's own log says what moved its brightness: `log show --predicate 'process ==
+"corebrightnessd"'` has `DisplayServicesSetBrightnessSmooth | property = -0.0625` for each brightness
+key press, and `CBAutoBrightnessEnabled` in `/usr/libexec/corebrightnessdiag status-info` says whether
+auto-brightness is on. At launch: `Display boost brought back at 130%`, or `Display
+boost not brought back: macOS's brightness is below its maximum` (or `this Mac's display can't
+boost`). `Display boost on` and `off` come at each crossing of 100%; the trigger stays 5 s after
+`off`, so stepping back past 100% within that logs no new trigger (no `has no EDR headroom`, and the
+`at ×` line straight away). The keys: what the tap takes, when it starts and whenever that changes,
+e.g. `Display keys on: brightness (volume and mute stay with macOS: the sound isn't going to a
+display)` or `Display keys on: brightness, volume and mute (LG TV SSCR2)`; `Display keys are waiting for
+Accessibility to be allowed`, `Asked macOS to allow Accessibility for the brightness and volume
+keys`, `Display keys off`, `Display keys tap stopped for the update` and `Display keys tap
+couldn't be made: macOS refused it`. A build without the dylib logs `Displays isn't available:
+this build has no libdisplays.dylib` (`running from source` from source).
+
 Mouse logs `Mouse tap on (reverse scrolling, back and forward buttons)` each time the tap starts or
 what it does changes, `Mouse tap off (every switch is off)`, `Mouse is waiting for Accessibility to
 be allowed (…)` (a switch is on but Accessibility isn't allowed, or was taken away), `Asked macOS
@@ -172,7 +202,7 @@ To reproduce without touching the user's data, run with
   copy can still be older than 1.2.7.
 - **Updates**: `Application Files/updater.py`. Daily check of GitHub releases after
   a wake, signature check, swap and relaunch. See *How updates work* in DEVELOPMENT.md.
-- **Tools**: Thermals and Power. Each is its own module for its readings; the menu
+- **Tools**: Thermals and Power (plus Keep Awake and Displays). Each is its own module for its readings; the menu
   (`statusbar.py`) and the page (`index.html`) have a section for each, and Settings a
   group for each, and the Dashboard a row of tiles for each. No plugin system beyond that.
 - **Power sensors**: `Application Files/power.py`. Reads IOKit `AppleSmartBattery`
@@ -226,12 +256,6 @@ To reproduce without touching the user's data, run with
   `should_ask`, `switches` and `describe` are pure and unit-tested, and `Mouse` is tested with a
   stand-in dylib (`tests/test_mouse.py`); `tests/test_mouse_native.py` compiles the Swift and runs
   `tests/mouse/main.swift` against its pure parts, and loads the dylib with every switch off.
-- **Accessibility**: `Application Files/accessibility.py`, shared by every tool with an event tap
-  (Mouse, and Displays' keys). `allowed()`, `ask()` (macOS's prompt), `open_settings()`, `watch()`
-  (the `com.apple.accessibility.api` distributed notification, read again 0.5 s and 3 s later because
-  the value lags), and `register(stop, start)` with `stop_taps()`/`start_taps()`, which the updater
-  calls around its swap (`Updater._install`): on macOS 27.2 a bundle replaced under a running tap
-  froze the keyboard and trackpad for about two minutes (Scroll Reverser #220).
 - **Keep Awake**: `Application Files/keepawake.py`. Holds the screen on with IOKit's
   `PreventUserIdleDisplaySleep` assertion (ctypes): Off, 1 Hour, 2 Hours, Until Sleep, work hours
   (`keep_awake_hours`) and the battery rule (`keep_awake_battery`), validated there for
@@ -249,11 +273,74 @@ To reproduce without touching the user's data, run with
   again at each wake. Only the updater's relaunch (`EngineRoomApp._quit_for_update`) writes
   `keep-awake-handover.json` (a pick, today's Off, and the pid of the `caffeinate` it leaves holding
   the screen on over the gap), which the new copy reads once and deletes, ending that caffeinate.
+- **Accessibility**: `Application Files/accessibility.py`, shared by every tool with an event tap
+  (Mouse, and Displays' keys). `allowed()`, `ask()` (macOS's prompt, the first time a switch that needs a tap is
+  turned on), `open_settings()`, `watch(callback)` (the `com.apple.accessibility.api` distributed
+  notification, read again after 0.5 and 3 s since the value lags), and `register(stop, start)` /
+  `stop_taps()` / `start_taps()`: `Updater._install` stops every tap just before it swaps the
+  bundle and starts them again if the swap fails (a bundle replaced under a running tap froze
+  input for two minutes on 27.2, Scroll Reverser #220). On macOS 27 System Settings calls the
+  list **Device Control and Data Access**, and the prompt didn't appear for an LSUIElement app
+  (tccd logged that it showed it): the maintainer added the app with +. `setting_name()` gives the
+  list's name for the macOS running, which the Displays and Mouse tabs show. An app TCC can't find in
+  Launch Services (one in `/private/tmp`) can't be listed at all, so test copies live somewhere
+  registered.
+- **Displays**: `Application Files/displays.py` over `Native/Displays/*.swift`, built into
+  `Contents/Frameworks/libdisplays.dylib` and loaded with ctypes (C functions, `@_cdecl`; its
+  callbacks come on the main thread). Brightness for each display on its own: the built-in through
+  DisplayServices (`Builtin.swift`), externals and TVs over DDC (`DDC.swift`, m1ddc's IOAVService
+  method, chip 0xB7 behind `AppleMCDP29XX`; services matched to displays by the framebuffer the
+  IORegistry lists before each, with only its manufacturer and product IDs read; that walk runs on
+  the DDC queue too, off the main thread) on a serial queue of its own, only on a change or when the menu or the tab opens, with only the latest value for
+  each feature written. No software dimming: a display that doesn't answer DDC has no slider.
+  The built-in XDR display's boost (`Boost.swift`, BrightIntosh's method as evidence only): a 1×1
+  window at `CGShieldingWindowLevel() + 1`, alpha 0.003, with one frame of EDR content in a
+  `CAMetalLayer`, then the gamma table times `Scale.gammaFactor` as macOS's headroom allows.
+  Measured on the M1 Pro, 27.2.1: **the table must be written with 256 entries** (written with
+  1,024, every value is clamped to 1.0 and the picture only washes out); **the trigger is drawn
+  once** (×1.3 held 13.6 W against 9.3 W for a minute with no redraws), so nothing runs while
+  boosted but a 5 s check that the table is still ours; ×1.6 reads about 19 W, and BetterDisplay's
+  160% (×1.658) 20.8 W. **macOS posts `didChangeScreenParametersNotification` every time the EDR
+  headroom moves** (dozens a second while it ramps up after the trigger appears), so that
+  notification only writes the factor for the new headroom: the trigger is made again only when the
+  built-in display's ID or frame changed, and the list of displays only when the screens themselves
+  did (`ScreenChange`, tested). Making the trigger again on each one restored the table each time and
+  flickered the screen. **Entering EDR isn't visible**: macOS ramps the backlight from 600 to 1,600
+  nits over 0.75 s while WindowServer holds SDR white at 500 (its log), and the screen draws about 2
+  W more (9.30 W against 11.34 W with the trigger at ×1); macOS keeps EDR 15 s after the trigger
+  goes. So the trigger stays 5 s at ×1 after the boost drops back to 100% (`triggerGrace`), and a key
+  step aiming past 100% (or the slider at 90% or more) makes it ahead of the boost (`prepare`).
+  **The keys' steps ease** over 0.25 s, macOS's own fade per step (its corebrightnessd ramps):
+  `Fade`, a 60 Hz `DispatchSourceTimer` on the main queue at user-interactive QoS (the main thread
+  idles at background QoS, where timers fire late) that stops when it arrives. At 100% and below it
+  moves macOS's brightness, above it the factor; crossing upward macOS's brightness reaches its
+  maximum first, downward the factor reaches ×1 first. A press during a fade aims one step past its
+  target, from where it is; the HUD shows the target at once. DisplayServices' notifications for the
+  fade's own brightness can arrive once it's boosting, so the boost ignores them for 0.5 s and checks
+  the current value. It ends when DisplayServices' brightness notification says macOS's own
+  brightness went below its maximum, pauses while the screens sleep, and comes back at launch
+  (`display_boost`) only with macOS's brightness at its maximum. Chips that ignore gamma tables
+  (`displays.CHIPS_IGNORING_GAMMA`: M5 Pro, M5 Max, A18 Pro) and screens without XDR stop at
+  100%. Dragged within `displays.SNAP_WITHIN` (3 points) of 100% on a display that runs past it, a
+  brightness slider sits on 100 (`displays.snap`), with macOS's alignment haptic as it lands (a Force
+  Touch trackpad's; the page asks `Api` for it); the menu counts the mouse-up too, since a slider's
+  last action comes with it. Only while the pointer holds it, never for the arrow keys or VoiceOver:
+  they step one point, so from 100 a step to 101 would snap back and never get past it. The keys
+  (`Keys.swift`): a tap on a thread of its own for system-defined events only
+  (brightness 2 and 3, volume 0 and 1, mute 7), taking brightness while a display can be adjusted
+  and volume while macOS's sound output is a display whose volume answers DDC; presses go to the
+  main queue at user-interactive QoS, where the step, the write and the HUD (`HUD.swift`) happen
+  before Python hears of it. `Scale.swift` has the pure parts (scale, nits, factor, steps, easing,
+  segments, `ScreenChange`; `keysLine` is in `Keys.swift`), tested by `tests/displays/main.swift`; `tools/render_menu.py --displays` and the
+  preview's `tv`, `boosted`, `dkeys`… states show the rest.
 - **Menu bar**: `Application Files/statusbar.py`. Native `NSStatusItem` and `NSMenu`
   (PyObjC). The title shows watts or a temperature; the menu's fan profile buttons,
   Thermals tiles and Power rows are custom views (NSTextField labels, NSBox tiles,
   NSSlider, SF Symbols), then the actions. Open Dashboard is first, then Thermals, Keep Awake (its
-  four choices as tiles in two rows, and its line) and Power. While Keep Awake holds the screen on,
+  four choices as tiles in two rows, and its line), Power and Displays (a brightness slider for each
+  display that can be adjusted, named as macOS names it and "Built-in Display" for the laptop's own;
+  the built-in one runs to 160% with a mark at 100%; the items are made again only when the displays
+  themselves change). While Keep Awake holds the screen on,
   a steaming cup (`cup.and.heat.waves.fill`, or `cup.and.saucer.fill` before macOS 14) follows the
   reading as an attachment in the title, which takes the title's colour; the charging bolt stays the button's image. The profile buttons are the three chosen in
   Settings, drawn as tiles like the temperatures' (a borderless NSButton over an NSBox), the
@@ -268,9 +355,11 @@ To reproduce without touching the user's data, run with
   in for the page.
 - **Frontend**: `Application Files/index.html`. A single page in vanilla JS with a
   hand-rolled canvas chart and no external resources. A **Dashboard | Thermals | Keep Awake | Power |
-  Mouse** switcher (Keep Awake between Thermals and Power; Displays goes between Power and Mouse) and
-  a shared Settings page. The Mouse tab's switches are settings; whether this copy has the tap and
-  whether Accessibility is allowed come with `get_live` only while it's the page showing. Keep Awake's work
+  Displays | Mouse** switcher (Keep Awake between Thermals and Power) and a shared Settings page.
+  Displays has a card for each display (sliders sent at most every 60 ms and left alone by polls
+  while held) and the keys switch with Accessibility's status. The Mouse tab's switches are
+  settings; whether this copy has the tap and whether Accessibility is allowed come with
+  `get_live` only while it's the page showing. Keep Awake's work
   hours are a 24-hour bar (pointer events with `setPointerCapture`, mouse only), saved once on
   release after a 120 ms snap to the half hour; its labels come from `Api.app_info`'s `clock`. The window opens on the Dashboard, and **Open
   Dashboard** in the menu switches to it (`EngineRoomApp._show_tab`); Power always opens on
@@ -280,9 +369,9 @@ To reproduce without touching the user's data, run with
   Temperatures arrive in °C and are shown in the unit chosen in Settings.
 - **Build**: `scripts/build.sh` runs PyInstaller with `Application Files/MacEngineRoom.spec`
   in `~/Library/Caches/MacEngineRoom-build`, compiles the fan helper into
-  `Contents/MacOS/Mac Engine Room Fans` with `swiftc` (no compiler, no fan control), compiles
-  each `Native/<Tool>/` folder into `Contents/Frameworks/lib<tool>.dylib` (no compiler, no Mouse
-  switches), and signs the app. `scripts/install.sh` installs
+  `Contents/MacOS/Mac Engine Room Fans` with `swiftc` (no compiler, no fan control), each
+  `Native/<Tool>/` folder into `Contents/Frameworks/lib<tool>.dylib` (no compiler, no Displays or
+  Mouse switches), and signs the app. `scripts/install.sh` installs
   it in `/Applications`; `scripts/package.sh` makes the release disk image. The
   `.command` files in `scripts/` are double-click wrappers around `install.sh`.
 
@@ -591,6 +680,13 @@ Don't undo these without asking:
   Dashboard row. Never called "Caffeine". Work hours are set on a 24-hour bar that snaps to half
   hours, mouse only (no keyboard, decided). A 12-hour Mac sees Noon and Midnight, never 12 AM or
   12 PM. The menu bar's cup steams.
+- **Displays** (1.5.0), designed with the maintainer on 2026-11-19; the whole design is in
+  `docs/PLAN.md`. One slider per display, each on its own; no software dimming and nothing linking
+  displays; the built-in XDR display's scale runs to 160%, past macOS's maximum, and lowering
+  macOS's own brightness ends the boost. The keys switch is off until turned on; the HUD is the
+  app's own (BetterDisplay's look: 16 segments to 160% with 100% at the 10th, a bubble like
+  "130% · 960 nits", 10 segments and no nits on a TV). No volume in the menu, nothing in Settings,
+  no Dashboard row, no LG TV control over the network.
 - **Mouse** (1.5.0), designed with the maintainer on 2026-11-19; the whole design is in
   `docs/PLAN.md`. It replaces LinearMouse. Three switches, all off until turned on: reverse
   scrolling (vertical only, every wheel mouse, no list of devices; the trackpad and a Magic Mouse are

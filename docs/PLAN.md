@@ -443,9 +443,13 @@ and volume.
   - The strength follows the headroom macOS grants at the moment
     (`NSScreen.maximumExtendedDynamicRangeColorComponentValue`).
   - When the app quits or crashes, macOS puts the user's ColorSync tables back.
-  - Whether the trigger window has to keep redrawing is still to be measured (BrightIntosh
-    redraws at 5 fps). Either way it runs in Swift (see Shared groundwork), only while above
-    100%, and it pauses while the screen sleeps.
+  - **Measured on the M1 Pro, 27.2.1 (2026-11-19):** the trigger doesn't have to keep
+    redrawing. Drawn once, ×1.3 held the screen at 13.6 W (from 9.3 W) for a minute, so it's
+    drawn once and only exists above 100%; it pauses while the screen sleeps. The table must be
+    written with **256 entries**: written with 1,024 (the size macOS reports), every value is
+    clamped to 1.0, which only washes the picture out. At alpha 0.003 (BetterDisplay's) the pixel
+    can't be seen and still triggers EDR. BetterDisplay's 160% writes ×1.658 (20.8 W); the app
+    writes (percent / 100)^(2.5 / 2.3), capped by macOS's headroom, which matches it at 160%.
   - macOS 26.3 blocked the preset-unlocking methods BetterDisplay and Lunar used before, so
     don't use those.
 - **Trade-offs accepted:** real HDR video looks blown out while boosted, and screenshots don't

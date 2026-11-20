@@ -278,6 +278,8 @@ class Api:
         live["update"] = [self._app._updater.status, self._app._updater.version]
         live["fan_control"] = self._app._fans.status
         live["keep_awake"] = self._app._keep_awake.status()
+        if page == "displays":  # it reads the Accessibility grant, so only while the Displays tab shows
+            live["displays"] = self._app._displays.status()
         if page == "mouse":  # it reads the Accessibility grant, so only while the Mouse tab shows
             live["mouse"] = self._app._mouse.status()
         return live
@@ -286,9 +288,31 @@ class Api:
         """The Keep Awake tab's buttons: Off, 1 Hour, 2 Hours or Until Sleep. Returns what to show."""
         return self._app._keep_awake.choose(str(choice))
 
+    def set_display_brightness(self, display, percent, haptic=False):
+        """The Displays tab's brightness sliders. `haptic` when a dragged one has just landed on 100%
+        (displays.snap): the page has no tap of its own, so the trackpad's comes from here, as the menu's."""
+        import displays
+        from PyObjCTools import AppHelper
+
+        if haptic:
+            AppHelper.callAfter(displays.haptic)
+        AppHelper.callAfter(self._app._displays.set_brightness, int(display), float(percent))
+
+    def set_display_volume(self, display, percent):
+        """The Displays tab's volume sliders (displays whose volume answers DDC)."""
+        from PyObjCTools import AppHelper
+
+        AppHelper.callAfter(self._app._displays.set_volume, int(display), float(percent))
+
+    def refresh_displays(self):
+        """The Displays tab opened: the displays are read again (DDC only then, or on a change)."""
+        from PyObjCTools import AppHelper
+
+        AppHelper.callAfter(self._app._displays.refresh)
+
     def open_accessibility_settings(self):
         """Privacy & Security › Accessibility (Device Control and Data Access on macOS 27), where the user
-        allows the Mouse tab's switches."""
+        allows the Mouse tab's switches and the Displays tab's keys switch."""
         import accessibility
         from PyObjCTools import AppHelper
 
@@ -397,6 +421,7 @@ class Api:
         AppHelper.callAfter(NSWorkspace.sharedWorkspace().openURL_, NSURL.URLWithString_(REPORT_ISSUE_URL))
 
     def app_info(self):
+        import displays
         import fans
         import keepawake
 
@@ -406,7 +431,8 @@ class Api:
                 "version": VERSION, "log_path": str(LOG_PATH), "sensor_hint": self._app._sensor_hint(),
                 "history_recording": self._app._settings.get()["record_history"],
                 "update_unavailable_reason": self._app._updater.unavailable_reason,
-                "fan_profiles": fans.page_profiles(), "fan_tuning_limits": fans.TUNING_LIMITS}
+                "fan_profiles": fans.page_profiles(), "fan_tuning_limits": fans.TUNING_LIMITS,
+                "display_snap": displays.SNAP_WITHIN}
 
     def set_content_size(self, width, height, fit=False):
         """The page reports the size it needs; the window can't be made bigger.
@@ -439,6 +465,7 @@ def _copy_to_clipboard(text):
 class EngineRoomApp:
     def __init__(self):
         import launch
+        from displays import Displays
         from fans import FanControl, Helper
         from history import ChargingRecorder, HistoryStore
         from keepawake import KeepAwake
@@ -463,6 +490,7 @@ class EngineRoomApp:
         self._sampler = Sampler(self._reader, self._on_sample, thermals, self._thermal_parts,
                                 fans_running=lambda: self._fans.running, priority=self._priority)
         self._keep_awake = KeepAwake(self._settings, DATA_DIR, on_change=self._on_keep_awake_change)
+        self._displays = Displays(self._settings)
         self._mouse = Mouse(self._settings)
         self._login_item = launch.LoginItem(self._app_path, DATA_DIR)
         self._updater = Updater(
@@ -526,6 +554,7 @@ class EngineRoomApp:
         self._recorder.enabled = values["record_history"]
         self._fans.nudge()  # a profile chosen or tuned: act on it now
         self._keep_awake.settings_changed(values)  # work hours or the battery rule changed
+        self._displays.settings_changed(values)  # the keys switch: the tap starts or stops
         self._mouse.settings_changed(values)  # a Mouse switch: the tap starts or stops
         AppHelper.callAfter(self._apply_theme, values["theme"])
 
@@ -559,6 +588,7 @@ class EngineRoomApp:
         self._priority.refresh()  # before the sampler wakes: it has to wake at full priority
         if self._statusbar.menu_open:
             self._sampler.wake()  # the fans, which are only read while shown
+            self._displays.refresh()  # DDC only now, or on a change
 
     def _apply_theme(self, theme):
         import AppKit
@@ -759,6 +789,11 @@ class EngineRoomApp:
         self._priority.refresh()  # it isn't opening any more
         return False
 
+    def _on_displays_change(self, displays):
+        """Main thread: a display changed (a key press, DDC answering, the boost ending)."""
+        if self._statusbar is not None and not self._quitting:
+            self._statusbar.set_displays(displays)
+
     def _on_keep_awake_change(self, holding):
         """Any thread: Keep Awake started or stopped holding the screen on. The menu bar's cup
         follows at once, not at the next sample."""
@@ -920,8 +955,11 @@ class EngineRoomApp:
             on_menu_open=self._on_menu_open, fan_status=lambda: self._fans.status,
             on_profile=lambda pid: self._settings.update({"fan_profile": pid}),
             on_allow_fans=self._fans.open_login_items,
-            keep_awake_status=self._keep_awake.status, on_keep_awake=self._keep_awake.choose)
+            keep_awake_status=self._keep_awake.status, on_keep_awake=self._keep_awake.choose,
+            displays=self._displays.displays, on_display_brightness=self._displays.set_brightness)
         self._keep_awake.start()  # before the first sample, which feeds it
+        self._displays.on_change(self._on_displays_change)
+        self._displays.start()  # the boost if it was on, and the key tap if its switch is on and it's allowed
         self._mouse.start()  # its tap, if a switch is on and Accessibility is allowed
         self._sampler.start()
         self._fans.start()

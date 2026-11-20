@@ -3,7 +3,7 @@
     python3 tools/render_menu.py OUT [--state holding] [--profile balanced] [--fahrenheit] ...
 
 Writes OUT-light.png and OUT-dark.png, and prints the menu's items in order. The custom
-views (fan profiles, the temperature tiles, Keep Awake, the Power rows) are statusbar.py's
+views (fan profiles, the temperature tiles, Keep Awake, the Power rows, the Displays sliders) are statusbar.py's
 own, filled in from made-up readings; the plain items (section headers, actions) are drawn
 as labels, so their fonts and spacing only approximate macOS's. The readings match
 tools/preview/stub.js. `--help` lists the options.
@@ -37,6 +37,20 @@ KEEP_AWAKE = {
     "offtoday": {"choice": "off", "holding": False, "line": None},  # no line
     "battery": {"choice": "2h", "holding": False, "line": "Paused because the battery is below 20%"},
 }
+# The displays, as displays.Displays.displays() gives them (Native/Displays' JSON).
+BUILTIN = {"id": 1, "name": "Built-in Display", "builtin": True, "adjustable": True, "answered": True, "percent": 100.0,
+           "top": 160.0, "nits": 500, "volume": None, "muted": None, "boosting": False}
+TV = {"id": 5, "name": "LG TV SSCR2", "builtin": False, "adjustable": True, "answered": True, "percent": 60.0, "top": 100.0,
+      "nits": None, "volume": 25, "muted": False, "boosting": False}
+DISPLAYS = {
+    "builtin": [BUILTIN],
+    "boosted": [{**BUILTIN, "percent": 130.0, "nits": 960, "boosting": True}],
+    "quarter": [{**BUILTIN, "percent": 42.5, "nits": 75}],  # after ⌥⇧ quarter steps
+    "noboost": [{**BUILTIN, "top": 100.0}],  # an M5 Pro, or a Mac without an XDR screen
+    "tv": [BUILTIN, TV],
+    "tvnoddc": [BUILTIN, {**TV, "adjustable": False, "answered": False, "percent": None, "volume": None}],  # no slider for it
+    "none": [],  # a build without libdisplays.dylib, or a Mac mini whose display doesn't answer DDC
+}
 
 
 def options():
@@ -55,6 +69,7 @@ def options():
     a.add_argument("--charging", action="store_true")
     a.add_argument("--hot", type=float, default=0, help="degrees added to every temperature")
     a.add_argument("--keep-awake", choices=KEEP_AWAKE, default="off", help="Keep Awake's state (default off)")
+    a.add_argument("--displays", choices=DISPLAYS, default="builtin", help="the displays (default: the built-in one at 100%%)")
     return a.parse_args()
 
 
@@ -107,7 +122,8 @@ def build_menu(o):
     statusbar.NSStatusBar = SimpleNamespace(systemStatusBar=lambda: SimpleNamespace(statusItemWithLength_=lambda l: item))
     keep_awake = KEEP_AWAKE[o.keep_awake]
     bar = statusbar.StatusBar(on_open=None, on_check_updates=None, on_quit=None, on_menu_open=lambda: None,
-                              fan_status=lambda: status, keep_awake_status=lambda: keep_awake)
+                              fan_status=lambda: status, keep_awake_status=lambda: keep_awake,
+                              displays=lambda: DISPLAYS[o.displays])
     bar.update(sample, thermals, settings, keep_awake["holding"])
     bar._target.menuNeedsUpdate_(bar._menu)
     return bar
@@ -128,7 +144,8 @@ def label(item, width):
 def rows(bar, width):
     """(name, view) for each item showing, top to bottom."""
     names = [(bar._profiles_item, "fan profiles"), (bar._tiles_item, "temperature tiles"),
-             (bar._keep_awake_item, "Keep Awake tiles"), (bar._keep_awake_line_item, "Keep Awake line")] + [(item, f"{key} row") for key, item in bar._rows.items()]
+             (bar._keep_awake_item, "Keep Awake tiles"), (bar._keep_awake_line_item, "Keep Awake line")] + [(item, f"{key} row") for key, item in bar._rows.items()] + [
+                 (item, f"display {display}") for item, display, _ in bar._display_items]
     out = []
     for item in bar._menu.itemArray():
         if item.isHidden():

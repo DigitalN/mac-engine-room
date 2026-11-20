@@ -23,6 +23,7 @@ HERE = Path(__file__).resolve().parent
 APP_DIR = HERE.parent.parent / "Application Files"
 sys.path.insert(0, str(APP_DIR))
 
+import displays  # noqa: E402  (pure until Displays starts)
 import fans  # noqa: E402  (pure: no AppKit or SMC)
 import keepawake  # noqa: E402  (pure until KeepAwake starts)
 import settings  # noqa: E402
@@ -41,7 +42,8 @@ def _clock(fmt, h24):
 
 
 def app_facts():
-    importlib.reload(fans)  # an edit to them shows on the next load, like one to the page
+    importlib.reload(displays)  # an edit to them shows on the next load, like one to the page
+    importlib.reload(fans)
     importlib.reload(keepawake)
     importlib.reload(settings)
     version = re.search(r'^VERSION = "([^"]+)"', (APP_DIR / "main.py").read_text(encoding="utf-8"), re.M)
@@ -49,7 +51,7 @@ def app_facts():
             "fan_profiles": fans.page_profiles(), "fan_tuning_limits": fans.TUNING_LIMITS,
             "fan_names": fans.PROFILE_NAMES,
             "keep_awake_choices": [[c, keepawake.CHOICE_NAMES[c]] for c in keepawake.CHOICES],
-            "keep_awake_battery_levels": keepawake.BATTERY_LEVELS,
+            "keep_awake_battery_levels": keepawake.BATTERY_LEVELS, "display_snap": displays.SNAP_WITHIN,
             # The bar's labels, through the app's own helper, as a 12-hour and a 24-hour Mac show them.
             "clock12": _clock(lambda t: _strftime(t, "%-I:%M %p"), False),
             "clock24": _clock(lambda t: _strftime(t, "%H:%M"), True)}

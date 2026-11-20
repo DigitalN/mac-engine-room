@@ -69,6 +69,21 @@ def test_temperatures_are_in_celsius_unless_fahrenheit_is_chosen():
     assert validate({"temperature_unit": "kelvin"})["temperature_unit"] == "celsius"
 
 
+def test_display_keys_start_off_and_only_take_true_or_false():
+    assert DEFAULTS["display_keys"] is False
+    assert validate({"display_keys": True})["display_keys"] is True
+    assert validate({"display_keys": 1})["display_keys"] is False
+
+
+def test_display_boost_runs_from_100_to_160_percent():
+    assert DEFAULTS["display_boost"] == 1.0
+    assert validate({"display_boost": 1.3})["display_boost"] == 1.3
+    assert validate({"display_boost": 1.6})["display_boost"] == 1.6
+    assert validate({"display_boost": 1})["display_boost"] == 1.0
+    for junk in (1.7, 0.9, True, "1.3", None):
+        assert validate({"display_boost": junk})["display_boost"] == 1.0
+
+
 def test_mouse_switches_start_off_and_only_take_true_or_false():
     for key in ("mouse_reverse_scrolling", "mouse_smooth_scrolling", "mouse_back_forward"):
         assert DEFAULTS[key] is False
