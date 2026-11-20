@@ -234,7 +234,10 @@ final class TapThread {
         runLoop = loop
         CGEvent.tapEnable(tap: tap, enable: true)
         made = true
-        ready.signal()
+        // start() returns, and stop() can be called, only once the run loop is running: each run starts
+        // with a fresh "stopped" flag, so a CFRunLoopStop that came before it would be lost and stop()
+        // would wait forever. CFRunLoopRun runs in the default mode and does its blocks before waiting.
+        CFRunLoopPerformBlock(loop, CFRunLoopMode.defaultMode.rawValue) { ready.signal() }
 
         CFRunLoopRun()  // until stop()
 
@@ -260,7 +263,7 @@ final class TapThread {
         guard let runLoop else {
             return
         }
-        CFRunLoopStop(runLoop)  // a stop that comes before the run loop runs still counts
+        CFRunLoopStop(runLoop)  // the loop is running: start() waited for it
         finished.wait()
     }
 }
