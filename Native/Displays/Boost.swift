@@ -34,6 +34,11 @@ final class Boost {
     private var queue: MTLCommandQueue?
     private var base: (r: [CGGammaValue], g: [CGGammaValue], b: [CGGammaValue])?
     private var written: Double = 1  // the factor last written to the table
+    /// The table's top red entry as macOS reads it back after our last write: the 5 s check compares
+    /// against this, not against base × factor, in case macOS clamps or resamples what it reads back
+    /// (it clamps a 1,024-entry write), which would otherwise restore and rewrite the table, and dip
+    /// the screen to 100%, every 5 s.
+    private var reference: CGGammaValue?
     private var timer: Timer?
     private var rampUntil = Date.distantPast
     private var observing: CGDirectDisplayID = 0
@@ -129,6 +134,7 @@ final class Boost {
         CGDisplayRestoreColorSyncSettings()  // the user's own table, as the base to multiply
         base = Self.readTable(display)
         written = 1
+        reference = nil
         makeTrigger(on: screen)
         if observing != display, DisplayServices.observe(display, brightnessChanged) {
             observing = display
@@ -154,6 +160,7 @@ final class Boost {
             CGDisplayRestoreColorSyncSettings()
         }
         written = 1
+        reference = nil
         base = nil
     }
 
@@ -177,12 +184,12 @@ final class Boost {
             }
         }
         // Something else (ColorSync, Night Shift, another app) put its own table in: ours goes back.
-        if written != 1, let top = Self.readTable(display)?.r.last, let ours = base?.r.last,
-           abs(Double(top) - Double(ours) * written) > 0.003 {
-            base = nil
+        if written != 1, let reference, let top = Self.readTable(display)?.r.last,
+           abs(Double(top) - Double(reference)) > 0.003 {
             CGDisplayRestoreColorSyncSettings()
             base = Self.readTable(display)
             written = 1
+            self.reference = nil
         }
         apply()
     }
@@ -200,9 +207,13 @@ final class Boost {
         if CGSetDisplayTransferByTable(display, Self.tableSize, base.r.map { $0 * f }, base.g.map { $0 * f },
                                        base.b.map { $0 * f }) == .success {
             written = factor
+            reference = Self.readTable(display)?.r.last
             if !reported {
                 reported = true
-                onLog(String(format: "Display boost at ×%.3f, macOS's headroom %.2f", factor, headroom))
+                let wrote = Double(base.r.last ?? 1) * factor
+                let readBack = reference.map { String(format: "%.3f", Double($0)) } ?? "nothing"
+                onLog(String(format: "Display boost at ×%.3f, macOS's headroom %.2f (the table's top entry: wrote %.3f, reads back ",
+                             factor, headroom, wrote) + readBack + ")")
             }
         }
     }

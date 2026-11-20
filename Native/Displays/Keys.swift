@@ -139,7 +139,10 @@ final class KeyTap {
         runLoop = loop
         CGEvent.tapEnable(tap: tap, enable: true)
         made = true
-        ready.signal()
+        // `ready` is signalled from inside the run, not just before it: each run starts with its stop
+        // flag cleared, so a CFRunLoopStop that landed between the two would be lost, and stop() would
+        // wait forever on the main thread.
+        CFRunLoopPerformBlock(loop, CFRunLoopMode.defaultMode.rawValue) { ready.signal() }
 
         CFRunLoopRun()  // until stop()
 
@@ -155,7 +158,9 @@ final class KeyTap {
         guard let runLoop else {
             return
         }
-        CFRunLoopStop(runLoop)  // a stop that comes before the run loop runs still counts
+        // The stop runs inside the run loop too, so it can't land between two runs and be lost.
+        CFRunLoopPerformBlock(runLoop, CFRunLoopMode.defaultMode.rawValue) { CFRunLoopStop(CFRunLoopGetCurrent()) }
+        CFRunLoopWakeUp(runLoop)
         finished.wait()
     }
 }

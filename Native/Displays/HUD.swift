@@ -25,15 +25,22 @@ final class HUD {
     private var panel: NSPanel?
     private let view = HUDView(frame: NSRect(origin: .zero, size: HUD.size))
     private var hideTimer: Timer?
+    private var shows = 0  // counts presses, so a fade's end knows whether one came after it began
 
     func show(_ content: HUDContent, on screen: NSScreen) {
         let panel = self.panel ?? makePanel()
+        shows += 1
         view.content = content
         let visible = screen.visibleFrame
         let origin = NSPoint(x: screen.frame.maxX - Self.size.width - Self.margin.width,
                              y: visible.maxY - Self.size.height - Self.margin.height)
         panel.setFrameOrigin(origin)
-        panel.alphaValue = 1
+        // Through the animator, so a fade still running is cancelled: setting alphaValue directly
+        // leaves it going, and a press during the fade would vanish with it.
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0
+            panel.animator().alphaValue = 1
+        }
         panel.orderFrontRegardless()
         hideTimer?.invalidate()
         let timer = Timer(timeInterval: Self.shownFor, repeats: false) { [weak self] _ in self?.fade() }
@@ -45,11 +52,13 @@ final class HUD {
         guard let panel else {
             return
         }
+        let fading = shows
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = Self.fadeFor
             panel.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
-            if let self, self.panel?.alphaValue == 0 {
+            // A cancelled fade ends too: the panel only goes if no press came since it began.
+            if let self, self.shows == fading {
                 self.panel?.orderOut(nil)
             }
         })

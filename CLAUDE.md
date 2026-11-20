@@ -84,7 +84,9 @@ whenever the displays or what can be adjusted change: a built-in display says `(
 can't boost and `(can't be adjusted)` where DisplayServices won't, an external one `(no DDC)`. An
 external display that never answers logs `<name> doesn't answer DDC, so its brightness stays its
 own`, and a write it refused `<name> didn't take a DDC write`. The boost logs `Display boost on at
-130%`, then `Display boost at ×1.330, macOS's headroom 3.20` at the first gamma table write, or
+130%`, then `Display boost at ×1.330, macOS's headroom 3.20 (the table's top entry: wrote 1.330, reads
+back 1.330)` at the first gamma table write (the check every 5 s compares the table with what read
+back, so a read-back that differs is macOS clamping or resampling, not another app), or
 `Display boost has no EDR headroom from macOS yet (1.00)` if macOS hadn't granted any 3 s after
 the trigger appeared (a screen that's asleep or dimmed has none); `Display boost off`, or `Display
 boost off (macOS's brightness went below its maximum)`; `Display boost paused (the screens are
@@ -247,8 +249,8 @@ To reproduce without touching the user's data, run with
   callbacks come on the main thread). Brightness for each display on its own: the built-in through
   DisplayServices (`Builtin.swift`), externals and TVs over DDC (`DDC.swift`, m1ddc's IOAVService
   method, chip 0xB7 behind `AppleMCDP29XX`; services matched to displays by the framebuffer the
-  IORegistry lists before each, with only its manufacturer and product IDs read) on a serial queue
-  of its own, only on a change or when the menu or the tab opens, with only the latest value for
+  IORegistry lists before each, with only its manufacturer and product IDs read; that walk runs on
+  the DDC queue too, off the main thread) on a serial queue of its own, only on a change or when the menu or the tab opens, with only the latest value for
   each feature written. No software dimming: a display that doesn't answer DDC has no slider.
   The built-in XDR display's boost (`Boost.swift`, BrightIntosh's method as evidence only): a 1×1
   window at `CGShieldingWindowLevel() + 1`, alpha 0.003, with one frame of EDR content in a

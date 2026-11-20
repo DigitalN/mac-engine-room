@@ -8,7 +8,8 @@
 // - The brightness, volume and mute keys while the switch is on (Keys.swift), with the HUD (HUD.swift).
 //
 // DDC only runs on a change, or when the menu or the tab opens (displays_refresh), on a queue of its
-// own: each call waits for the monitor. What the app set is remembered rather than read back.
+// own: each call waits for the monitor. What the app set is remembered rather than read back. The
+// IORegistry walk that finds the externals' DDC channels (10–14 ms) runs on that queue too.
 //
 // C functions (@_cdecl). All but displays_list and displays_free run on the main thread (Python sends
 // them there); the callbacks are called on the main thread:
@@ -71,6 +72,7 @@ final class Controller {
     private var probing = Set<CGDirectDisplayID>()
     private var observers: [NSObjectProtocol] = []
     private var lastLogged = ""
+    private var walk = 0  // the latest IORegistry walk asked for; an older one's result is dropped
     var changed: () -> Void = {}
     var log: (String) -> Void = { _ in }
 
@@ -109,15 +111,10 @@ final class Controller {
         discover()
     }
 
-    /// The displays macOS has now; new externals are asked over DDC whether they answer.
+    /// The displays macOS has now. Externals without a DDC channel are looked for on the DDC queue,
+    /// then asked whether they answer; the built-in display is in the list at once.
     func discover() {
-        let channels = DDCDiscovery.externalServices()
-        defer { channels.forEach { IOObjectRelease($0.proxy) } }
         let screens = NSScreen.screens.filter { CGDisplayMirrorsDisplay($0.displayID) == kCGNullDirectDisplay }
-        let externals = screens.filter { CGDisplayIsBuiltin($0.displayID) == 0 }
-        let pairs = DDCDiscovery.match(
-            displays: externals.map { ($0.displayID, CGDisplayVendorNumber($0.displayID), CGDisplayModelNumber($0.displayID)) },
-            channels: channels.map { ($0.vendor, $0.product) })
         var next: [Display] = []
         for screen in screens {
             let id = screen.displayID
@@ -133,27 +130,58 @@ final class Controller {
                 if display.brightness == nil || !boost.requested {
                     readBuiltin(display)
                 }
-            } else if display.channel == nil, let index = pairs[id] {
-                let found = channels[index]
-                display.channel = DDCChannel(proxy: found.proxy, vendor: found.vendor, product: found.product,
-                                             chipAddress: found.chipAddress)
-                if display.channel == nil {
-                    display.answered = false
-                }
-            } else if display.channel == nil {
-                display.answered = false  // no DDC channel for it: DisplayLink, AirPlay, Sidecar…
             }
             next.append(display)
         }
         lock.lock()
         displays = next
         lock.unlock()
-        for display in next where !display.builtin && display.channel != nil && display.answered == nil {
-            probe(display)
+        let externals = next.filter { !$0.builtin }
+        if externals.contains(where: { $0.channel == nil }) {
+            findChannels(externals)
         }
         describe()
         route()
         changed()
+    }
+
+    /// Finds DDC channels for the externals that have none, on the DDC queue (the IORegistry walk takes
+    /// 10–14 ms), and gives them to those displays on the main thread. Every external takes part in
+    /// the matching, so the ones that have their channel already keep theirs out of it.
+    private func findChannels(_ externals: [Display]) {
+        walk += 1
+        let asked = walk
+        let ids = externals.map { ($0.id, CGDisplayVendorNumber($0.id), CGDisplayModelNumber($0.id)) }
+        let wanted = Set(externals.filter { $0.channel == nil }.map { $0.id })
+        Self.ddcQueue.async { [weak self] in
+            let found = DDCDiscovery.externalServices()
+            let pairs = DDCDiscovery.match(displays: ids, channels: found.map { ($0.vendor, $0.product) })
+            var channels: [CGDirectDisplayID: DDCChannel] = [:]
+            for (id, index) in pairs where wanted.contains(id) {
+                let f = found[index]
+                channels[id] = DDCChannel(proxy: f.proxy, vendor: f.vendor, product: f.product, chipAddress: f.chipAddress)
+            }
+            found.forEach { IOObjectRelease($0.proxy) }
+            DispatchQueue.main.async {
+                guard let self, asked == self.walk else {
+                    return
+                }
+                for display in self.displays where wanted.contains(display.id) && display.channel == nil {
+                    if let channel = channels[display.id] {
+                        display.channel = channel
+                        display.answered = nil  // asked, even if an earlier look found no channel for it
+                    } else {
+                        display.answered = false  // no DDC channel for it: DisplayLink, AirPlay, Sidecar…
+                    }
+                }
+                for display in self.displays where !display.builtin && display.channel != nil && display.answered == nil {
+                    self.probe(display)
+                }
+                self.describe()
+                self.route()
+                self.changed()
+            }
+        }
     }
 
     /// Reads every display again: the menu or the tab opened.
