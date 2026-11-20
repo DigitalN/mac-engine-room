@@ -1,9 +1,11 @@
 # Mac Engine Room
 
-A macOS menu bar app with two tools. **Thermals** shows how hot your Mac's CPU, GPU,
+A macOS menu bar app with a few tools. **Thermals** shows how hot your Mac's CPU, GPU,
 memory and SSD are, and runs its fans the way you choose. **Power** shows where its power
 goes: what the charger delivers, what the Mac uses, and what goes into or out of the
-battery, with a history of every charge.
+battery, with a history of every charge. **Keep Awake** keeps the screen on. **Displays**
+sets each display's brightness, taking a MacBook Pro's XDR screen up to 1,600 nits, and
+**Mouse** reverses a wheel mouse's scrolling while the trackpad stays natural.
 
 Formerly **Pythonflow**. Installed copies rename themselves when they update, and keep
 your history and settings.
@@ -20,8 +22,8 @@ macOS 27 and is no longer maintained.
 
 - **Menu bar reading**: the CPU's temperature, the hottest temperature, or system,
   screen or chip power, or the charger's input while charging. Click it for the fan
-  profiles, Keep Awake and a quick summary of temperatures, fans and power. A cup
-  follows the reading while Keep Awake holds the screen on.
+  profiles, Keep Awake, a quick summary of temperatures, fans and power, and a brightness
+  slider for each display. A cup follows the reading while Keep Awake holds the screen on.
 - **Dashboard**: the window opens on a short page with a row of readings per tool:
   CPU, GPU and each fan's speed, with the fan profiles, then system power, battery and
   charger.
@@ -36,6 +38,14 @@ macOS 27 and is no longer maintained.
 - **Keep Awake**: keep the screen on, so the Mac doesn't sleep, start the screen saver or
   lock, for 1 hour, 2 hours or until the Mac sleeps (see [Keep Awake](#keep-awake)). Or
   during your work hours on the days you choose, without ever waking the Mac.
+- **Displays**: a brightness slider for each display, in the menu and on the Displays tab.
+  The XDR screen of a 14" or 16" MacBook Pro goes past 100% to 160%, its 1,600-nit HDR peak
+  (see [Displays](#displays)). External displays and TVs that answer DDC get their own
+  brightness and volume. The brightness and volume keys can do all of it, once you turn them on.
+- **Mouse**: reverse scrolling for wheel mice while the trackpad keeps natural scrolling,
+  smooth scrolling, and Back and Forward on the side buttons, in Safari and Finder too. Each is
+  a switch on the Mouse tab, off until you turn it on, with a link to macOS's pointer
+  acceleration setting.
 - **Power flow** from charger to Mac to battery, with the charger's conversion loss and
   where the Mac's power goes.
 - **Live power chart** of the last 1, 5 or 15 minutes.
@@ -66,6 +76,11 @@ helper: in **System Settings → General → Login Items & Extensions**, turn on
 Room under **Allow in the Background** and enter your password. Mac Engine Room shows how,
 and the fans stay with macOS until then.
 
+The Mouse switches and the brightness and volume keys need Mac Engine Room to be allowed in
+**System Settings → Privacy & Security → Accessibility** (called **Device Control and Data
+Access** on macOS 27). The Displays and Mouse tabs have a button that opens it; if Mac Engine
+Room isn't in the list, add it with **+**.
+
 Tested on macOS 27.0 with Apple silicon. Fan control needs macOS 13 or later. On a desktop
 Mac, Power shows the whole Mac's power and the chip's, since there's no battery or charger. To build
 from source, see [DEVELOPMENT.md](docs/DEVELOPMENT.md).
@@ -75,14 +90,19 @@ from source, see [DEVELOPMENT.md](docs/DEVELOPMENT.md).
 - **The only connection is the update check**: once a day, after your Mac wakes, it asks
   GitHub for the latest release. It only installs updates signed by the same developer.
   No analytics, crash reports or web server.
-- **It reads power and temperature sensors only**, never serial numbers or your
-  computer's name. The sensor report in Settings is only made when you click Copy, and
+- **It reads power and temperature sensors and your displays' names**, never serial numbers or
+  your computer's name. The sensor report in Settings is only made when you click Copy, and
   only goes where you paste it.
 - **Fan control uses a small helper that runs as an administrator**, because only an
   administrator can set fan speeds. It's only installed when you choose a fan profile and
   allow it. All it can do is set fan speeds within each fan's range, give the fans back to
   macOS, and report on them, and it only answers Mac Engine Room. It gives the fans back
   to macOS if Mac Engine Room quits or stops responding, and before your Mac sleeps.
+- **The Mouse switches and the brightness and volume keys see only scrolling, the extra mouse
+  buttons and the keyboard's media keys**, through an event tap you allow in Privacy & Security:
+  never what you type or where the pointer goes. With their switches off there's no event tap
+  at all. External displays' brightness and volume go over the display's own cable (DDC), not
+  the network.
 - **Your data stays on your Mac**, in `~/Library/Application Support/Mac Engine Room`.
   You can turn off history recording or delete it in Settings.
 
@@ -137,6 +157,25 @@ With **Stop when the battery is below** on, Keep Awake pauses on battery below t
 choose, and comes back when you plug in. Locking the screen pauses it too. When it lets go, the
 screen still gets your usual time before it dims.
 
+## Displays
+
+Each display's slider sets that display's own backlight: macOS's brightness for the built-in
+screen, and DDC for an external display or TV, which gets a volume slider too if it answers.
+A display that doesn't answer DDC has no slider; use its own buttons or remote.
+
+On the XDR screen of a 14" or 16" MacBook Pro, the slider goes on past 100% to 160%. Above
+100%, Mac Engine Room uses the screen's HDR headroom, the same way BrightIntosh does: 130% is
+about 960 nits and 160% is the panel's 1,600-nit peak. The rated full-screen brightness is
+1,000 nits (about 132%), so above that macOS may pull it back after a while. It uses more power
+(on an M1 Pro, about 2 W just past 100% and 4 W at 130%), HDR video looks blown out while it's
+on, and screenshots don't show it. Lowering macOS's own brightness, in Control Center
+or with auto-brightness, ends it. The M5 Pro and M5 Max stop at 100% for now: since macOS 26.3
+they ignore the gamma tables the boost needs.
+
+Turn on **Brightness and volume keys** on the Displays tab, and the brightness keys set the
+display the pointer is on, going past 100% on the XDR screen with the nits shown as you step.
+The volume and mute keys set a display's own speakers when your sound is going to that display.
+
 ## A reading wrong or missing?
 
 Every Mac model names its sensors a little differently. In Settings, under About, click
@@ -175,6 +214,13 @@ sensor dumps collected by [iSMC](https://github.com/dkorunic/iSMC) by Dinko Koru
 Fan control is based on [ThermalForge](https://github.com/ProducerGuy/ThermalForge) by
 ProducerGuy (MIT): its fan profiles, and the fan and SMC code, which it adapted from
 [macos-smc-fan](https://github.com/agoodkind/macos-smc-fan) by Alexander Goodkind (MIT).
+
+Displays talks DDC the way [m1ddc](https://github.com/waydabber/m1ddc) by waydabber (MIT) and
+[MonitorControl](https://github.com/MonitorControl/MonitorControl) (MIT) do. Mouse finds which
+device each scroll came from, and turns the side buttons into Back and Forward, the way
+[LinearMouse](https://github.com/linearmouse/linearmouse) (MIT) does, and tells a trackpad from
+a wheel mouse the way [Scroll Reverser](https://github.com/pilotmoon/Scroll-Reverser) by Nick
+Moore (Apache-2.0) does.
 
 Their notices, and those of the libraries the app bundles (Python, pywebview, PyObjC and
 others), are in [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES), which is also inside the app.
