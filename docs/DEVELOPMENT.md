@@ -97,8 +97,8 @@ doesn't release anything: the download links only change when a release is publi
   codesign -dvv "$M/Mac Engine Room.app/Contents/MacOS/Mac Engine Room Fans" 2>&1 | grep -E "^Identifier|flags|TeamIdentifier"
   plutil -p "$M/Mac Engine Room.app/Contents/Library/LaunchDaemons/com.pythonflow.monitor.fans.plist" | grep Label
   ```
-- [ ] Each tool's event tap is inside and signed by the same team (`libmouse.dylib`, and
-  `libdisplays.dylib` once Displays is in):
+- [ ] Each tool's event tap is inside and signed by the same team (`libdisplays.dylib` and
+  `libmouse.dylib`):
   ```bash
   for lib in "$M/Mac Engine Room.app/Contents/Frameworks/"lib{mouse,displays}.dylib; do codesign -dvv "$lib" 2>&1 | grep -E "^Identifier|TeamIdentifier"; done
   ```
