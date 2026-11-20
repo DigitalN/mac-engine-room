@@ -1,6 +1,7 @@
 //  Native/Displays' pure parts, compiled into one program with it: the brightness scale, the nits, the
 //  boost's gamma factor, the keys' steps, the HUD's segments and bubble, DDC packets, matching DDC
-//  channels to displays, reading a key event, and which display the sound goes to. Nothing is shown,
+//  channels to displays, reading a key event, which display the sound goes to, and what a
+//  screen-parameters notification means. Nothing is shown,
 //  no tap is made and no display is touched. Run by tests/test_displays_native.py; prints one line per
 //  test and exits 1 on a failure.
 
@@ -137,5 +138,34 @@ check("the 16\" M1 Pro's XDR boosts", BoostSupport.supported(builtin: true, pote
 check("an M5 Pro doesn't", !BoostSupport.supported(builtin: true, potentialHeadroom: 16, chipIgnoresGamma: true))
 check("a screen without XDR doesn't", !BoostSupport.supported(builtin: true, potentialHeadroom: 1, chipIgnoresGamma: false))
 check("an external display doesn't", !BoostSupport.supported(builtin: false, potentialHeadroom: 16, chipIgnoresGamma: false))
+
+// ── screen-parameters notifications ──
+// macOS posts one every time a screen's EDR headroom moves, dozens a second while the boost's trigger
+// ramps it up. 1.5.0's test copy made the trigger again on every one, restoring the table each time,
+// and the screen flickered.
+
+let builtinShape = ScreenShape(id: 1, frame: CGRect(x: 0, y: 0, width: 1728, height: 1117), name: "Built-in Retina Display")
+let tvShape = ScreenShape(id: 4, frame: CGRect(x: 1728, y: 0, width: 1920, height: 1080), name: "LG TV SSCR2")
+check("the first look is a change", ScreenChange.changed(nil, [builtinShape]))
+check("the same screens again (a headroom moved) aren't", !ScreenChange.changed([builtinShape, tvShape], [builtinShape, tvShape]))
+check("a display plugged in is", ScreenChange.changed([builtinShape], [builtinShape, tvShape]))
+check("one unplugged is", ScreenChange.changed([builtinShape, tvShape], [builtinShape]))
+check("one moved is", ScreenChange.changed([builtinShape, tvShape],
+                                           [builtinShape, ScreenShape(id: 4, frame: CGRect(x: -1920, y: 0, width: 1920, height: 1080), name: "LG TV SSCR2")]))
+check("a new resolution is", ScreenChange.changed([builtinShape],
+                                                   [ScreenShape(id: 1, frame: CGRect(x: 0, y: 0, width: 1512, height: 982), name: "Built-in Retina Display")]))
+check("another main screen is", ScreenChange.changed([builtinShape, tvShape], [tvShape, builtinShape]))
+
+let placed = ScreenPlace(id: 1, frame: builtinShape.frame)
+check("a headroom change keeps the trigger", ScreenChange.trigger(placed: placed, now: placed, wasGone: false) == .keep)
+check("a new resolution moves it", ScreenChange.trigger(placed: placed, now: ScreenPlace(id: 1, frame: CGRect(x: 0, y: 0, width: 1512, height: 982)),
+                                                          wasGone: false) == .move)
+check("the built-in display moved in the arrangement moves it",
+      ScreenChange.trigger(placed: placed, now: ScreenPlace(id: 1, frame: CGRect(x: -1728, y: 0, width: 1728, height: 1117)), wasGone: false) == .move)
+check("a new ID for it moves it", ScreenChange.trigger(placed: placed, now: ScreenPlace(id: 2, frame: placed.frame), wasGone: false) == .move)
+check("no trigger (paused, or none made): nothing to move", ScreenChange.trigger(placed: nil, now: placed, wasGone: false) == .keep)
+check("the lid closed with an external: gone", ScreenChange.trigger(placed: placed, now: nil, wasGone: false) == .gone)
+check("still closed: nothing more", ScreenChange.trigger(placed: nil, now: nil, wasGone: true) == .keep)
+check("opened again: back", ScreenChange.trigger(placed: nil, now: placed, wasGone: true) == .back)
 
 exit(failed ? 1 : 0)

@@ -90,8 +90,14 @@ back, so a read-back that differs is macOS clamping or resampling, not another a
 `Display boost has no EDR headroom from macOS yet (1.00)` if macOS hadn't granted any 3 s after
 the trigger appeared (a screen that's asleep or dimmed has none); `Display boost off`, or `Display
 boost off (macOS's brightness went below its maximum)`; `Display boost paused (the screens are
-asleep)` and `Display boost resumed` (2 s after they wake, or `Display boost off (macOS's
-brightness is below its maximum)`). At launch: `Display boost brought back at 130%`, or `Display
+asleep)` or `Display boost paused (the built-in display isn't in use)` (the lid closed with an
+external), and `Display boost resumed` (2 s after they wake or it's back, or `Display boost off
+(macOS's brightness is below its maximum)`). Many `Display boost at` lines in a row mean the trigger
+is being made again over and over (1.5.0's test copy did, on every headroom change, and the screen
+flickered). macOS's own log says what moved its brightness: `log show --predicate 'process ==
+"corebrightnessd"'` has `DisplayServicesSetBrightnessSmooth | property = -0.0625` for each brightness
+key press, and `CBAutoBrightnessEnabled` in `/usr/libexec/corebrightnessdiag status-info` says whether
+auto-brightness is on. At launch: `Display boost brought back at 130%`, or `Display
 boost not brought back: macOS's brightness is below its maximum` (or `this Mac's display can't
 boost`). The keys: `Display keys on: brightness, volume and mute`, `Display keys are waiting for
 Accessibility to be allowed`, `Asked macOS to allow Accessibility for the brightness and volume
@@ -259,7 +265,12 @@ To reproduce without touching the user's data, run with
   1,024, every value is clamped to 1.0 and the picture only washes out); **the trigger is drawn
   once** (×1.3 held 13.6 W against 9.3 W for a minute with no redraws), so nothing runs while
   boosted but a 5 s check that the table is still ours; ×1.6 reads about 19 W, and BetterDisplay's
-  160% (×1.658) 20.8 W. It ends when DisplayServices' brightness notification says macOS's own
+  160% (×1.658) 20.8 W. **macOS posts `didChangeScreenParametersNotification` every time the EDR
+  headroom moves** (dozens a second while it ramps up after the trigger appears), so that
+  notification only writes the factor for the new headroom: the trigger is made again only when the
+  built-in display's ID or frame changed, and the list of displays only when the screens themselves
+  did (`ScreenChange`, tested). Making the trigger again on each one restored the table each time and
+  flickered the screen. It ends when DisplayServices' brightness notification says macOS's own
   brightness went below its maximum, pauses while the screens sleep, and comes back at launch
   (`display_boost`) only with macOS's brightness at its maximum. Chips that ignore gamma tables
   (`displays.CHIPS_IGNORING_GAMMA`: M5 Pro, M5 Max, A18 Pro) and screens without XDR stop at

@@ -73,6 +73,8 @@ final class Controller {
     private var observers: [NSObjectProtocol] = []
     private var lastLogged = ""
     private var walk = 0  // the latest IORegistry walk asked for; an older one's result is dropped
+    private var shapes: [ScreenShape]?  // the screens as discover() last saw them
+    private var changeSoon: DispatchWorkItem?
     var changed: () -> Void = {}
     var log: (String) -> Void = { _ in }
 
@@ -95,8 +97,11 @@ final class Controller {
             }
             self.changed()
         }
+        boost.onWritten = { [weak self] in self?.changedSoon() }
         sound.onChange = { [weak self] in self?.route() }
         let center = NotificationCenter.default
+        // macOS posts this every time a screen's EDR headroom moves (dozens a second while the boost's
+        // trigger ramps it up), not only when the screens change: each part checks what really did.
         observers.append(center.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             self?.discover()
             self?.boost.screensChanged()
@@ -111,10 +116,15 @@ final class Controller {
         discover()
     }
 
-    /// The displays macOS has now. Externals without a DDC channel are looked for on the DDC queue,
-    /// then asked whether they answer; the built-in display is in the list at once.
+    /// The displays macOS has now, if they changed. Externals without a DDC channel are looked for on
+    /// the DDC queue, then asked whether they answer; the built-in display is in the list at once.
     func discover() {
         let screens = NSScreen.screens.filter { CGDisplayMirrorsDisplay($0.displayID) == kCGNullDirectDisplay }
+        let shapes = screens.map { ScreenShape(id: $0.displayID, frame: $0.frame, name: $0.localizedName) }
+        guard ScreenChange.changed(self.shapes, shapes) else {
+            return  // only a headroom moved
+        }
+        self.shapes = shapes
         var next: [Display] = []
         for screen in screens {
             let id = screen.displayID
@@ -182,6 +192,15 @@ final class Controller {
                 self.changed()
             }
         }
+    }
+
+    /// Tells Python once the boost's table has settled: while macOS ramps the headroom up it's written
+    /// dozens of times a second, and only the last one changes what the menu and the page show.
+    private func changedSoon() {
+        changeSoon?.cancel()
+        let item = DispatchWorkItem { [weak self] in self?.changed() }
+        changeSoon = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: item)
     }
 
     /// Reads every display again: the menu or the tab opened.

@@ -1,6 +1,8 @@
 // The pure parts of Displays: the brightness scale, the nits the HUD shows, the boost's gamma
-// factor, the keys' steps and the HUD's segments. Tested by tests/displays/main.swift.
+// factor, the keys' steps, the HUD's segments and what a screen-parameters notification means.
+// Tested by tests/displays/main.swift.
 
+import CoreGraphics
 import Foundation
 
 enum Scale {
@@ -120,5 +122,51 @@ enum BoostSupport {
 
     static func supported(builtin: Bool, potentialHeadroom: Double, chipIgnoresGamma: Bool) -> Bool {
         return builtin && potentialHeadroom >= minimumPotentialHeadroom && !chipIgnoresGamma
+    }
+}
+
+/// A screen as discover() sees it.
+struct ScreenShape: Equatable {
+    let id: UInt32
+    let frame: CGRect
+    let name: String
+}
+
+/// Where the boost's trigger is: the built-in display and its frame.
+struct ScreenPlace: Equatable {
+    let id: UInt32
+    let frame: CGRect
+}
+
+/// What a screen-parameters notification means. macOS posts one every time a screen's EDR headroom
+/// moves, dozens a second while it ramps up after the boost's trigger appears, so most of them mean
+/// nothing changed but the headroom.
+enum ScreenChange {
+    /// Whether the screens themselves changed: one added, removed, mirrored, moved, resized, renamed,
+    /// or another made the main screen.
+    static func changed(_ old: [ScreenShape]?, _ new: [ScreenShape]) -> Bool {
+        return old != new
+    }
+
+    enum Trigger: Equatable {
+        case keep  // only the headroom can have moved: write the factor for it
+        case move  // the built-in display's ID or frame changed: make the trigger again
+        case gone  // the built-in display isn't a screen now (the lid closed with an external)
+        case back  // it's a screen again
+    }
+
+    /// From where the trigger is (nil when there's none: off, paused or never made), where the built-in
+    /// display is now (nil when it isn't a screen) and whether it was already gone.
+    static func trigger(placed: ScreenPlace?, now: ScreenPlace?, wasGone: Bool) -> Trigger {
+        guard now != nil else {
+            return wasGone ? .keep : .gone
+        }
+        if wasGone {
+            return .back
+        }
+        guard let placed else {
+            return .keep
+        }
+        return placed == now ? .keep : .move
     }
 }

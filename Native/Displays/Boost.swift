@@ -8,6 +8,10 @@
 //   value is clamped to 1.0, which only washes the picture out.
 // - The trigger is drawn once. Drawn once, ×1.3 held the screen at 13.6 W (from 9.3 W) for a minute,
 //   so nothing redraws while boosted, and nothing runs at all at or below 100%.
+// - macOS posts a screen-parameters notification every time the headroom moves (dozens a second while
+//   it ramps up after the trigger appears): each one only writes the factor for the new headroom
+//   (screensChanged). The trigger is made again only when the built-in display itself moved; making
+//   it again on every one restored the table each time and flickered the screen (1.5.0's test copy).
 // - At alpha 0.003 (BetterDisplay's), the pixel can't be seen and still triggers EDR.
 // When the app quits or crashes, macOS puts the user's ColorSync tables back.
 //
@@ -20,15 +24,16 @@ import QuartzCore
 final class Boost {
     static let tableSize: UInt32 = 256
     static let integrityInterval = 5.0  // seconds between checks that the table is still ours
-    static let rampInterval = 0.1  // while macOS's headroom settles after the trigger appears
-    static let rampFor = 3.0
-    static let wakeSettle = 2.0  // seconds after the screens wake before the boost comes back
+    static let headroomWait = 3.0  // app.log says so if macOS hasn't granted any headroom by then
+    static let wakeSettle = 2.0  // seconds after the screens wake (or the built-in display is back) before the boost comes back
 
     /// What the boost asks for (percent, 100 = none) and whether it's paused (screens asleep).
     private(set) var percent = 100.0
     private var paused = false
+    private var gone = false  // the built-in display isn't a screen (the lid closed with an external)
     private var display: CGDirectDisplayID = 0
     private var window: NSWindow?
+    private var placedOn: ScreenPlace?  // where the trigger is
     private var layer: CAMetalLayer?
     private var device: MTLDevice?
     private var queue: MTLCommandQueue?
@@ -40,13 +45,15 @@ final class Boost {
     /// the screen to 100%, every 5 s.
     private var reference: CGGammaValue?
     private var timer: Timer?
-    private var rampUntil = Date.distantPast
+    private var starts = 0
     private var observing: CGDirectDisplayID = 0
     private var reported = false  // app.log has the first table write (or no headroom) since the trigger appeared
     /// The boost ended because macOS's brightness went below its maximum (its reason, for app.log).
     var onEnded: (String) -> Void = { _ in }
     /// It's on (with its gamma factor and headroom), or off, or paused (why), for app.log.
     var onLog: (String) -> Void = { _ in }
+    /// The table was written with a new factor, or put back: the nits and "boosting" it lists change.
+    var onWritten: () -> Void = {}
 
     var active: Bool {
         return percent > Scale.plainTop && !paused && window != nil
@@ -75,7 +82,7 @@ final class Boost {
             }
             return
         }
-        guard !paused else {
+        guard !paused, !gone else {
             return
         }
         if window == nil {
@@ -96,13 +103,51 @@ final class Boost {
             return
         }
         if asleep {
-            stop()
-            onLog("Display boost paused (the screens are asleep)")
+            if window != nil {
+                stop()
+                onLog("Display boost paused (the screens are asleep)")
+            }
             return
         }
-        // macOS may still be bringing its brightness back as the screens wake.
+        resumeSoon()
+    }
+
+    /// macOS changed something about the screens. Most of these only mean the headroom moved, and
+    /// apply() writes the factor for it. When the built-in display's ID or frame changed, the trigger
+    /// is made again and the table read again (macOS may have reset it); while the built-in display
+    /// isn't a screen, the boost pauses.
+    func screensChanged() {
+        guard requested else {
+            return
+        }
+        let now = NSScreen.screens.first { CGDisplayIsBuiltin($0.displayID) != 0 }
+            .map { ScreenPlace(id: $0.displayID, frame: $0.frame) }
+        if let now {
+            display = now.id
+        }
+        switch ScreenChange.trigger(placed: placedOn, now: now, wasGone: gone) {
+        case .keep:
+            apply()
+        case .move:
+            stop()
+            start()
+        case .gone:
+            gone = true
+            if window != nil {
+                stop()
+                onLog("Display boost paused (the built-in display isn't in use)")
+            }
+        case .back:
+            gone = false
+            resumeSoon()
+        }
+    }
+
+    /// Brings the boost back after the screens wake or the built-in display is back, once macOS has had
+    /// a moment (it may still be bringing its brightness back), if its brightness is at its maximum.
+    private func resumeSoon() {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.wakeSettle) { [weak self] in
-            guard let self, !self.paused, self.percent > Scale.plainTop, self.window == nil else {
+            guard let self, !self.paused, !self.gone, self.percent > Scale.plainTop, self.window == nil else {
                 return
             }
             if DisplayServices.brightness(self.display).map({ $0 >= 0.999 }) ?? false {
@@ -113,16 +158,6 @@ final class Boost {
                 self.onEnded("macOS's brightness is below its maximum")
             }
         }
-    }
-
-    /// The displays were reconfigured: the trigger moves to the built-in display's new frame, and the
-    /// table is read again (macOS may have reset it).
-    func screensChanged() {
-        guard active else {
-            return
-        }
-        stop()
-        start()
     }
 
     // ── the trigger and the table ──
@@ -141,8 +176,21 @@ final class Boost {
         }
         Boost.current = self
         reported = false
-        rampUntil = Date().addingTimeInterval(Self.rampFor)
-        schedule(Self.rampInterval)
+        schedule(Self.integrityInterval)
+        // Nothing polls while macOS ramps the headroom up: each step posts a screen-parameters
+        // notification, and screensChanged() writes the factor for it.
+        starts += 1
+        let started = starts
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.headroomWait) { [weak self] in
+            guard let self, self.starts == started, self.active else {
+                return
+            }
+            self.apply()
+            if !self.reported {
+                self.reported = true
+                self.onLog(String(format: "Display boost has no EDR headroom from macOS yet (%.2f)", self.headroom))
+            }
+        }
         apply()
     }
 
@@ -156,8 +204,10 @@ final class Boost {
         window?.orderOut(nil)
         window = nil
         layer = nil
+        placedOn = nil
         if written != 1 {
             CGDisplayRestoreColorSyncSettings()
+            onWritten()
         }
         written = 1
         reference = nil
@@ -175,13 +225,6 @@ final class Boost {
     private func tick() {
         guard active else {
             return
-        }
-        if Date() > rampUntil, timer?.timeInterval != Self.integrityInterval {
-            schedule(Self.integrityInterval)
-            if !reported {
-                reported = true
-                onLog(String(format: "Display boost has no EDR headroom from macOS yet (%.2f)", headroom))
-            }
         }
         // Something else (ColorSync, Night Shift, another app) put its own table in: ours goes back.
         if written != 1, let reference, let top = Self.readTable(display)?.r.last,
@@ -207,6 +250,7 @@ final class Boost {
         if CGSetDisplayTransferByTable(display, Self.tableSize, base.r.map { $0 * f }, base.g.map { $0 * f },
                                        base.b.map { $0 * f }) == .success {
             written = factor
+            onWritten()
             reference = Self.readTable(display)?.r.last
             if !reported {
                 reported = true
@@ -262,6 +306,7 @@ final class Boost {
         window.orderFrontRegardless()
         self.window = window
         self.layer = layer
+        placedOn = ScreenPlace(id: display, frame: frame)
         // One frame of EDR white, once: it stays composited.
         let value = Double(screen.maximumPotentialExtendedDynamicRangeColorComponentValue)
         if let drawable = layer.nextDrawable(), let buffer = queue.makeCommandBuffer() {
