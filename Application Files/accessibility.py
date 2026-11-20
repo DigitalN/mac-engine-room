@@ -19,12 +19,23 @@ certificate's name), so updates signed with the same certificate keep it.
 
 import ctypes
 import logging
+import platform
 
 log = logging.getLogger("pythonflow")
 
 SETTINGS_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
 NOTIFICATION = "com.apple.accessibility.api"
 RECHECK_AFTER = (0.5, 3.0)  # seconds after the notification: the value lags behind it
+
+
+def setting_name():
+    """What System Settings calls the list an event tap must be allowed in: macOS 27 renamed Privacy &
+    Security › Accessibility to Device Control and Data Access (seen on 27.2.1)."""
+    try:
+        major = int(platform.mac_ver()[0].split(".")[0])
+    except ValueError:
+        major = 0
+    return "Device Control and Data Access" if major >= 27 else "Accessibility"
 
 _services = None
 _watchers = []

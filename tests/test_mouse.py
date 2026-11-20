@@ -53,6 +53,9 @@ class FakeAccess:
     def watch(self, callback):
         self.watchers.append(callback)
 
+    def setting_name(self):
+        return "Device Control and Data Access"
+
     def register(self, stop, start):
         self.taps.append((stop, start))
 
@@ -125,7 +128,7 @@ def test_the_tap_starts_once_allowed_and_stops_if_that_is_taken_away():
 def test_a_grant_the_notification_missed_is_seen_by_the_tabs_polls():
     m, library, access = make(mouse_back_forward=True)
     access.is_allowed = True  # no notification
-    assert m.status() == {"available": True, "allowed": True, "running": True}
+    assert m.status() == {"available": True, "allowed": True, "running": True, "setting": "Device Control and Data Access"}
     assert library.tap == (False, False, True)
 
 
@@ -150,7 +153,7 @@ def test_without_the_dylib_nothing_happens(monkeypatch, caplog):
         m.start()
     assert "Mouse isn't available: running from source" in caplog.text
     assert not m.available and access.watchers == [] and access.taps == []
-    assert m.status() == {"available": False, "allowed": False, "running": False}
+    assert m.status()["available"] is False and m.status()["running"] is False
     turn(m, mouse_back_forward=True)
     assert access.asked == 0
 
@@ -193,3 +196,10 @@ def test_accessibility_stops_and_starts_every_registered_tap(monkeypatch):
 
 def test_accessibility_reads_the_grant():
     assert accessibility.allowed() in (True, False)
+
+
+def test_the_list_is_device_control_and_data_access_from_macos_27(monkeypatch):
+    for version, name in [("27.2.1", "Device Control and Data Access"), ("28.0", "Device Control and Data Access"),
+                          ("26.4", "Accessibility"), ("", "Accessibility")]:
+        monkeypatch.setattr(accessibility.platform, "mac_ver", lambda v=version: (v, ("", "", ""), "arm64"))
+        assert accessibility.setting_name() == name

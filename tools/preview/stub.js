@@ -10,7 +10,8 @@
 //                h24 (a Mac set to 24-hour time) kaday (work hours 0:00–24:00) kanoon (8:00–Noon)
 //   mouse:       mouseon (all three switches on, allowed, tap running) mousewaiting (switches on,
 //                Accessibility not allowed) mousedenied (all off, not allowed) nomouse (built
-//                without a Swift compiler). Turning a switch on in the preview allows Accessibility.
+//                without a Swift compiler) macos26 (the list is Accessibility, not macOS 27's Device
+//                Control and Data Access). Turning a switch on in the preview allows it.
 //   settings:    fahrenheit dark light
 //   tab:         dashboard (default) thermals keepawake power mouse history settings
 // Change window.__state while it runs to try anything else; the next poll picks it up.
@@ -20,6 +21,9 @@
 (() => {
   const app = window.__app;
   const wave = (t, base, amp, period) => Math.round((base + amp * Math.sin(t / period)) * 10) / 10;
+  // accessibility.setting_name(): what System Settings calls the list the tap is allowed in.
+  const SETTING = /(^|,)macos26(,|$)/.test(new URLSearchParams(location.search).get('s') || '')
+    ? 'Accessibility' : 'Device Control and Data Access';
   const state = window.__state = {
     settings: { ...app.settings, launch_at_login: true },
     fanControl: { profile: 'macos', state: 'off' },
@@ -38,7 +42,7 @@
     fans: [{ min: 1499, max: 4296 }, { min: 1499, max: 4744 }],
     fanRpm: null,  // [rpm, …] to show; null follows fan control (0 while macOS has them cool)
     keepAwake: { choice: 'off', holding: false, line: null },  // keepawake.KeepAwake.status()
-    mouse: { available: true, allowed: true, running: false },  // mouse.Mouse.status()
+    mouse: { available: true, allowed: true, running: false, setting: SETTING },  // mouse.Mouse.status()
     firstWeekday: 0,  // Python's weekday the Mac's calendar starts on: 0 Monday, 6 Sunday
     h24: false,  // the Mac shows 24-hour time (the bar's labels come from keepawake.half_hour_labels)
     sessions: [],
@@ -88,14 +92,15 @@
     kanoon: () => { state.settings.keep_awake_hours = { ...state.settings.keep_awake_hours, start: '08:00', end: '12:00' }; },
     mouseon: () => {
       Object.assign(state.settings, { mouse_reverse_scrolling: true, mouse_smooth_scrolling: true, mouse_back_forward: true });
-      state.mouse = { available: true, allowed: true, running: true };
+      state.mouse = { available: true, allowed: true, running: true, setting: SETTING };
     },
     mousewaiting: () => {
       Object.assign(state.settings, { mouse_reverse_scrolling: true });
-      state.mouse = { available: true, allowed: false, running: false };
+      state.mouse = { available: true, allowed: false, running: false, setting: SETTING };
     },
-    mousedenied: () => { state.mouse = { available: true, allowed: false, running: false }; },
-    nomouse: () => { state.mouse = { available: false, allowed: false, running: false }; },
+    mousedenied: () => { state.mouse = { available: true, allowed: false, running: false, setting: SETTING }; },
+    nomouse: () => { state.mouse = { available: false, allowed: false, running: false, setting: SETTING }; },
+    macos26: () => {},  // SETTING reads it
     fahrenheit: () => { state.settings.temperature_unit = 'fahrenheit'; },
     dark: () => { state.settings.theme = 'dark'; },
     light: () => { state.settings.theme = 'light'; },

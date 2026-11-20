@@ -490,7 +490,7 @@ dialog .actions { justify-content: flex-end; }
         </div>
       </div>
       <div class="group m-needs-tap">
-        <h3>Accessibility</h3>
+        <h3 id="m-access-title">Accessibility</h3>
         <div class="card">
           <div class="srow">
             <div class="lbl"><span id="m-access"></span><div class="hint" id="m-access-hint"></div></div>
@@ -1452,7 +1452,7 @@ $('ka-level').onchange = e => saveBattery({ level: +e.target.value });
 // ── Mouse ───────────────────────────────────────────────
 // The switches are settings (mouse.py runs the tap); whether this copy has the tap and whether
 // Accessibility is allowed come with each poll while this tab shows. Renders only while it's showing.
-let mouseState = null;  // mouse.Mouse.status(): { available, allowed, running }
+let mouseState = null;  // mouse.Mouse.status(): { available, allowed, running, setting }
 function renderMouse() {
   if (activeTab !== 'mouse' || !settings) return;
   const m = mouseState || { available: true, allowed: true, running: false };
@@ -1462,10 +1462,12 @@ function renderMouse() {
   setChecked($('m-smooth'), settings.mouse_smooth_scrolling);
   setChecked($('m-back-forward'), settings.mouse_back_forward);
   const on = settings.mouse_reverse_scrolling || settings.mouse_smooth_scrolling || settings.mouse_back_forward;
+  const setting = m.setting || 'Accessibility';  // Device Control and Data Access on macOS 27
+  put('m-access-title', 'text', setting);
   put('m-access', 'text', m.allowed ? 'Allowed' : 'Not allowed');
   put('m-access-hint', 'text', m.allowed
     ? 'Mac Engine Room can change how mice scroll and what their side buttons do.'
-    : on ? 'The switches take effect once Mac Engine Room is allowed in Privacy & Security › Accessibility.'
+    : on ? `The switches take effect once Mac Engine Room is allowed in Privacy & Security › ${setting}.`
       : 'Turning on a switch asks for it. Mac Engine Room needs it to change how mice scroll and what their side buttons do.');
   put('m-access-open', 'display', m.allowed ? 'none' : '');
 }

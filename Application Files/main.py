@@ -287,7 +287,8 @@ class Api:
         return self._app._keep_awake.choose(str(choice))
 
     def open_accessibility_settings(self):
-        """Privacy & Security › Accessibility, where the user allows the Mouse tab's switches."""
+        """Privacy & Security › Accessibility (Device Control and Data Access on macOS 27), where the user
+        allows the Mouse tab's switches."""
         import accessibility
         from PyObjCTools import AppHelper
 

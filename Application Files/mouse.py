@@ -178,14 +178,16 @@ class Mouse:
 
     def status(self):
         """For the Mouse tab: whether the switches can work in this build, whether Accessibility is
-        allowed (read now: the tab polls it), and whether the tap is running. A grant that changed
-        without its notification is acted on from here."""
+        allowed (read now: the tab polls it), whether the tap is running, and what System Settings
+        calls the list it's allowed in (`setting`). A grant that changed without its notification is
+        acted on from here."""
+        setting = self._access.setting_name()
         if self._library is None:
-            return {"available": False, "allowed": False, "running": False}
+            return {"available": False, "allowed": False, "running": False, "setting": setting}
         allowed = self._access.allowed()
         if allowed != self._allowed:
             self._main(lambda: self._grant_changed(allowed))
-        return {"available": True, "allowed": allowed, "running": self._library.running()}
+        return {"available": True, "allowed": allowed, "running": self._library.running(), "setting": setting}
 
     def _main(self, fn):
         if self._call_on_main is not None:
