@@ -7,12 +7,6 @@ battery, with a history of every charge. **Keep Awake** keeps the screen on. **D
 sets each display's brightness, taking a MacBook Pro's XDR screen up to 1,600 nits, and
 **Mouse** reverses a wheel mouse's scrolling while the trackpad stays natural.
 
-Formerly **Pythonflow**. Installed copies rename themselves when they update, and keep
-your history and settings.
-
-A Python rewrite of [Powerflow](https://github.com/lzt1008/powerflow), which crashes on
-macOS 27 and is no longer maintained.
-
 ![Mac Engine Room dashboard](docs/screenshot.png)
 
 **[⬇︎ Download the latest version](https://github.com/DigitalN/mac-engine-room/releases/latest)**
@@ -200,7 +194,7 @@ database without changing it. You can then delete `/Applications/powerflow.app`.
 
 ## Credits
 
-Based on [Powerflow](https://github.com/lzt1008/powerflow) by The Powerflow Team
+Originally based on [Powerflow](https://github.com/lzt1008/powerflow) by The Powerflow Team
 (Samuel Lyon / lzt1008), under the MIT license; the app icon is Powerflow's. The macOS 27
 fixes build on diagnoses from community pull requests
 [#19](https://github.com/lzt1008/powerflow/pull/19),
