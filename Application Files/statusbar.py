@@ -17,7 +17,6 @@ Every method here must run on the main thread (main.py dispatches with
 AppHelper.callAfter).
 """
 
-import logging
 import math
 import time
 
@@ -32,7 +31,6 @@ import displays as display_tool
 import fans as fan_control
 import keepawake
 
-log = logging.getLogger("pythonflow")
 
 FIGURE_SPACE = "\u2007"  # same width as a digit in a monospaced-digit font
 TEMPERATURE_METRICS = {"cpu_temp": "cpu", "hottest_temp": "hottest"}
@@ -46,7 +44,6 @@ ROW_SYMBOLS = {"system": "laptopcomputer", "screen": "sun.max", "chip": "cpu", "
 # A reading older than this isn't shown: it was read before the menu last opened.
 THERMALS_FRESH_FOR = 6.0
 HELD_NOTE_AFTER = 60.0  # seconds: a parked GPU's last reading, shown dimmed after this (as the page says its age)
-SLOW_MENU = 0.3  # seconds from the click to an open, filled menu above which app.log says so
 
 MENU_WIDTH = 300
 INSET = 14
@@ -64,11 +61,6 @@ POINTER_EVENTS = (AppKit.NSEventTypeLeftMouseDown, AppKit.NSEventTypeLeftMouseDr
 POINTER_FRESH_FOR = 1.0  # seconds: an older one is a pointer event AppKit still holds as current, not this move
 # Fan control states with the profile buttons available to click.
 PROFILES_USABLE = ("off", "holding", "override", "other", "approval", "error")
-
-
-def slow_menu_note(took):
-    """The line for app.log when the menu took `took` seconds to open, or None if it was quick."""
-    return f"Menu took {took:.1f} s to open" if took > SLOW_MENU else None
 
 
 def format_watts(value, pad_to=4):
@@ -293,7 +285,6 @@ class StatusBar:
         self._settings = {}
         self._available = TILES  # the tiles this Mac has, once a reading says
         self._shown = {}  # what each view shows, so only changes reach AppKit
-        self._clicked = None  # when the click that is opening the menu happened (time.monotonic())
         self.menu_open = False
 
         menu = NSMenu.alloc().init()
@@ -627,32 +618,11 @@ class StatusBar:
 
     def _menu_needs_update(self):
         """AppKit's first word that the menu is about to open."""
-        self._clicked = self._click_time()
         self._fill()
-
-    def _click_time(self):
-        """When the click on this item that is opening the menu happened, or None if the menu
-        isn't opening from one (the keyboard, accessibility). NSEvent counts seconds since boot,
-        awake, which is time.monotonic()'s clock (mach_absolute_time)."""
-        try:
-            event = AppKit.NSApp.currentEvent()
-            if event is None or event.type() not in (AppKit.NSEventTypeLeftMouseDown, AppKit.NSEventTypeRightMouseDown):
-                return None
-            if event.window() != self._button.window():
-                return None
-            age = time.monotonic() - event.timestamp()
-            return event.timestamp() if 0 <= age < 60 else None
-        except Exception:
-            return None
 
     def _set_menu_open(self, is_open):
         self.menu_open = is_open
         self._on_menu_open()
-        if is_open and self._clicked is not None:
-            note = slow_menu_note(time.monotonic() - self._clicked)
-            if note:
-                log.info(note)
-        self._clicked = None
 
     def _fill(self):
         self._fill_profiles()
