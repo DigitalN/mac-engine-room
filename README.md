@@ -176,13 +176,6 @@ Every Mac model names its sensors a little differently. In Settings, under About
 **Copy** next to Sensor report, then **Report a Problem…** and paste it into the issue. It
 lists your Mac's model, chip and sensors, and nothing that identifies you or your Mac.
 
-## Coming from Pythonflow
-
-Nothing to do: Pythonflow updates itself into Mac Engine Room, renames its app and data
-folders, and stays open at login if it was. If you install Mac Engine Room by hand
-instead, opening it quits Pythonflow, moves it to the Trash and takes over its history
-and settings.
-
 ## Coming from Powerflow
 
 It fixes the original's problems on macOS 27: the crash at launch, blank battery
